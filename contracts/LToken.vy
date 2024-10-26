@@ -9,10 +9,17 @@ interface IERC20:
     def decimals() -> uint256: view
     def approve(_to: address, _value: uint256) -> bool: nonpayable
 
+interface PriceOracle:
+    def price_w() -> uint256: nonpayable
+    def price() -> uint256: view
+
+
 LEVERAGE: public(immutable(uint256))
+LEV_RATIO: immutable(uint256)
 COLLATERAL: public(immutable(IERC20))
 STABLECOIN: public(immutable(IERC20))
 DEPOSITED_TOKEN: public(immutable(IERC20))
+PRICE_ORACLE_CONTRACT: public(immutable(PriceOracle))
 
 COLLATERAL_PRECISION: immutable(uint256)
 # Stablecoin precision is always 1e18
@@ -20,6 +27,9 @@ COLLATERAL_PRECISION: immutable(uint256)
 fee: public(uint256)
 admin: public(address)
 stablecoin_allocator: public(address)
+
+collateral_amount: public(uint256)
+debt: public(uint256)
 
 
 event SetAdmin:
@@ -29,8 +39,16 @@ event SetAllocator:
     allocator: address
 
 
+# ERC20/ERC4626 attributes
+allowance: public(HashMap[address, HashMap[address, uint256]])
+balanceOf: public(HashMap[address, uint256])
+totalSupply: public(uint256)
+###
+
+
 @deploy
-def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: IERC20, leverage: uint256, fee: uint256, admin: address):
+def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: IERC20, leverage: uint256, fee: uint256,
+             price_oracle_contract: PriceOracle, admin: address):
     """
     @notice Initializer (can be performed by an EOA deployer or a factory)
     @param deposited_token Token which gets deposited. Can be collateral or can be not
@@ -38,6 +56,7 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: IERC20, le
     @param collateral Collateral token
     @param leverage Degree of leverage, 1e18-based
     @param fee Fee of the AMM, 1e10-based
+    @param price_oracle_contract Contract for reading price oracle for collateral
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
     """
     # Example:
@@ -51,15 +70,43 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: IERC20, le
     LEVERAGE = leverage
     self.fee = fee
     self.admin = admin
+    PRICE_ORACLE_CONTRACT = price_oracle_contract
 
     COLLATERAL_PRECISION = 10**(18 - staticcall COLLATERAL.decimals())
     assert staticcall STABLECOIN.decimals() == 18
+    assert leverage > 10**18
+
+    denominator: uint256 = 2 * leverage - 1
+    LEV_RATIO = leverage**2 // denominator * 10**18 // denominator
 
 
 @external
 @view
 def coins(i: uint256) -> IERC20:
     return [STABLECOIN, COLLATERAL][i]
+
+
+# Math
+@internal
+@view
+def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> uint256:
+    coll_value: uint256 = p_oracle * collateral * COLLATERAL_PRECISION // 10**18
+    D: uint256 = coll_value**2 - 4 * coll_value * LEV_RATIO // 10**18 * debt
+    return (coll_value + isqrt(D)) * 10**18 // (2 * LEV_RATIO)
+###
+
+
+# ERC4626 methods
+@external
+@nonreentrant
+def deposit(assets: uint256, receiver: address = msg.sender) -> uint256:
+    """
+    @notice Deposit assets in return for whatever number of shares corresponds to the current conditions
+    @param assets Amount of assets to deposit
+    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
+    """
+    return 0
+###
 
 
 @external
