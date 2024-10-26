@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "lverage-token"
+version = "0.1.0"
+description = ""
+authors = ["Michael Egorov <michael@curve.fi>"]
+packages = []
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4"
+vyper = "0.4.0"
+poetry = "^1"
+titanoboa = "0.2.4"
+hypothesis = "^6"
+pdbpp = "^0.10.3"
+jedi = "^0.19.1"
+pytest-xdist = "^3.6"
+pytest-forked = "^1.6.0"
+ipython = "^8"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
