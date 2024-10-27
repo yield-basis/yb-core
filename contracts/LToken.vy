@@ -39,11 +39,9 @@ event SetAllocator:
     allocator: address
 
 
-# ERC20/ERC4626 attributes
 allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
-###
 
 
 @deploy
@@ -96,17 +94,11 @@ def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> uint256:
 ###
 
 
-# ERC4626 methods
 @external
-@nonreentrant
-def deposit(assets: uint256, receiver: address = msg.sender) -> uint256:
-    """
-    @notice Deposit assets in return for whatever number of shares corresponds to the current conditions
-    @param assets Amount of assets to deposit
-    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
-    """
-    return 0
-###
+@view
+def calc_token_amount(amount: uint256, deposit: bool) -> uint256:
+    initial_collateral: uint256 = self.collateral_amount
+    initial_debt: uint256 = self.debt
 
 
 @external
