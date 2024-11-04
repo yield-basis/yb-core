@@ -95,6 +95,7 @@ def get_p() -> uint256:
 
 
 @external
+@nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
 
@@ -127,12 +128,29 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
 
 @external
-def _borrow(amount: uint256):
-    pass
+def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256):
+    assert msg.sender == DEPOSITOR, "Access violation"
+
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    collateral: uint256 = self.collateral_amount  # == y_initial
+    debt: uint256 = self.debt
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    invariant_before: uint256 = isqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+
+    debt += d_debt
+    collateral += d_collateral
+
+    self.debt = debt
+    self.collateral_amount = collateral
+    # Assume that transfer of collateral happened already (as a result of exchange)
+
+    invariant_after: uint256 = isqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+
+    assert invariant_after >= invariant_before + min_invariant_change
 
 
 @external
-def _deposit(collateral_amount: uint256, borrowed_amount: uint256, min_invariant_change: uint256):
+def _withdraw(collateral_amount: uint256, borrowed_amount: uint256, min_invariant_change: uint256):
     pass
 
 
