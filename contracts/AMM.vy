@@ -56,11 +56,17 @@ def __init__(depositor: address,
 
 # Math
 @internal
+@pure
+def sqrt(arg: uint256) -> uint256:
+    return isqrt(arg)
+
+
+@internal
 @view
 def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> uint256:
     coll_value: uint256 = p_oracle * collateral * COLLATERAL_PRECISION // 10**18
     D: uint256 = coll_value**2 - 4 * coll_value * LEV_RATIO // 10**18 * debt
-    return (coll_value + isqrt(D)) * 10**18 // (2 * LEV_RATIO)
+    return (coll_value + self.sqrt(D)) * 10**18 // (2 * LEV_RATIO)
 ###
 
 
@@ -124,6 +130,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
+    # XXX event
+
     return out_amount
 
 
@@ -135,7 +143,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self.debt
     x0: uint256 = self.get_x0(p_o, collateral, debt)
-    invariant_before: uint256 = isqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
     debt += d_debt
     collateral += d_collateral
@@ -144,14 +152,34 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
     self.collateral_amount = collateral
     # Assume that transfer of collateral happened already (as a result of exchange)
 
-    invariant_after: uint256 = isqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+    invariant_after: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
     assert invariant_after >= invariant_before + min_invariant_change
 
+    # XXX event
+
 
 @external
-def _withdraw(collateral_amount: uint256, borrowed_amount: uint256, min_invariant_change: uint256):
-    pass
+def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_debt_return: uint256) -> uint256[2]:
+    assert msg.sender == DEPOSITOR, "Access violation"
+
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    collateral: uint256 = self.collateral_amount  # == y_initial
+    debt: uint256 = self.debt
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+
+    # TODO use snekmate for floor/ceil
+    d_collateral: uint256 = collateral * invariant_change // invariant_before  # floor
+    d_debt: uint256 = (debt * invariant_change + (invariant_before - 1)) // invariant_before  # ceil
+    assert d_collateral >= min_collateral_return and d_debt <= max_debt_return, "Min/max amounts"
+
+    self.collateral_amount -= d_collateral
+    self.debt -= d_debt
+
+    # XXX event
+
+    return [d_collateral, d_debt]
 
 
 @external
@@ -162,11 +190,22 @@ def coins(i: uint256) -> IERC20:
 
 @external
 @view
-def invariant(collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
-    return 0
+def value_oracle() -> uint256:
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    collateral: uint256 = self.collateral_amount  # == y_initial
+    debt: uint256 = self.debt
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    Ip: uint256 = self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18)
+    return 2 * Ip - x0
 
 
 @external
 @view
 def invariant_change(collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
-    return 0
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    collateral: uint256 = self.collateral_amount  # == y_initial
+    debt: uint256 = self.debt
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+    invariant_after: uint256 = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
+    return invariant_after - invariant_before
