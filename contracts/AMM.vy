@@ -32,6 +32,26 @@ collateral_amount: public(uint256)
 debt: public(uint256)
 
 
+event TokenExchange:
+    buyer: indexed(address)
+    sold_id: uint256
+    tokens_sold: uint256
+    bought_id: uint256
+    tokens_bought: uint256
+    fee: uint256
+    price_oracle: uint256
+
+event AddLiquidityRaw:
+    token_amounts: uint256[2]
+    invariant: uint256
+    price_oracle: uint256
+
+event RemoveLiquidityRaw:
+    token_amounts: uint256[2]
+    invariant: uint256
+    price_oracle: uint256
+
+
 @deploy
 def __init__(depositor: address,
              stablecoin: IERC20, collateral: IERC20, leverage: uint256,
@@ -111,11 +131,12 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
     x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
 
     out_amount: uint256 = 0
+    fee: uint256 = self.fee
 
     if i == 0:  # Buy collateral
         x: uint256 = x_initial + in_amount
         y: uint256 = x_initial * collateral // x
-        out_amount = (collateral - y) * (10**18 - self.fee) // 10**18
+        out_amount = (collateral - y) * (10**18 - fee) // 10**18
         self.debt -= in_amount
         self.collateral_amount -= out_amount
         assert extcall STABLECOIN.transferFrom(msg.sender, self, in_amount, default_return_value=True)
@@ -124,13 +145,13 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
     else:  # Sell collateral
         y: uint256 = collateral + in_amount
         x: uint256 = x_initial * collateral // y
-        out_amount = (x_initial - x) * (10**18 - self.fee) // 10**18
+        out_amount = (x_initial - x) * (10**18 - fee) // 10**18
         self.debt += out_amount
         self.collateral_amount += in_amount
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
-    # XXX event
+    log TokenExchange(msg.sender, i, in_amount, j, out_amount, fee, p_o)
 
     return out_amount
 
@@ -156,7 +177,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
 
     assert invariant_after >= invariant_before + min_invariant_change
 
-    # XXX event
+    log AddLiquidityRaw([d_collateral, d_debt], invariant_after, p_o)
 
 
 @external
@@ -177,7 +198,7 @@ def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_deb
     self.collateral_amount -= d_collateral
     self.debt -= d_debt
 
-    # XXX event
+    log RemoveLiquidityRaw([d_collateral, d_debt], invariant_before - invariant_change, p_o)
 
     return [d_collateral, d_debt]
 
