@@ -166,7 +166,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt()
     x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
 
     if i == 0:  # Buy collateral
@@ -185,7 +185,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 def get_p() -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt()
     return (self.get_x0(p_o, collateral, debt) - self.debt) * (10**18 // COLLATERAL_PRECISION) // self.collateral_amount
 
 
@@ -196,7 +196,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt_w()
     x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
 
     out_amount: uint256 = 0
@@ -231,7 +231,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt_w()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
@@ -255,7 +255,7 @@ def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_deb
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt_w()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
@@ -283,7 +283,7 @@ def coins(i: uint256) -> IERC20:
 def value_oracle() -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     Ip: uint256 = self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18)
     return 2 * Ip - x0
@@ -294,7 +294,7 @@ def value_oracle() -> uint256:
 def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
-    debt: uint256 = self.debt
+    debt: uint256 = self._debt()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
     if is_deposit:
@@ -303,6 +303,3 @@ def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_de
     else:
         invariant_after: uint256 = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
         return invariant_before - invariant_after
-
-
-# XXX TODO include interest and its withdrawal
