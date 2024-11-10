@@ -3,7 +3,7 @@
 @title LEVAMM
 @notice Automatic market maker which keeps constant leverage
 @author Michael Egorov
-@license Copyright (c)
+@license Copyright (c) 2024
 """
 
 interface IERC20:
@@ -30,6 +30,9 @@ fee: public(uint256)
 
 collateral_amount: public(uint256)
 debt: public(uint256)
+rate: public(uint256)
+rate_mul: public(uint256)
+rate_time: uint256
 
 
 event TokenExchange:
@@ -51,6 +54,11 @@ event RemoveLiquidityRaw:
     invariant: uint256
     price_oracle: uint256
 
+event SetRate:
+    rate: uint256
+    rate_mul: uint256
+    time: uint256
+
 
 @deploy
 def __init__(depositor: address,
@@ -70,6 +78,9 @@ def __init__(depositor: address,
     denominator: uint256 = 2 * leverage - 1
     LEV_RATIO = leverage**2 // denominator * 10**18 // denominator
 
+    self.rate_mul = 10**18
+    self.rate_time = block.timestamp
+
     extcall stablecoin.approve(DEPOSITOR, max_value(uint256))
     extcall collateral.approve(DEPOSITOR, max_value(uint256))
 
@@ -88,6 +99,64 @@ def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> uint256:
     D: uint256 = coll_value**2 - 4 * coll_value * LEV_RATIO // 10**18 * debt
     return (coll_value + self.sqrt(D)) * 10**18 // (2 * LEV_RATIO)
 ###
+
+
+@internal
+@view
+def _rate_mul() -> uint256:
+    """
+    @notice Rate multiplier which is 1.0 + integral(rate, dt)
+    @return Rate multiplier in units where 1.0 == 1e18
+    """
+    return unsafe_div(self.rate_mul * (10**18 + self.rate * (block.timestamp - self.rate_time)), 10**18)
+
+
+@external
+@view
+def get_rate_mul() -> uint256:
+    """
+    @notice Rate multiplier which is 1.0 + integral(rate, dt)
+    @return Rate multiplier in units where 1.0 == 1e18
+    """
+    return self._rate_mul()
+
+
+@external
+@nonreentrant
+def set_rate(rate: uint256) -> uint256:
+    """
+    @notice Set interest rate. That affects the dependence of AMM base price over time
+    @param rate New rate in units of int(fraction * 1e18) per second
+    @return rate_mul multiplier (e.g. 1.0 + integral(rate, dt))
+    """
+    assert msg.sender == DEPOSITOR, "Access"
+    rate_mul: uint256 = self._rate_mul()
+    self.rate_mul = rate_mul
+    self.rate_time = block.timestamp
+    self.rate = rate
+    log SetRate(rate, rate_mul, block.timestamp)
+    return rate_mul
+
+
+@internal
+@view
+def _debt() -> uint256:
+    return self.debt * self._rate_mul() // self.rate_mul
+
+
+@internal
+def _debt_w() -> uint256:
+    rate_mul: uint256 = self._rate_mul()
+    debt: uint256 = self.debt * rate_mul // self.rate_mul
+    self.rate_mul = rate_mul
+    self.rate_time = block.timestamp
+    return debt
+
+
+@external
+@view
+def get_debt() -> uint256:
+    return self._debt()
 
 
 @external
@@ -157,7 +226,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256):
+def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256) -> uint256:
     assert msg.sender == DEPOSITOR, "Access violation"
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
@@ -174,10 +243,10 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
     # Assume that transfer of collateral happened already (as a result of exchange)
 
     invariant_after: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
-
     assert invariant_after >= invariant_before + min_invariant_change
 
     log AddLiquidityRaw([d_collateral, d_debt], invariant_after, p_o)
+    return invariant_after
 
 
 @external
@@ -222,11 +291,18 @@ def value_oracle() -> uint256:
 
 @external
 @view
-def invariant_change(collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
+def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self.debt
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
-    invariant_after: uint256 = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
-    return invariant_after - invariant_before
+    if is_deposit:
+        invariant_after: uint256 = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
+        return invariant_after - invariant_before
+    else:
+        invariant_after: uint256 = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
+        return invariant_before - invariant_after
+
+
+# XXX TODO include interest and its withdrawal
