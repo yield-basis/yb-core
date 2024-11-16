@@ -291,15 +291,24 @@ def value_oracle() -> uint256:
 
 @external
 @view
-def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256:
+def value_oracle_for(collateral: uint256, debt: uint256) -> uint256:
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    Ip: uint256 = self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18)
+    return 2 * Ip - x0
+
+
+@external
+@view
+def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+    invariant_after: uint256 = 0
     if is_deposit:
-        invariant_after: uint256 = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
-        return invariant_after - invariant_before
+        invariant_after = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
     else:
-        invariant_after: uint256 = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
-        return invariant_before - invariant_after
+        invariant_after = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
+    return [invariant_before, invariant_after]

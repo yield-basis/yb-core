@@ -15,9 +15,10 @@ interface IERC20:
 interface LevAMM:
     def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256) -> uint256: nonpayable
     def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_debt_return: uint256) -> uint256[2]: nonpayable
-    def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256: view
+    def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
     def fee() -> uint256: view
     def value_oracle() -> uint256: view
+    def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -27,7 +28,10 @@ interface CurveCryptoPool:
     def price_oracle() -> uint256: view
     def decimals() -> uint256: view
     def mid_fee() -> uint256: view
+    def totalSupply() -> uint256: view
     def coins(i: uint256) -> address: view
+    def calc_token_amount(amounts: uint256[2], deposit: bool) -> uint256: view
+    def balances(i: uint256) -> uint256: view
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
@@ -148,6 +152,24 @@ def deposit(assets: uint256, receiver: address = msg.sender) -> uint256:
 
     log Deposit(msg.sender, receiver, assets, to_mint)
     return to_mint
+
+
+@external
+@view
+@nonreentrant
+def expected_tokens(assets: uint256, debt: uint256) -> uint256:
+    """
+    @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
+    @param assets Amount of crypto to deposit
+    @param debt Amount of stables to borrow for MMing (approx same value as crypto)
+    """
+    lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([assets, debt], True)
+    supply: uint256 = self.totalSupply
+    if supply > 0:
+        invariants: uint256[2] = staticcall self.amm.invariant_change(lp_tokens, debt, True)
+        return supply * invariants[1] // invariants[0] - supply
+    else:
+        return staticcall self.amm.value_oracle_for(lp_tokens, debt)
 
 
 @external
