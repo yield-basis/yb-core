@@ -169,8 +169,8 @@ def preview_withdraw(tokens: uint256) -> uint256:
     #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
 
     supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0) * state.collateral // supply_of_cswap
-    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1) * state.collateral // supply_of_cswap
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
+    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
 
     r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
     # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
@@ -230,7 +230,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     state: AMMState = staticcall amm.get_state()
 
     supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0) * state.collateral // supply_of_cswap
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
 
     r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
     # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
