@@ -151,6 +151,8 @@ def preview_withdraw(tokens: uint256) -> uint256:
     amm: LevAMM = self.amm
     supply: uint256 = self.totalSupply
     state: AMMState = staticcall amm.get_state()
+    # XXX we may need to downsize token amount by a tiny bit (aka tiny withdrawal fee) to make sure rounding errors
+    # will not fail us
 
     # 1. Measure lp_token/stable ratio of Cryptopool
     # 2. lp_token/debt = r ratio must be the same
@@ -165,9 +167,21 @@ def preview_withdraw(tokens: uint256) -> uint256:
     #       (x0 - d1 + d) * (c1 - r * d) = (x0 - d1) * c1 * ((supply - tokens) / supply)**2
     #   It's a quadratic equation. Let's say eps=(supply - tokens) / supply, then:
     #       D = (r*(x0-d1) - c1)**2 + 4*r*c1 * (1 - eps**2) * (x0 - d1)
-    #       d = (-(r*(x0-d1)-c1) + sqrt(D)) / (2*r)
+    #       d = (-|r*(x0-d1)-c1| + sqrt(D)) / (2*r)
     #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
-    return 0
+
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
+    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
+    r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
+    # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
+    reps_factor: uint256 = (2 * supply * tokens - tokens**2) // supply * r // supply
+
+    a: uint256 = r * (state.x0 - state.debt) // 10**18
+    a = max(a, state.collateral) - min(a, state.collateral)  # = abs(r(x0 - d1) - c1)
+    D: uint256 = a**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
+    to_return: uint256 = (self.sqrt(D) - a) * 10**18 // (2 * r)
+
+    return crypto_in_cswap * to_return // stables_in_cswap
 
 
 @external
