@@ -19,6 +19,7 @@ interface LevAMM:
     def fee() -> uint256: view
     def get_invariant() -> uint256: view
     def value_oracle() -> uint256: view
+    def get_state() -> AMMState: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
 
 interface CurveCryptoPool:
@@ -36,6 +37,13 @@ interface CurveCryptoPool:
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
+
+
+struct AMMState:
+    collateral: uint256
+    debt: uint256
+    x0: uint256
+
 
 # ERC20 events
 
@@ -118,7 +126,7 @@ def sqrt(arg: uint256) -> uint256:
 @external
 @view
 @nonreentrant
-def expected_tokens(assets: uint256, debt: uint256) -> uint256:
+def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     """
     @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
     @param assets Amount of crypto to deposit
@@ -131,6 +139,35 @@ def expected_tokens(assets: uint256, debt: uint256) -> uint256:
         return supply * invariants[1] // invariants[0] - supply
     else:
         return staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
+
+
+@external
+@view
+@nonreentrant
+def preview_withdraw(tokens: uint256) -> uint256:
+    """
+    @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
+    """
+    amm: LevAMM = self.amm
+    supply: uint256 = self.totalSupply
+    state: AMMState = staticcall amm.get_state()
+
+    # 1. Measure lp_token/stable ratio of Cryptopool
+    # 2. lp_token/debt = r ratio must be the same
+    # 3. Measure initial c1, d1
+    # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply:
+    #       sqrt((x0 - d2) * c2) = sqrt((x0 - d1) * c1) * (supply - tokens) / supply
+    #   c1 is initial collateral (lp token amount), d1 is initial debt; c2, d2 are final values of those.
+    #   Debt is reduced and collateral also, but let us express everything in terms of ratio r and collateral c:
+    #       d2 = d1 - d
+    #       c2 = c1 - r * d
+    #   So we solve against d:
+    #       (x0 - d1 + d) * (c1 - r * d) = (x0 - d1) * c1 * ((supply - tokens) / supply)**2
+    #   It's a quadratic equation. Let's say eps=(supply - tokens) / supply, then:
+    #       D = (r*(x0-d1) - c1)**2 + 4*r*c1 * (1 - eps**2) * (x0 - d1)
+    #       d = (-(r*(x0-d1)-c1) + sqrt(D)) / (2*r)
+    #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
+    return 0
 
 
 @external

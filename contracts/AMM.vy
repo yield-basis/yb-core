@@ -17,6 +17,12 @@ interface PriceOracle:
     def price() -> uint256: view
 
 
+struct AMMState:
+    collateral: uint256
+    debt: uint256
+    x0: uint256
+
+
 LEVERAGE: public(immutable(uint256))
 LEV_RATIO: immutable(uint256)
 DEPOSITOR: public(immutable(address))
@@ -157,6 +163,17 @@ def _debt_w() -> uint256:
 @view
 def get_debt() -> uint256:
     return self._debt()
+
+
+@external
+@view
+def get_state() -> AMMState:
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    state: AMMState = empty(AMMState)
+    state.collateral = self.collateral_amount
+    state.debt = self._debt()
+    state.x0 = self.get_x0(p_o, state.collateral, state.debt)
+    return state
 
 
 @external
