@@ -14,7 +14,7 @@ interface IERC20:
 
 interface LevAMM:
     def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256: nonpayable
-    def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_debt_return: uint256) -> uint256[2]: nonpayable
+    def _withdraw(frac: uint256) -> uint256[2]: nonpayable
     def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
     def fee() -> uint256: view
     def get_invariant() -> uint256: view
@@ -151,8 +151,6 @@ def preview_withdraw(tokens: uint256) -> uint256:
     amm: LevAMM = self.amm
     supply: uint256 = self.totalSupply
     state: AMMState = staticcall amm.get_state()
-    # XXX we may need to downsize token amount by a tiny bit (aka tiny withdrawal fee) to make sure rounding errors
-    # will not fail us
 
     # 1. Measure lp_token/stable ratio of Cryptopool
     # 2. lp_token/debt = r ratio must be the same
@@ -170,8 +168,10 @@ def preview_withdraw(tokens: uint256) -> uint256:
     #       d = (-|r*(x0-d1)-c1| + sqrt(D)) / (2*r)
     #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
 
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
-    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
+    supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0) * state.collateral // supply_of_cswap
+    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1) * state.collateral // supply_of_cswap
+
     r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
     # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
     reps_factor: uint256 = (2 * supply * tokens - tokens**2) // supply * r // supply
@@ -195,6 +195,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
     """
     amm: LevAMM = self.amm
+    assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
+    assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
     lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([assets, debt], 0, amm.address)
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
@@ -212,6 +214,44 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     self._mint(receiver, shares)
     log Deposit(msg.sender, receiver, assets, shares)
     return shares
+
+
+@external
+@nonreentrant
+def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sender) -> uint256:
+    """
+    @notice Method to withdraw assets (e.g. like BTC) by spending shares (e.g. like yield-bearing BTC)
+    @param shares Shares to withdraw
+    @param min_assets Minimal amount of assets to receive (important to calculate to exclude sandwich attacks)
+    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
+    """
+    amm: LevAMM = self.amm
+    supply: uint256 = self.totalSupply
+    state: AMMState = staticcall amm.get_state()
+
+    supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0) * state.collateral // supply_of_cswap
+
+    r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
+    # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
+    reps_factor: uint256 = (2 * supply * shares - shares**2) // supply * r // supply
+
+    a: uint256 = r * (state.x0 - state.debt) // 10**18
+    a = max(a, state.collateral) - min(a, state.collateral)  # = abs(r(x0 - d1) - c1)
+    D: uint256 = a**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
+    to_return: uint256 = (self.sqrt(D) - a) * 10**18 // (2 * r)
+
+    withdrawn: uint256[2] = extcall amm._withdraw(10**18 * to_return // state.debt)
+
+    self._burn(msg.sender, shares)
+    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn[0])
+    cswap_withdrawn: uint256[2] = extcall COLLATERAL.remove_liquidity(withdrawn[0], [0, 0], self)
+    assert cswap_withdrawn[1] >= min_assets, "Slippage"
+    assert extcall STABLECOIN.transfer(amm.address, cswap_withdrawn[0])
+    assert extcall DEPOSITED_TOKEN.transfer(receiver, cswap_withdrawn[1])
+
+    log Withdraw(msg.sender, receiver, msg.sender, cswap_withdrawn[1], shares)
+    return cswap_withdrawn[1]
 
 
 @external

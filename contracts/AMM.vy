@@ -56,9 +56,8 @@ event AddLiquidityRaw:
     price_oracle: uint256
 
 event RemoveLiquidityRaw:
-    token_amounts: uint256[2]
-    invariant: uint256
-    price_oracle: uint256
+    collateral_change: uint256
+    debt_change: uint256
 
 event SetRate:
     rate: uint256
@@ -265,24 +264,19 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256:
 
 
 @external
-def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_debt_return: uint256) -> uint256[2]:
+def _withdraw(frac: uint256) -> uint256[2]:
     assert msg.sender == DEPOSITOR, "Access violation"
 
-    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
-    x0: uint256 = self.get_x0(p_o, collateral, debt)
-    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
-    # TODO use snekmate for floor/ceil
-    d_collateral: uint256 = collateral * invariant_change // invariant_before  # floor
-    d_debt: uint256 = (debt * invariant_change + (invariant_before - 1)) // invariant_before  # ceil
-    assert d_collateral >= min_collateral_return and d_debt <= max_debt_return, "Min/max amounts"
+    d_collateral: uint256 = collateral * frac // 10**18
+    d_debt: uint256 = debt * frac // 10**18
 
     self.collateral_amount -= d_collateral
     self.debt -= d_debt
 
-    log RemoveLiquidityRaw([d_collateral, d_debt], invariant_before - invariant_change, p_o)
+    log RemoveLiquidityRaw(d_collateral, d_debt)
 
     return [d_collateral, d_debt]
 
