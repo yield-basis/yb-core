@@ -226,14 +226,13 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256) -> uint256:
+def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256:
     assert msg.sender == DEPOSITOR, "Access violation"
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
-    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
 
     debt += d_debt
     collateral += d_collateral
@@ -243,7 +242,6 @@ def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint2
     # Assume that transfer of collateral happened already (as a result of exchange)
 
     invariant_after: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
-    assert invariant_after >= invariant_before + min_invariant_change
 
     log AddLiquidityRaw([d_collateral, d_debt], invariant_after, p_o)
     return invariant_after
@@ -296,6 +294,16 @@ def value_oracle_for(collateral: uint256, debt: uint256) -> uint256:
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     Ip: uint256 = self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18)
     return 2 * Ip - x0
+
+
+@external
+@view
+def get_invariant() -> uint256:
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    collateral: uint256 = self.collateral_amount  # == y_initial
+    debt: uint256 = self._debt()
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    return self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION)
 
 
 @external

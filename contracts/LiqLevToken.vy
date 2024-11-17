@@ -13,10 +13,11 @@ interface IERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256, min_invariant_change: uint256) -> uint256: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256: nonpayable
     def _withdraw(invariant_change: uint256, min_collateral_return: uint256, max_debt_return: uint256) -> uint256[2]: nonpayable
     def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
     def fee() -> uint256: view
+    def get_invariant() -> uint256: view
     def value_oracle() -> uint256: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
 
@@ -115,46 +116,6 @@ def sqrt(arg: uint256) -> uint256:
 
 
 @external
-@nonreentrant
-def deposit(assets: uint256, receiver: address = msg.sender) -> uint256:
-    """
-    @notice Simple method to deposit assets (e.g. like BTC) to receive shares (e.g. like yield-bearing BTC) - auto slippage
-    @param assets Amount of assets to deposit
-    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
-    """
-    amm: LevAMM = self.amm
-    # p_asset: uint256 = COLLATERAL.price_oracle()
-    # value_in_amm: uint256 = self.amm.value_oracle()
-    # total_btc = value_in_amm / p_asset - and nonmanipulatable
-
-    p_asset: uint256 = staticcall COLLATERAL.price_oracle()
-    loan_amount: uint256 = assets * DEPOSITED_TOKEN_PRECISION * p_asset // 10**18
-
-    # For calculating min shares
-    vprice: uint256 = staticcall COLLATERAL.get_virtual_price()
-    min_lp: uint256 = self.sqrt(assets * DEPOSITED_TOKEN_PRECISION * loan_amount) * 10**18 // vprice
-    min_lp = min_lp * (10**10 - staticcall COLLATERAL.mid_fee()) // 10**10  # Sandwiches are unprofitable for this %
-
-    collateral_shares: uint256 = extcall COLLATERAL.add_liquidity([loan_amount, assets], min_lp, amm.address)
-
-    # Process deposit
-    amm_initial_value: uint256 = staticcall amm.value_oracle()
-    extcall amm._deposit(collateral_shares, loan_amount, 0)
-    d_amm_value: uint256 = staticcall amm.value_oracle() - amm_initial_value
-
-    # loan amount is exactly assets * price
-    assert d_amm_value >= loan_amount * (10**18 - staticcall amm.fee()) // 10**18, "Slippage in LevAMM"
-
-    to_mint: uint256 = assets * DEPOSITED_TOKEN_PRECISION
-    if self.totalSupply > 0:
-        to_mint = self.totalSupply * d_amm_value // amm_initial_value
-    self._mint(receiver, to_mint)
-
-    log Deposit(msg.sender, receiver, assets, to_mint)
-    return to_mint
-
-
-@external
 @view
 @nonreentrant
 def expected_tokens(assets: uint256, debt: uint256) -> uint256:
@@ -169,7 +130,37 @@ def expected_tokens(assets: uint256, debt: uint256) -> uint256:
         invariants: uint256[2] = staticcall self.amm.invariant_change(lp_tokens, debt, True)
         return supply * invariants[1] // invariants[0] - supply
     else:
-        return staticcall self.amm.value_oracle_for(lp_tokens, debt)
+        return staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
+
+
+@external
+@nonreentrant
+def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address = msg.sender) -> uint256:
+    """
+    @notice Method to deposit assets (e.g. like BTC) to receive shares (e.g. like yield-bearing BTC)
+    @param assets Amount of assets to deposit
+    @param debt Amount of debt for AMM to take (approximately BTC * btc_price)
+    @param min_shares Minimal amount of shares to receive (important to calculate to exclude sandwich attacks)
+    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
+    """
+    amm: LevAMM = self.amm
+    lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([assets, debt], 0, amm.address)
+    supply: uint256 = self.totalSupply
+    shares: uint256 = 0
+
+    invariant_before: uint256 = staticcall amm.get_invariant()
+    invariant_after: uint256 = extcall amm._deposit(assets, debt)
+
+    if supply > 0:
+        shares = supply * invariant_after // invariant_before - supply
+    else:
+        shares = staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
+
+    assert shares >= min_shares, "Slippage"
+
+    self._mint(receiver, shares)
+    log Deposit(msg.sender, receiver, assets, shares)
+    return shares
 
 
 @external
