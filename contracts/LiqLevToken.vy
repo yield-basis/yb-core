@@ -255,6 +255,16 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
 
 @external
+@view
+def pricePerShare() -> uint256:
+    """
+    Non-manipulatable "fair price per share" oracle
+    """
+    p_o: uint256 = staticcall COLLATERAL.price_oracle()
+    return staticcall self.amm.value_oracle() * 10**18 // p_o * 10**18 // self.totalSupply
+
+
+@external
 @nonreentrant
 def set_amm(amm: LevAMM):
     assert msg.sender == self.admin, "Access"
