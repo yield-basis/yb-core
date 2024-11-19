@@ -21,6 +21,7 @@ interface LevAMM:
     def value_oracle() -> uint256: view
     def get_state() -> AMMState: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
+    def set_rate(rate: uint256) -> uint256: nonpayable
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -278,6 +279,13 @@ def set_admin(new_admin: address):
     assert msg.sender == self.admin, "Access"
     self.admin = new_admin
     log SetAdmin(new_admin)
+
+
+@external
+@nonreentrant
+def set_rate(rate: uint256):
+    assert msg.sender == self.admin, "Access"
+    extcall self.amm.set_rate(rate)
 
 
 # ERC20 methods
