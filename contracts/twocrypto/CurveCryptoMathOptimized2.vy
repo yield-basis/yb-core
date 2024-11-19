@@ -1,7 +1,7 @@
-# pragma version 0.3.10
+# pragma version 0.4.0
 # pragma optimize gas
 # pragma evm-version paris
-# (c) Curve.Fi, 2020-2023
+# (c) Curve.Fi, 2020-2024
 # AMM Math for 2-coin Curve Cryptoswap Pools
 #
 # Unless otherwise agreed on, only contracts owned by Curve DAO or
@@ -10,18 +10,19 @@
 """
 @title CurveTwocryptoMathOptimized
 @author Curve.Fi
-@license Copyright (c) Curve.Fi, 2020-2023 - all rights reserved
+@license Copyright (c) Curve.Fi, 2020-2024 - all rights reserved
 @notice Curve AMM Math for 2 unpegged assets (e.g. ETH <> USD).
 """
 
 N_COINS: constant(uint256) = 2
+N_COINS_INT: constant(int256) = 2
 A_MULTIPLIER: constant(uint256) = 10000
 
 MIN_GAMMA: constant(uint256) = 10**10
 MAX_GAMMA_SMALL: constant(uint256) = 2 * 10**16
 MAX_GAMMA: constant(uint256) = 3 * 10**17
 
-MIN_A: constant(uint256) = N_COINS**N_COINS * A_MULTIPLIER / 10
+MIN_A: constant(uint256) = N_COINS**N_COINS * A_MULTIPLIER // 10
 MAX_A: constant(uint256) = N_COINS**N_COINS * A_MULTIPLIER * 1000
 
 version: public(constant(String[8])) = "v2.0.0"
@@ -148,17 +149,17 @@ def _newton_y(ANN: uint256, gamma: uint256, x: uint256[N_COINS], D: uint256, i: 
     """
 
     x_j: uint256 = x[1 - i]
-    y: uint256 = D**2 / (x_j * N_COINS**2)
-    K0_i: uint256 = (10**18 * N_COINS) * x_j / D
+    y: uint256 = D**2 // (x_j * N_COINS**2)
+    K0_i: uint256 = (10**18 * N_COINS) * x_j // D
 
     assert (K0_i >= unsafe_div(10**36, lim_mul)) and (K0_i <= lim_mul)  # dev: unsafe values x[i]
 
-    convergence_limit: uint256 = max(max(x_j / 10**14, D / 10**14), 100)
+    convergence_limit: uint256 = max(max(x_j // 10**14, D // 10**14), 100)
 
-    for j in range(255):
+    for j: uint256 in range(255):
         y_prev: uint256 = y
 
-        K0: uint256 = K0_i * y * N_COINS / D
+        K0: uint256 = K0_i * y * N_COINS // D
         S: uint256 = x_j + y
 
         _g1k0: uint256 = gamma + 10**18
@@ -168,28 +169,28 @@ def _newton_y(ANN: uint256, gamma: uint256, x: uint256[N_COINS], D: uint256, i: 
             _g1k0 = K0 - _g1k0 + 1
 
         # D / (A * N**N) * _g1k0**2 / gamma**2
-        mul1: uint256 = 10**18 * D / gamma * _g1k0 / gamma * _g1k0 * A_MULTIPLIER / ANN
+        mul1: uint256 = 10**18 * D // gamma * _g1k0 // gamma * _g1k0 * A_MULTIPLIER // ANN
 
         # 2*K0 / _g1k0
-        mul2: uint256 = 10**18 + (2 * 10**18) * K0 / _g1k0
+        mul2: uint256 = 10**18 + (2 * 10**18) * K0 // _g1k0
 
         yfprime: uint256 = 10**18 * y + S * mul2 + mul1
         _dyfprime: uint256 = D * mul2
         if yfprime < _dyfprime:
-            y = y_prev / 2
+            y = y_prev // 2
             continue
         else:
             yfprime -= _dyfprime
-        fprime: uint256 = yfprime / y
+        fprime: uint256 = yfprime // y
 
         # y -= f / f_prime;  y = (y * fprime - f) / fprime
         # y = (yfprime + 10**18 * D - 10**18 * S) // fprime + mul1 // fprime * (10**18 - K0) // K0
-        y_minus: uint256 = mul1 / fprime
-        y_plus: uint256 = (yfprime + 10**18 * D) / fprime + y_minus * 10**18 / K0
-        y_minus += 10**18 * S / fprime
+        y_minus: uint256 = mul1 // fprime
+        y_plus: uint256 = (yfprime + 10**18 * D) // fprime + y_minus * 10**18 // K0
+        y_minus += 10**18 * S // fprime
 
         if y_plus < y_minus:
-            y = y_prev / 2
+            y = y_prev // 2
         else:
             y = y_plus - y_minus
 
@@ -199,7 +200,7 @@ def _newton_y(ANN: uint256, gamma: uint256, x: uint256[N_COINS], D: uint256, i: 
         else:
             diff = y_prev - y
 
-        if diff < max(convergence_limit, y / 10**14):
+        if diff < max(convergence_limit, y // 10**14):
             return y
 
     raise "Did not converge"
@@ -218,8 +219,8 @@ def newton_y(ANN: uint256, gamma: uint256, x: uint256[N_COINS], D: uint256, i: u
         lim_mul = unsafe_div(unsafe_mul(lim_mul, MAX_GAMMA_SMALL), gamma)  # smaller than 100.0
 
     y: uint256 = self._newton_y(ANN, gamma, x, D, i, lim_mul)
-    frac: uint256 = y * 10**18 / D
-    assert (frac >= unsafe_div(10**36 / N_COINS, lim_mul)) and (frac <= unsafe_div(lim_mul, N_COINS))  # dev: unsafe value for y
+    frac: uint256 = y * 10**18 // D
+    assert (frac >= unsafe_div(10**36 // N_COINS, lim_mul)) and (frac <= unsafe_div(lim_mul, N_COINS))  # dev: unsafe value for y
 
     return y
 
@@ -250,10 +251,10 @@ def get_y(
     gamma2: int256 = unsafe_mul(gamma, gamma)
 
     # savediv by x_j done here:
-    y: int256 = D**2 / (x_j * N_COINS**2)
+    y: int256 = D**2 // (x_j * N_COINS_INT**2)
 
     # K0_i: int256 = (10**18 * N_COINS) * x_j / D
-    K0_i: int256 = unsafe_div(10**18 * N_COINS * x_j, D)
+    K0_i: int256 = unsafe_div(10**18 * N_COINS_INT * x_j, D)
     assert (K0_i >= unsafe_div(10**36, lim_mul_signed)) and (K0_i <= lim_mul_signed)  # dev: unsafe values x[i]
 
     ann_gamma2: int256 = ANN * gamma2
@@ -263,8 +264,8 @@ def get_y(
 
     # b = ANN*D*gamma2/4/10000/x_j/10**4 - 10**32*3 - 2*gamma*10**14
     b: int256 = (
-        D*ann_gamma2/400000000/x_j
-        - convert(unsafe_mul(10**32, 3), int256)
+        D * ann_gamma2 // 400000000 // x_j
+        - (3 * 10**32)
         - unsafe_mul(unsafe_mul(2, gamma), 10**14)
     )
 
@@ -281,10 +282,10 @@ def get_y(
     d: int256 = -unsafe_div(unsafe_add(10**18, gamma) ** 2, 10**4)
 
     # delta0: int256 = 3*a*c/b - b
-    delta0: int256 = 3 * a * c / b - b  # safediv by b
+    delta0: int256 = 3 * a * c // b - b  # safediv by b
 
     # delta1: int256 = 9*a*c/b - 2*b - 27*a**2/b*d/b
-    delta1: int256 = 3 * delta0 + b - 27*a**2/b*d/b
+    delta1: int256 = 3 * delta0 + b - 27*a**2 // b * d // b
 
     divider: int256 = 1
     threshold: int256 = min(min(abs(delta0), abs(delta1)), a)
@@ -348,7 +349,7 @@ def get_y(
     second_cbrt: int256 = 0
     if delta1 > 0:
         # second_cbrt = convert(self._cbrt(convert((delta1 + sqrt_val), uint256) / 2), int256)
-        second_cbrt = convert(self._cbrt(convert(unsafe_add(delta1, sqrt_val), uint256) / 2), int256)
+        second_cbrt = convert(self._cbrt(convert(unsafe_add(delta1, sqrt_val), uint256) // 2), int256)
     else:
         # second_cbrt = -convert(self._cbrt(convert(unsafe_sub(sqrt_val, delta1), uint256) / 2), int256)
         second_cbrt = -convert(self._cbrt(unsafe_div(convert(unsafe_sub(sqrt_val, delta1), uint256), 2)), int256)
@@ -357,7 +358,7 @@ def get_y(
     C1: int256 = unsafe_div(unsafe_mul(unsafe_div(b_cbrt**2, 10**18), second_cbrt), 10**18)
 
     # root: int256 = (10**18*C1 - 10**18*b - 10**18*b*delta0/C1)/(3*a), keep 2 safe ops here.
-    root: int256 = (unsafe_mul(10**18, C1) - unsafe_mul(10**18, b) - unsafe_mul(10**18, b)/C1*delta0)/unsafe_mul(3, a)
+    root: int256 = (unsafe_mul(10**18, C1) - unsafe_mul(10**18, b) - unsafe_mul(10**18, b)//C1*delta0)//unsafe_mul(3, a)
 
     # y_out: uint256[2] =  [
     #     convert(D**2/x_j*root/4/10**18, uint256),   # <--- y
@@ -366,7 +367,7 @@ def get_y(
     y_out: uint256[2] = [convert(unsafe_div(unsafe_div(unsafe_mul(unsafe_div(D**2, x_j), root), 4), 10**18), uint256), convert(root, uint256)]
 
     frac: uint256 = unsafe_div(y_out[0] * 10**18, _D)
-    assert (frac >= unsafe_div(10**36 / N_COINS, lim_mul)) and (frac <= unsafe_div(lim_mul, N_COINS))  # dev: unsafe value for y
+    assert (frac >= unsafe_div(10**36 // N_COINS, lim_mul)) and (frac <= unsafe_div(lim_mul, N_COINS))  # dev: unsafe value for y
 
     return y_out
 
@@ -406,7 +407,7 @@ def newton_D(ANN: uint256, gamma: uint256, x_unsorted: uint256[N_COINS], K0_prev
     __g1k0: uint256 = gamma + 10**18
     diff: uint256 = 0
 
-    for i in range(255):
+    for i: uint256 in range(255):
         D_prev: uint256 = D
         assert D > 0
         # Unsafe division by D and D_prev is now safe
@@ -430,10 +431,10 @@ def newton_D(ANN: uint256, gamma: uint256, x_unsorted: uint256[N_COINS], K0_prev
         mul2: uint256 = unsafe_div(((2 * 10**18) * N_COINS) * K0, _g1k0)
 
         # calculate neg_fprime. here K0 > 0 is being validated (safediv).
-        neg_fprime: uint256 = (S + unsafe_div(S * mul2, 10**18)) + mul1 * N_COINS / K0 - unsafe_div(mul2 * D, 10**18)
+        neg_fprime: uint256 = (S + unsafe_div(S * mul2, 10**18)) + mul1 * N_COINS // K0 - unsafe_div(mul2 * D, 10**18)
 
         # D -= f / fprime; neg_fprime safediv being validated
-        D_plus: uint256 = D * (neg_fprime + S) / neg_fprime
+        D_plus: uint256 = D * (neg_fprime + S) // neg_fprime
         D_minus: uint256 = unsafe_div(D * D,  neg_fprime)
         if 10**18 > K0:
             D_minus += unsafe_div(unsafe_div(D * unsafe_div(mul1, neg_fprime), 10**18) * unsafe_sub(10**18, K0), K0)
@@ -452,8 +453,8 @@ def newton_D(ANN: uint256, gamma: uint256, x_unsorted: uint256[N_COINS], K0_prev
 
         if diff * 10**14 < max(10**16, D):  # Could reduce precision for gas efficiency here
 
-            for _x in x:
-                frac: uint256 = _x * 10**18 / D
+            for _x: uint256 in x:
+                frac: uint256 = _x * 10**18 // D
                 assert (frac >= 10**16 - 1) and (frac < 10**20 + 1)  # dev: unsafe values x[i]
             return D
 
@@ -507,7 +508,7 @@ def get_p(
     # p_xy = x * (GK0 + NNAG2 * y / D * K0 / 10**36) / y * 10**18 / denominator
     # p is in 10**18 precision.
     return unsafe_div(
-        _xp[0] * ( GK0 + unsafe_div(unsafe_div(NNAG2 * _xp[1], _D) * K0, 10**36) ) / _xp[1] * 10**18,
+        _xp[0] * ( GK0 + unsafe_div(unsafe_div(NNAG2 * _xp[1], _D) * K0, 10**36) ) // _xp[1] * 10**18,
         denominator
     )
 
