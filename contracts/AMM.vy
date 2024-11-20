@@ -40,6 +40,9 @@ rate: public(uint256)
 rate_mul: public(uint256)
 rate_time: uint256
 
+minted: public(uint256)
+redeemed: public(uint256)
+
 
 event TokenExchange:
     buyer: indexed(address)
@@ -218,20 +221,22 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
     out_amount: uint256 = 0
     fee: uint256 = self.fee
 
-    if i == 0:  # Buy collateral
+    if i == 0:  # Trader buys collateral from us
         x: uint256 = x_initial + in_amount
         y: uint256 = x_initial * collateral // x
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
         self.debt -= in_amount
         self.collateral_amount -= out_amount
+        self.redeemed += in_amount
         assert extcall STABLECOIN.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall COLLATERAL.transfer(_for, out_amount, default_return_value=True)
 
-    else:  # Sell collateral
+    else:  # Trader sells collateral to us
         y: uint256 = collateral + in_amount
         x: uint256 = x_initial * collateral // y
         out_amount = (x_initial - x) * (10**18 - fee) // 10**18
         self.debt += out_amount
+        self.minted += out_amount
         self.collateral_amount += in_amount
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
@@ -252,6 +257,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256:
 
     debt += d_debt
     collateral += d_collateral
+    self.minted += d_debt
 
     self.debt = debt
     self.collateral_amount = collateral
@@ -274,7 +280,8 @@ def _withdraw(frac: uint256) -> uint256[2]:
     d_debt: uint256 = debt * frac // 10**18
 
     self.collateral_amount -= d_collateral
-    self.debt -= d_debt
+    self.debt = debt - d_debt
+    self.redeemed += d_debt
 
     log RemoveLiquidityRaw(d_collateral, d_debt)
 
