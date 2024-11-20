@@ -8,6 +8,7 @@
 
 interface IERC20:
     def decimals() -> uint256: view
+    def balanceOf(_user: address) -> uint256: view
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
@@ -22,6 +23,7 @@ interface LevAMM:
     def get_state() -> AMMState: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
     def set_rate(rate: uint256) -> uint256: nonpayable
+    def collect_fees() -> uint256: nonpayable
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -286,6 +288,20 @@ def set_admin(new_admin: address):
 def set_rate(rate: uint256):
     assert msg.sender == self.admin, "Access"
     extcall self.amm.set_rate(rate)
+
+
+@external
+@nonreentrant
+def allocate_stablecoins():
+    assert msg.sender == self.admin, "Access"
+    extcall STABLECOIN.transfer(self.amm.address, staticcall STABLECOIN.balanceOf(self))
+
+
+@external
+@nonreentrant
+def distrubute_borrower_fees():  # This will JUST donate to the crypto pool
+    assert msg.sender == self.admin, "Access"
+    extcall self.amm.collect_fees()
 
 
 # ERC20 methods
