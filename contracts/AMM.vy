@@ -67,6 +67,10 @@ event SetRate:
     rate_mul: uint256
     time: uint256
 
+event CollectFees:
+    amount: uint256
+    new_supply: uint256
+
 
 @deploy
 def __init__(depositor: address,
@@ -338,3 +342,34 @@ def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_de
     else:
         invariant_after = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
     return [invariant_before, invariant_after]
+
+
+@external
+@view
+def admin_fees() -> uint256:
+    """
+    @notice Calculate the amount of fees obtained from the interest
+    """
+    minted: uint256 = self.minted
+    return unsafe_sub(max(self._debt() + self.redeemed, minted), minted)
+
+
+@external
+@nonreentrant
+def collect_fees() -> uint256:
+    """
+    @notice Collect the fees charged as interest.
+    """
+    debt: uint256 = self._debt_w()
+    minted: uint256 = self.minted
+    to_be_redeemed: uint256 = debt + self.redeemed
+    # Difference between to_be_redeemed and minted amount is exactly due to interest charged
+    if to_be_redeemed > minted:
+        self.minted = to_be_redeemed
+        to_be_redeemed = unsafe_sub(to_be_redeemed, minted)  # Now this is the fees to charge
+        extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed)
+        log CollectFees(to_be_redeemed, debt)
+        return to_be_redeemed
+    else:
+        log CollectFees(0, debt)
+        return 0
