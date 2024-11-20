@@ -989,7 +989,7 @@ def tweak_price(
     self.xcp_profit = xcp_profit
 
     # ------------ Rebalance liquidity if there's enough profits to adjust it:
-    if virtual_price * 2 - 10**18 > xcp_profit + 2 * rebalancing_params[0]:
+    if virtual_price ** 2 > xcp_profit * (10**18 + 2 * rebalancing_params[0]):
         #                          allowed_extra_profit --------^
 
         # ------------------- Get adjustment step ----------------------------
@@ -1050,7 +1050,7 @@ def tweak_price(
             # ---------------------------- Proceed if we've got enough profit.
             if (
                 old_virtual_price > 10**18 and
-                2 * old_virtual_price - 10**18 > xcp_profit
+                old_virtual_price ** 2 > xcp_profit * 10**18
             ):
 
                 self.D = D
