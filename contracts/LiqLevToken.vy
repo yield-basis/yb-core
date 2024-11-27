@@ -48,6 +48,9 @@ struct AMMState:
     x0: uint256
 
 
+event SetStaker:
+    staker: indexed(address)
+
 # ERC20 events
 
 event Approval:
@@ -88,6 +91,7 @@ amm: public(LevAMM)
 event SetAdmin:
     admin: address
 
+staker: public(address)
 
 allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
@@ -302,6 +306,14 @@ def allocate_stablecoins():
 def distrubute_borrower_fees():  # This will JUST donate to the crypto pool
     assert msg.sender == self.admin, "Access"
     extcall self.amm.collect_fees()
+
+
+@external
+@nonreentrant
+def set_staker(staker: address):
+    assert msg.sender == self.admin, "Access"
+    self.staker = staker
+    log SetStaker(staker)
 
 
 # ERC20 methods
