@@ -92,6 +92,9 @@ event SetAdmin:
     admin: address
 
 staker: public(address)
+admin_balance: public(int256)
+min_admin_fee: public(uint256)
+previous_value: public(uint256)
 
 allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
@@ -128,6 +131,31 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCrypt
 @pure
 def sqrt(arg: uint256) -> uint256:
     return isqrt(arg)
+
+
+@internal
+@view
+def _admin_fee() -> uint256:
+    return self.min_admin_fee  # XXX
+
+
+@internal
+@view
+def _get_admin_balance() -> (int256, uint256):
+    p_o: uint256 = staticcall COLLATERAL.price_oracle()
+    current_value: uint256 = staticcall self.amm.value_oracle() * 10**18 // p_o
+    supply: uint256 = self.totalSupply
+    staked: uint256 = self.balanceOf[self.staker]
+    admin_fees_mul: int256 = convert(
+        10**18 - (10**18 - self._admin_fee()) * self.sqrt((supply - staked) * 10**18 // supply) // 10**18,
+        int256)
+    admin_balance: int256 = self.admin_balance + (convert(current_value, int256) - convert(self.previous_value, int256)) * admin_fees_mul // 10**18
+    return admin_balance, current_value
+
+
+@internal
+def _update_admin_balance():
+    self.admin_balance, self.previous_value = self._get_admin_balance()
 
 
 @external
