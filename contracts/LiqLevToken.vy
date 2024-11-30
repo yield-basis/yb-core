@@ -143,6 +143,7 @@ def _admin_fee() -> uint256:
 @view
 def _get_admin_balance() -> (int256, uint256):
     p_o: uint256 = staticcall COLLATERAL.price_oracle()
+    # XXX invariant instead?
     current_value: uint256 = staticcall self.amm.value_oracle() * 10**18 // p_o
     supply: uint256 = self.totalSupply
     staked: uint256 = self.balanceOf[self.staker]

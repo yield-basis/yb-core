@@ -321,8 +321,10 @@ def value_oracle_for(collateral: uint256, debt: uint256) -> uint256:
 @external
 @view
 def get_invariant() -> uint256:
-    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
+    if collateral == 0:
+        return 0
+    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     debt: uint256 = self._debt()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
     return self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION)
