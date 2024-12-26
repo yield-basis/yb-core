@@ -14,9 +14,9 @@ interface IERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256[2]: nonpayable
     def _withdraw(frac: uint256) -> uint256[2]: nonpayable
-    def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
     def fee() -> uint256: view
     def get_invariant() -> uint256: view
     def value_oracle() -> uint256: view
@@ -100,6 +100,9 @@ allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
 
+st_balance_of: public(HashMap[address, uint256])
+st_total_supply: public(uint256)
+
 
 @deploy
 def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
@@ -143,7 +146,6 @@ def _admin_fee() -> uint256:
 @view
 def _get_admin_balance() -> (int256, uint256):
     p_o: uint256 = staticcall COLLATERAL.price_oracle()
-    # XXX invariant instead?
     current_value: uint256 = staticcall self.amm.value_oracle() * 10**18 // p_o
     supply: uint256 = self.totalSupply
     staked: uint256 = self.balanceOf[self.staker]
@@ -166,13 +168,13 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     """
     @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
     @param assets Amount of crypto to deposit
-    @param debt Amount of stables to borrow for MMing (approx same value as crypto)
+    @param debt Amount of stables to borrow for MMing (approx same value as crypto)  XXX eliminate this
     """
     lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([assets, debt], True)
     supply: uint256 = self.totalSupply
     if supply > 0:
-        invariants: uint256[2] = staticcall self.amm.invariant_change(lp_tokens, debt, True)
-        return supply * invariants[1] // invariants[0] - supply
+        values: uint256[2] = staticcall self.amm.value_change(lp_tokens, debt, True)
+        return supply * values[1] // values[0] - supply
     else:
         return staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
 
@@ -237,13 +239,14 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
-    invariant_before: uint256 = staticcall amm.get_invariant()
-    invariant_after: uint256 = extcall amm._deposit(assets, debt)
+    position_values: uint256[2] = extcall amm._deposit(assets, debt)
 
     if supply > 0:
-        shares = supply * invariant_after // invariant_before - supply
+        shares = supply * position_values[1] // position_values[0] - supply
+
     else:
         shares = staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
+        # Initial value/shares ratio is EXACTLY 1.0
 
     assert shares >= min_shares, "Slippage"
 

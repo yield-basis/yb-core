@@ -251,13 +251,15 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256:
+def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256[2]:
     assert msg.sender == DEPOSITOR, "Access violation"
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
+
+    value_before: uint256 = 2 * self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18) - x0
 
     debt += d_debt
     collateral += d_collateral
@@ -267,10 +269,10 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256:
     self.collateral_amount = collateral
     # Assume that transfer of collateral happened already (as a result of exchange)
 
-    invariant_after: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
+    value_after: uint256 = 2 * self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18) - x0
 
-    log AddLiquidityRaw([d_collateral, d_debt], invariant_after, p_o)
-    return invariant_after
+    log AddLiquidityRaw([d_collateral, d_debt], value_after, p_o)
+    return [value_before, value_after]
 
 
 @external
@@ -332,18 +334,22 @@ def get_invariant() -> uint256:
 
 @external
 @view
-def invariant_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]:
+def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
     x0: uint256 = self.get_x0(p_o, collateral, debt)
-    invariant_before: uint256 = self.sqrt(collateral * COLLATERAL_PRECISION * (x0 - debt))
-    invariant_after: uint256 = 0
+    val_before: uint256 = 2 * self.sqrt((x0 - debt) * collateral * COLLATERAL_PRECISION * p_o // 10**18) - x0
+    val_after: uint256 = 0
     if is_deposit:
-        invariant_after = self.sqrt((collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)))
+        val_after = 2 * self.sqrt(
+            (collateral + collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt + borrowed_amount)) * p_o // 10**18
+        ) - x0
     else:
-        invariant_after = self.sqrt((collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)))
-    return [invariant_before, invariant_after]
+        val_after = 2 * self.sqrt(
+            (collateral - collateral_amount) * COLLATERAL_PRECISION * (x0 - (debt - borrowed_amount)) * p_o // 10**18
+        ) - x0
+    return [val_before, val_after]
 
 
 @external
