@@ -14,14 +14,14 @@ interface IERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256[2]: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange: nonpayable
     def _withdraw(frac: uint256) -> uint256[2]: nonpayable
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[2]: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange: view
     def fee() -> uint256: view
     def get_invariant() -> uint256: view
-    def value_oracle() -> uint256: view
+    def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
-    def value_oracle_for(collateral: uint256, debt: uint256) -> uint256: view
+    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
 
@@ -46,6 +46,15 @@ struct AMMState:
     collateral: uint256
     debt: uint256
     x0: uint256
+
+struct ValueChange:
+    p_o: uint256
+    value_before: uint256
+    value_after: uint256
+
+struct OraclizedValue:
+    p_o: uint256
+    value: uint256
 
 
 event SetStaker:
@@ -145,8 +154,9 @@ def _admin_fee() -> uint256:
 @internal
 @view
 def _get_admin_balance() -> (int256, uint256):
-    p_o: uint256 = staticcall COLLATERAL.price_oracle()
-    current_value: uint256 = staticcall self.amm.value_oracle() * 10**18 // p_o
+    # XXX recheck
+    v: OraclizedValue = staticcall self.amm.value_oracle()
+    current_value: uint256 = v.value * 10**18 // v.p_o
     supply: uint256 = self.totalSupply
     staked: uint256 = self.balanceOf[self.staker]
     admin_fees_mul: int256 = convert(
@@ -158,25 +168,27 @@ def _get_admin_balance() -> (int256, uint256):
 
 @internal
 def _update_admin_balance():
+    # XXX recheck
     self.admin_balance, self.previous_value = self._get_admin_balance()
 
 
 @external
 @view
 @nonreentrant
-def preview_deposit(assets: uint256, debt: uint256) -> uint256:
+def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint256:
     """
     @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
     @param assets Amount of crypto to deposit
-    @param debt Amount of stables to borrow for MMing (approx same value as crypto)  XXX eliminate this
+    @param debt Amount of stables to borrow for MMing (approx same value as crypto) or best guess if max_value
     """
     lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([assets, debt], True)
     supply: uint256 = self.totalSupply
     if supply > 0:
-        values: uint256[2] = staticcall self.amm.value_change(lp_tokens, debt, True)
-        return supply * values[1] // values[0] - supply
+        v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
+        return supply * v.value_after // v.value_before - supply
     else:
-        return staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
+        v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
+        return v.value * 10**18 // v.p_o
 
 
 @external
@@ -239,14 +251,15 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
-    position_values: uint256[2] = extcall amm._deposit(assets, debt)
+    v: ValueChange = extcall amm._deposit(assets, debt)
 
     if supply > 0:
-        shares = supply * position_values[1] // position_values[0] - supply
+        shares = supply * v.value_after // v.value_before - supply
 
     else:
-        shares = staticcall self.amm.value_oracle_for(lp_tokens, debt) * 10**18 // staticcall COLLATERAL.price_oracle()
-        # Initial value/shares ratio is EXACTLY 1.0
+        ov: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
+        shares = ov.value * 10**18 // ov.p_o
+        # Initial value/shares ratio is EXACTLY 1.0 in collateral units
 
     assert shares >= min_shares, "Slippage"
 
@@ -299,8 +312,8 @@ def pricePerShare() -> uint256:
     """
     Non-manipulatable "fair price per share" oracle
     """
-    p_o: uint256 = staticcall COLLATERAL.price_oracle()
-    return staticcall self.amm.value_oracle() * 10**18 // p_o * 10**18 // self.totalSupply
+    v: OraclizedValue = staticcall self.amm.value_oracle()
+    return v.value * 10**18 // v.p_o * 10**18 // self.totalSupply
 
 
 @external

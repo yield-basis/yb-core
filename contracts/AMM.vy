@@ -22,6 +22,15 @@ struct AMMState:
     debt: uint256
     x0: uint256
 
+struct ValueChange:
+    p_o: uint256
+    value_before: uint256
+    value_after: uint256
+
+struct OraclizedValue:
+    p_o: uint256
+    value: uint256
+
 
 LEVERAGE: public(immutable(uint256))
 LEV_RATIO: immutable(uint256)
@@ -251,7 +260,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256[3]:
+def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     assert msg.sender == DEPOSITOR, "Access violation"
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
@@ -271,7 +280,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> uint256[3]:
     value_after: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1)  # Value in fiat
 
     log AddLiquidityRaw([d_collateral, d_debt], value_after, p_o)
-    return [p_o, value_before, value_after]
+    return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
 
 
 @external
@@ -301,18 +310,18 @@ def coins(i: uint256) -> IERC20:
 
 @external
 @view
-def value_oracle() -> uint256:
+def value_oracle() -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
-    return self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1)
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1))
 
 
 @external
 @view
-def value_oracle_for(collateral: uint256, debt: uint256) -> uint256:
+def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
-    return self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1)
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1))
 
 
 @external
@@ -330,7 +339,7 @@ def get_invariant() -> uint256:
 
 @external
 @view
-def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> uint256[3]:
+def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
@@ -346,7 +355,10 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
 
     x0_after: uint256 = self.get_x0(p_o, collateral, debt)
 
-    return [p_o, x0_before // (2 * LEVERAGE - 1), x0_after // (2 * LEVERAGE - 1)]
+    return ValueChange(
+        p_o = p_o,
+        value_before = x0_before // (2 * LEVERAGE - 1),
+        value_after = x0_after // (2 * LEVERAGE - 1))
 
 
 @external
