@@ -18,7 +18,6 @@ interface LevAMM:
     def _withdraw(frac: uint256) -> uint256[2]: nonpayable
     def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange: view
     def fee() -> uint256: view
-    def get_invariant() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
