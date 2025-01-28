@@ -203,7 +203,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
 
     # 1. Measure lp_token/stable ratio of Cryptopool
     # 2. lp_token/debt = r ratio must be the same
-    # 3. Measure initial c1, d1
+    # 3. Measure initial c1, d1 (collateral, debt)
     # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply:
     #       sqrt((x0 - d2) * c2) = sqrt((x0 - d1) * c1) * (supply - tokens) / supply
     #   c1 is initial collateral (lp token amount), d1 is initial debt; c2, d2 are final values of those.
@@ -225,10 +225,10 @@ def preview_withdraw(tokens: uint256) -> uint256:
     # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
     reps_factor: uint256 = (2 * supply * tokens - tokens**2) // supply * r // supply
 
-    a: uint256 = r * (state.x0 - state.debt) // 10**18
-    a = max(a, state.collateral) - min(a, state.collateral)  # = abs(r(x0 - d1) - c1)
-    D: uint256 = a**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
-    to_return: uint256 = (self.sqrt(D) - a) * 10**18 // (2 * r)
+    b: uint256 = r * (state.x0 - state.debt) // 10**18
+    b = max(b, state.collateral) - min(b, state.collateral)  # = abs(r(x0 - d1) - c1)
+    D: uint256 = b**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
+    to_return: uint256 = (self.sqrt(D) - b) * 10**18 // (2 * r)
 
     return crypto_in_cswap * to_return // stables_in_cswap
 
