@@ -256,9 +256,9 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         shares = supply * v.value_after // v.value_before - supply
 
     else:
-        ov: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
-        shares = ov.value * 10**18 // ov.p_o
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
+        # Value is measured in USD, and p_o is also provided
+        shares = v.value_after * 10**18 // v.p_o
 
     assert shares >= min_shares, "Slippage"
 
