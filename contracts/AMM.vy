@@ -22,6 +22,10 @@ struct AMMState:
     debt: uint256
     x0: uint256
 
+struct Pair:
+    collateral: uint256
+    debt: uint256
+
 struct ValueChange:
     p_o: uint256
     value_before: uint256
@@ -284,7 +288,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
 
 
 @external
-def _withdraw(frac: uint256) -> uint256[2]:
+def _withdraw(frac: uint256) -> Pair:
     assert msg.sender == DEPOSITOR, "Access violation"
 
     collateral: uint256 = self.collateral_amount  # == y_initial
@@ -299,7 +303,7 @@ def _withdraw(frac: uint256) -> uint256[2]:
 
     log RemoveLiquidityRaw(d_collateral, d_debt)
 
-    return [d_collateral, d_debt]
+    return Pair(collateral=d_collateral, debt=d_debt)
 
 
 @external
