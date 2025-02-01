@@ -164,8 +164,7 @@ def _calculate_values() -> LiquidityValues:
         int256)
 
     v: OraclizedValue = staticcall self.amm.value_oracle()
-    cur_value_unsigned: uint256 = v.value * 10**18 // v.p_o
-    cur_value: int256 = convert(cur_value_unsigned, int256)
+    cur_value: int256 = convert(v.value * 10**18 // v.p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
 
     v_st: int256 = convert(prev.staked, int256)
