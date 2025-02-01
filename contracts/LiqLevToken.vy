@@ -192,6 +192,9 @@ def _calculate_values() -> LiquidityValuesOut:
 
     prev.total = convert(new_total_value, uint256)
     prev.staked = convert(new_staked_value, uint256)
+    # Supply changes each time:
+    # value split reduces the amount of staked tokens (but not others),
+    # and this also reduces the supply of LP tokens
 
     return LiquidityValuesOut(
         admin=prev.admin,
