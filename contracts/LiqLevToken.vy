@@ -20,7 +20,7 @@ interface LevAMM:
     def fee() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
-    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
+    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view  # XXX not needed?
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
 
@@ -58,6 +58,12 @@ struct ValueChange:
 struct OraclizedValue:
     p_o: uint256
     value: uint256
+
+struct LiquidityValues:
+    admin: int256  # Can be negative
+    total: uint256
+    ideal_staked: uint256
+    staked: uint256
 
 
 event SetStaker:
@@ -104,16 +110,14 @@ event SetAdmin:
     admin: address
 
 staker: public(address)
-admin_balance: public(int256)
+
 min_admin_fee: public(uint256)
-previous_value: public(uint256)
+
+liquidity: public(LiquidityValues)
 
 allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
-
-st_balance_of: public(HashMap[address, uint256])
-st_total_supply: public(uint256)
 
 
 @deploy
@@ -150,29 +154,38 @@ def sqrt(arg: uint256) -> uint256:
 
 @internal
 @view
-def _admin_fee() -> uint256:
-    return self.min_admin_fee  # XXX
+def _admin_fee() -> int256:
+    return convert(self.min_admin_fee, int256)  # XXX need formula with sqrts etc
 
 
 @internal
 @view
-def _get_admin_balance() -> (int256, uint256):
-    # XXX recheck
+def _calculate_values() -> LiquidityValues:
+    prev: LiquidityValues = self.liquidity
+    f_a: int256 = self._admin_fee()
+
     v: OraclizedValue = staticcall self.amm.value_oracle()
-    current_value: uint256 = v.value * 10**18 // v.p_o
-    supply: uint256 = self.totalSupply
-    staked: uint256 = self.balanceOf[self.staker]
-    admin_fees_mul: int256 = convert(
-        10**18 - (10**18 - self._admin_fee()) * self.sqrt((supply - staked) * 10**18 // supply) // 10**18,
-        int256)
-    admin_balance: int256 = self.admin_balance + (convert(current_value, int256) - convert(self.previous_value, int256)) * admin_fees_mul // 10**18
-    return admin_balance, current_value
+    cur_value_unsigned: uint256 = v.value * 10**18 // v.p_o
+    cur_value: int256 = convert(cur_value_unsigned, int256)
+    prev_value: int256 = convert(prev.total, int256)
 
+    v_st: int256 = convert(prev.staked, int256)
+    v_st_ideal: int256 = convert(prev.ideal_staked, int256)
 
-@internal
-def _update_admin_balance():
-    # XXX recheck
-    self.admin_balance, self.previous_value = self._get_admin_balance()
+    prev.admin += (cur_value - prev_value) * f_a // 10**18
+    dv_use: int256 = (cur_value - prev_value) * (10**18 - f_a) // 10**18
+
+    staked: int256 = convert(self.balanceOf[self.staker], int256)
+    total: int256 = convert(self.totalSupply, int256)
+
+    dv_s: int256 = dv_use * staked // total
+    if dv_use > 0:
+        dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
+
+    prev.total = convert(prev_value + dv_use, uint256)
+    prev.staked = convert(staked + dv_s, uint256)
+
+    return prev
 
 
 @external

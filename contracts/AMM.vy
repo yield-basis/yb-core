@@ -323,7 +323,7 @@ def value_oracle() -> OraclizedValue:
 
 @external
 @view
-def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
+def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:  # XXX not needed?
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1))
 
