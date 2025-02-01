@@ -187,6 +187,11 @@ def _calculate_values() -> LiquidityValuesOut:
 
     new_total_value: int256 = prev_value + dv_use
     new_staked_value: int256 = staked + dv_s
+
+    # Solution of:
+    # staked - token_reduction       new_staked_value
+    # -------------------------  =  -------------------
+    # total - token_reduction         new_token_value
     token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, total - staked)
     # token_reduction = 0 if nothing is staked
 
