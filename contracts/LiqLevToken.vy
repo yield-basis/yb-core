@@ -154,15 +154,14 @@ def sqrt(arg: uint256) -> uint256:
 
 @internal
 @view
-def _admin_fee() -> int256:
-    return convert(self.min_admin_fee, int256)  # XXX need formula with sqrts etc
-
-
-@internal
-@view
 def _calculate_values() -> LiquidityValues:
     prev: LiquidityValues = self.liquidity
-    f_a: int256 = self._admin_fee()
+    staked: int256 = convert(self.balanceOf[self.staker], int256)
+    total: int256 = convert(self.totalSupply, int256)
+
+    f_a: int256 = convert(
+        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**18 - staked // total, uint256)) // 10**18,
+        int256)
 
     v: OraclizedValue = staticcall self.amm.value_oracle()
     cur_value_unsigned: uint256 = v.value * 10**18 // v.p_o
@@ -174,9 +173,6 @@ def _calculate_values() -> LiquidityValues:
 
     prev.admin += (cur_value - prev_value) * f_a // 10**18
     dv_use: int256 = (cur_value - prev_value) * (10**18 - f_a) // 10**18
-
-    staked: int256 = convert(self.balanceOf[self.staker], int256)
-    total: int256 = convert(self.totalSupply, int256)
 
     dv_s: int256 = dv_use * staked // total
     if dv_use > 0:
