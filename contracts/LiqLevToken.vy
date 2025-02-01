@@ -65,6 +65,14 @@ struct LiquidityValues:
     ideal_staked: uint256
     staked: uint256
 
+struct LiquidityValuesOut:
+    admin: int256  # Can be negative
+    total: uint256
+    ideal_staked: uint256
+    staked: uint256
+    staked_tokens: uint256
+    supply_tokens: uint256
+
 
 event SetStaker:
     staker: indexed(address)
@@ -154,7 +162,7 @@ def sqrt(arg: uint256) -> uint256:
 
 @internal
 @view
-def _calculate_values() -> LiquidityValues:
+def _calculate_values() -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
     staked: int256 = convert(self.balanceOf[self.staker], int256)
     total: int256 = convert(self.totalSupply, int256)
@@ -177,10 +185,22 @@ def _calculate_values() -> LiquidityValues:
     if dv_use > 0:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
-    prev.total = convert(prev_value + dv_use, uint256)
-    prev.staked = convert(staked + dv_s, uint256)
+    new_total_value: int256 = prev_value + dv_use
+    new_staked_value: int256 = staked + dv_s
+    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, total - staked)
+    # token_reduction = 0 if nothing is staked
 
-    return prev
+    prev.total = convert(new_total_value, uint256)
+    prev.staked = convert(new_staked_value, uint256)
+
+    return LiquidityValuesOut(
+        admin=prev.admin,
+        total=prev.total,
+        ideal_staked=prev.ideal_staked,
+        staked=prev.staked,
+        staked_tokens=convert(staked - token_reduction, uint256),
+        supply_tokens=convert(total - token_reduction, uint256)
+    )
 
 
 @external
@@ -195,11 +215,13 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([assets, debt], True)
     supply: uint256 = self.totalSupply
     if supply > 0:
-        v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
-        return supply * v.value_after // v.value_before - supply
-    else:
-        v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
-        return v.value * 10**18 // v.p_o
+        liquidity: LiquidityValuesOut = self._calculate_values()
+        if liquidity.supply_tokens > liquidity.staked_tokens:
+            v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
+            return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
+
+    v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
+    return v.value * 10**18 // v.p_o
 
 
 @external
