@@ -240,7 +240,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
     """
     amm: LevAMM = self.amm
-    supply: uint256 = self.totalSupply
+    supply: uint256 = self._calculate_values().supply_tokens
     state: AMMState = staticcall amm.get_state()
 
     # 1. Measure lp_token/stable ratio of Cryptopool
