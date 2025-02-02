@@ -177,6 +177,7 @@ def _calculate_values() -> LiquidityValuesOut:
 
     v_st: int256 = convert(prev.staked, int256)
     v_st_ideal: int256 = convert(prev.ideal_staked, int256)
+    # ideal_staked is set when some tokens are transferred to staker address
 
     prev.admin += (cur_value - prev_value) * f_a // 10**18
     dv_use: int256 = (cur_value - prev_value) * (10**18 - f_a) // 10**18
@@ -289,18 +290,29 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
     assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
     lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([assets, debt], 0, amm.address)
+
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
     v: ValueChange = extcall amm._deposit(assets, debt)
 
     if supply > 0:
+        liquidity_values: LiquidityValuesOut = self._calculate_values()
+        supply = liquidity_values.supply_tokens
+        self.liquidity.admin=liquidity_values.admin
+        self.liquidity.total=liquidity_values.total
+        self.liquidity.staked=liquidity_values.staked
+        # ideal_staked is only changed when we transfer coins to staker
         shares = supply * v.value_after // v.value_before - supply
 
     else:
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
         # Value is measured in USD, and p_o is also provided
         shares = v.value_after * 10**18 // v.p_o
+        # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
+        self.liquidity.ideal_staked = 0  # Likely already 0 since supply was 0
+        self.liquidity.staked = 0        # Same: nothing staked when supply is 0
+        self.liquidity.total = shares    # 1 share = 1 crypto at first deposit
 
     assert shares >= min_shares, "Slippage"
 
