@@ -464,6 +464,29 @@ def _mint(_to: address, _value: uint256):
 def _transfer(_from: address, _to: address, _value: uint256):
     assert _to not in [self, empty(address)]
 
+    staker: address = self.staker
+    if staker in [_from, _to]:
+        liquidity: LiquidityValuesOut = self._calculate_values()
+        self.liquidity.admin = liquidity.admin
+        self.liquidity.total = liquidity.total
+        self.totalSupply = liquidity.supply_tokens
+        self.balanceOf[staker] = liquidity.staked_tokens
+        if _from == staker:
+            # Reduce the staked part
+            liquidity.staked -= liquidity.total * _value // liquidity.supply_tokens
+            liquidity.ideal_staked = liquidity.ideal_staked * (liquidity.staked_tokens - _value) // liquidity.staked_tokens
+        elif _to == staker:
+            # Increase the staked part
+            d_staked_value: uint256 = liquidity.total * _value // liquidity.supply_tokens
+            liquidity.staked += d_staked_value
+            if liquidity.staked_tokens > 10**10:
+                liquidity.ideal_staked = liquidity.ideal_staked * (liquidity.staked_tokens + _value) // liquidity.staked_tokens
+            else:
+                # To exclude division by zero and numerical noise errors
+                liquidity.ideal_staked += d_staked_value
+        self.liquidity.staked = liquidity.staked
+        self.liquidity.ideal_staked = liquidity.ideal_staked
+
     self.balanceOf[_from] -= _value
     self.balanceOf[_to] += _value
 
