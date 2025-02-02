@@ -186,7 +186,7 @@ def _calculate_values() -> LiquidityValuesOut:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
     new_total_value: int256 = prev_value + dv_use
-    new_staked_value: int256 = staked + dv_s
+    new_staked_value: int256 = v_st + dv_s
 
     # Solution of:
     # staked - token_reduction       new_staked_value
