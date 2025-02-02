@@ -386,8 +386,8 @@ def pricePerShare() -> uint256:
     """
     Non-manipulatable "fair price per share" oracle
     """
-    v: OraclizedValue = staticcall self.amm.value_oracle()
-    return v.value * 10**18 // v.p_o * 10**18 // self.totalSupply
+    v: LiquidityValuesOut = self._calculate_values()
+    return v.total * 10**18 // v.supply_tokens
 
 
 @external
