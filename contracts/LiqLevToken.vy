@@ -299,9 +299,11 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     if supply > 0:
         liquidity_values: LiquidityValuesOut = self._calculate_values()
         supply = liquidity_values.supply_tokens
-        self.liquidity.admin=liquidity_values.admin
-        self.liquidity.total=liquidity_values.total
-        self.liquidity.staked=liquidity_values.staked
+        self.liquidity.admin = liquidity_values.admin
+        self.liquidity.total = liquidity_values.total
+        self.liquidity.staked = liquidity_values.staked
+        self.totalSupply = liquidity_values.supply_tokens
+        self.balanceOf[self.staker] = liquidity_values.staked_tokens
         # ideal_staked is only changed when we transfer coins to staker
         shares = supply * v.value_after // v.value_before - supply
 
@@ -331,7 +333,13 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
     """
     amm: LevAMM = self.amm
-    supply: uint256 = self.totalSupply
+    liquidity_values: LiquidityValuesOut = self._calculate_values()
+    supply: uint256 = liquidity_values.supply_tokens
+    self.liquidity.admin = liquidity_values.admin
+    self.liquidity.total = liquidity_values.total
+    self.liquidity.staked = liquidity_values.staked
+    self.totalSupply = supply
+    self.balanceOf[self.staker] = liquidity_values.staked_tokens
     state: AMMState = staticcall amm.get_state()
 
     # These values ARE affected by sandwiches, however they give us REAL amounts.
