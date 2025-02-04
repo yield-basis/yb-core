@@ -100,7 +100,7 @@ def __init__(depositor: address,
     assert staticcall STABLECOIN.decimals() == 18
     assert leverage > 10**18
 
-    denominator: uint256 = 2 * leverage - 1
+    denominator: uint256 = 2 * leverage - 10**18
     LEV_RATIO = leverage**2 // denominator * 10**18 // denominator
 
     self.rate_mul = 10**18
