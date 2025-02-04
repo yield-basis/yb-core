@@ -222,7 +222,7 @@ def get_p() -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount
     debt: uint256 = self._debt()
-    return (self.get_x0(p_o, collateral, debt) - self.debt) * (10**18 // COLLATERAL_PRECISION) // self.collateral_amount
+    return (self.get_x0(p_o, collateral, debt) - debt) * (10**18 // COLLATERAL_PRECISION) // collateral
 
 
 @external
