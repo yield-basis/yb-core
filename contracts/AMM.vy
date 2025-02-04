@@ -230,7 +230,7 @@ def get_p() -> uint256:
 def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
 
-    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
     x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
