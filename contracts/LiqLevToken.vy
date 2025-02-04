@@ -127,6 +127,9 @@ allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
 
+stablecoin_allocations: public(HashMap[address, uint256])
+stablecoin_allocated: public(HashMap[address, uint256])
+
 
 @deploy
 def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
@@ -415,9 +418,32 @@ def set_rate(rate: uint256):
 
 @external
 @nonreentrant
-def allocate_stablecoins():
+def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)):
+    """
+    @notice This method has to be used once this contract has received allocation of stablecoins
+    @param allocator Address of the allocator to provide stables for us
+    @param limit Limit to allocate for this pool from this allocator. Max uint256 = do not change
+    """
     assert msg.sender == self.admin, "Access"
-    extcall STABLECOIN.transfer(self.amm.address, staticcall STABLECOIN.balanceOf(self))
+
+    # if limit < max_value(uint256):
+    allocation: uint256 = limit
+    allocated: uint256 = self.stablecoin_allocated[allocator]
+    if limit == max_value(uint256):
+        allocation = self.stablecoin_allocations[allocator]
+    else:
+        self.stablecoin_allocations[allocator] = limit
+
+    if allocation > allocated:
+        # Assume that allocator has everything
+        extcall STABLECOIN.transferFrom(allocator, self.amm.address, allocation - allocated)
+        self.stablecoin_allocated[allocator] = allocation
+
+    elif allocation < allocated:
+        to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
+        allocated -= to_transfer
+        extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer)
+        self.stablecoin_allocated[allocator] = allocated
 
 
 @external
@@ -425,6 +451,7 @@ def allocate_stablecoins():
 def distrubute_borrower_fees():  # This will JUST donate to the crypto pool
     assert msg.sender == self.admin, "Access"
     extcall self.amm.collect_fees()
+    # XXX here we need to also donate them for the cryptoswap AMM
 
 
 @external
@@ -433,6 +460,9 @@ def set_staker(staker: address):
     assert msg.sender == self.admin, "Access"
     self.staker = staker
     log SetStaker(staker)
+
+
+# XXX add distribution of admin fees wherever the admin tells
 
 
 # ERC20 methods
