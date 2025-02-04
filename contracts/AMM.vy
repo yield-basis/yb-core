@@ -348,8 +348,8 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
 
     return ValueChange(
         p_o = p_o,
-        value_before = x0_before // (2 * LEVERAGE - 1),
-        value_after = x0_after // (2 * LEVERAGE - 1))
+        value_before = x0_before // (2 * LEVERAGE - 10**18),
+        value_after = x0_after // (2 * LEVERAGE - 10**18))
 
 
 @external
