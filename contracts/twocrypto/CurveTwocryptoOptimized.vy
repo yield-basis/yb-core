@@ -2031,3 +2031,9 @@ def apply_new_parameters(
         new_ma_time,
         _new_xcp_ma_time,
     )
+
+
+@external
+def donate(token: address, amount: uint256):
+    # XXX this is JUST a stub!!
+    extcall ERC20(token).transferFrom(msg.sender, self, amount)

@@ -39,6 +39,7 @@ interface CurveCryptoPool:
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
+    def donate(token: address, amount: uint256): nonpayable
 
 
 struct AMMState:
@@ -450,8 +451,9 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
 @nonreentrant
 def distrubute_borrower_fees():  # This will JUST donate to the crypto pool
     assert msg.sender == self.admin, "Access"
-    extcall self.amm.collect_fees()
-    # XXX here we need to also donate them for the cryptoswap AMM
+    amount: uint256 = extcall self.amm.collect_fees()
+    # XXX just a stub for now!
+    extcall COLLATERAL.donate(STABLECOIN.address, amount)
 
 
 @external
