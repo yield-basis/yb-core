@@ -464,9 +464,6 @@ def set_staker(staker: address):
     log SetStaker(staker)
 
 
-# XXX add distribution of admin fees wherever the admin tells
-
-
 # ERC20 methods
 
 @internal
