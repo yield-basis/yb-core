@@ -267,11 +267,11 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
 def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     assert msg.sender == DEPOSITOR, "Access violation"
 
-    p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
+    p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
 
-    value_before: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1)  # Value in fiat
+    value_before: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     debt += d_debt
     collateral += d_collateral
@@ -281,7 +281,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     self.collateral_amount = collateral
     # Assume that transfer of collateral happened already (as a result of exchange)
 
-    value_after: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 1)  # Value in fiat
+    value_after: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     log AddLiquidityRaw([d_collateral, d_debt], value_after, p_o)
     return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
