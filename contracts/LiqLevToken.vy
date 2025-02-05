@@ -20,7 +20,7 @@ interface LevAMM:
     def fee() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
-    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view  # XXX not needed?
+    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
 
@@ -427,7 +427,6 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
     """
     assert msg.sender == self.admin, "Access"
 
-    # if limit < max_value(uint256):
     allocation: uint256 = limit
     allocated: uint256 = self.stablecoin_allocated[allocator]
     if limit == max_value(uint256):
