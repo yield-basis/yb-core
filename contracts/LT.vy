@@ -1,6 +1,6 @@
 # @version 0.4.0
 """
-@title LiqLevToken
+@title LT
 @notice AMM for leveraging 2-token liquidity
 @author Michael Egorov
 @license Copyright (c) 2024
