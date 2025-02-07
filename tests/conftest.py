@@ -1,0 +1,49 @@
+
+import os
+from datetime import timedelta
+
+import boa
+import pytest
+from hypothesis import settings
+
+
+boa.env.enable_fast_mode()
+
+
+PRICE = 100_000
+
+
+settings.register_profile("default", deadline=timedelta(seconds=1000))
+settings.load_profile(os.getenv(u"HYPOTHESIS_PROFILE", "default"))
+
+
+@pytest.fixture(scope="session")
+def accounts():
+    return [boa.env.generate_address() for _ in range(10)]
+
+
+@pytest.fixture(scope="session")
+def admin():
+    return boa.env.generate_address()
+
+
+@pytest.fixture(scope="session")
+def token_mock():
+    return boa.load_partial('contracts/testing/ERC20Mock.vy')
+
+
+@pytest.fixture(scope="session")
+def collateral_token(token_mock):
+    return token_mock.deploy('Collateral', 'xxxBTC', 18)
+
+
+@pytest.fixture(scope="session")
+def stablecoin(token_mock):
+    return token_mock.deploy('Stablecoin', 'xxxUSD', 18)
+
+
+@pytest.fixture(scope="session")
+def price_oracle(admin):
+    with boa.env.prank(admin):
+        oracle = boa.load('contracts/testing/DummyPriceOracle.vy', admin, PRICE * 10**18)
+        return oracle
