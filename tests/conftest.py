@@ -47,3 +47,18 @@ def price_oracle(admin):
     with boa.env.prank(admin):
         oracle = boa.load('contracts/testing/DummyPriceOracle.vy', admin, PRICE * 10**18)
         return oracle
+
+
+@pytest.fixture(scope="session")
+def amm(admin, stablecoin, collateral_token, price_oracle):
+    with boa.env.prank(admin):
+        oracle = boa.load(
+                'contracts/AMM.vy',
+                admin,  # Depositor
+                stablecoin.address,
+                collateral_token.address,
+                2 * 10**18,
+                int(0.007e18),
+                price_oracle.address
+        )
+        return oracle
