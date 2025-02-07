@@ -49,6 +49,12 @@ def test_deposit_withdraw(stablecoin, collateral_token, amm, price_oracle,
         with boa.reverts('Access violation'):
             amm._withdraw(10**18)
 
+    assert amm.get_debt() == debt
+
+    state = amm.get_state()
+    assert state[0] == collateral_amount
+    assert state[1] == debt
+
     if collateral_amount > 0:
         with boa.env.prank(admin):
             frac = int(withdraw_fraction * 1e18)
