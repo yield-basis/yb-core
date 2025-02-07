@@ -50,9 +50,9 @@ def price_oracle(admin):
 
 
 @pytest.fixture(scope="session")
-def amm(admin, stablecoin, collateral_token, price_oracle):
+def amm(admin, stablecoin, collateral_token, price_oracle, accounts):
     with boa.env.prank(admin):
-        oracle = boa.load(
+        amm = boa.load(
                 'contracts/AMM.vy',
                 admin,  # Depositor
                 stablecoin.address,
@@ -61,4 +61,8 @@ def amm(admin, stablecoin, collateral_token, price_oracle):
                 int(0.007e18),
                 price_oracle.address
         )
-        return oracle
+        for a in accounts + [admin]:
+            with boa.env.prank(a):
+                stablecoin.approve(amm.address, 2**256-1)
+                collateral_token.approve(amm.address, 2**256-1)
+        return amm
