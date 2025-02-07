@@ -22,14 +22,13 @@ def test_set_rate(amm, rate, dt, admin, accounts):
 
 @given(
     collateral_amount=st.integers(min_value=0, max_value=10**25),
-    debt_multiplier=st.floats(min_value=0.9, max_value=1.1)
+    debt_multiplier=st.floats(min_value=0.9, max_value=1.1),
+    withdraw_fraction=st.floats(min_value=0, max_value=1.1)
 )
 @settings(max_examples=1000)
 def test_deposit_withdraw(stablecoin, collateral_token, amm, price_oracle,
                           admin, accounts,
-                          collateral_amount, debt_multiplier):
-    collateral_token._mint_for_testing(admin, collateral_amount)
-    collateral_token._mint_for_testing(accounts[0], collateral_amount)
+                          collateral_amount, debt_multiplier, withdraw_fraction):
     p_o = price_oracle.price()
     debt = int(debt_multiplier * (p_o * collateral_amount // 10**18) / 2)
 
@@ -45,3 +44,16 @@ def test_deposit_withdraw(stablecoin, collateral_token, amm, price_oracle,
             assert value_after > 0
         else:
             assert value_after == 0
+
+    with boa.env.prank(accounts[0]):
+        with boa.reverts('Access violation'):
+            amm._withdraw(10**18)
+
+    if collateral_amount > 0:
+        with boa.env.prank(admin):
+            frac = int(withdraw_fraction * 1e18)
+            if frac <= 10**18:
+                amm._withdraw(frac)
+            else:
+                with boa.reverts():
+                    amm._withdraw(frac)
