@@ -42,13 +42,23 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
     assert stablecoin.address == amm.coins(0)
     assert collateral_token.address == amm.coins(1)
 
-    _p_o, _value = amm.value_oracle()
+    _p_o, pool_value = amm.value_oracle()
     assert _p_o == p_o
-    assert abs(_value - debt) / debt < 1e-7
+    assert abs(pool_value - debt) / debt < 1e-7
 
     _p_o, _value = amm.value_oracle_for(collateral_amount * 2, debt * 2)
     assert _p_o == p_o
     assert abs(_value - 2 * debt) / (2 * debt) < 1e-7
+
+    _p_o, _v_before, _v_after = amm.value_change(collateral_amount, debt, True)
+    assert _p_o == p_o
+    assert pool_value == _v_before
+    assert abs(_v_after - 2 * _v_before) // _v_after < 1e-7
+
+    _p_o, _v_before, _v_after = amm.value_change(collateral_amount // 2, debt // 2, False)
+    assert _p_o == p_o
+    assert pool_value == _v_before
+    assert abs(_v_after - _v_before // 2) // _v_after < 1e-7
 
 
 @given(
