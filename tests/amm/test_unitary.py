@@ -20,14 +20,44 @@ def test_set_rate(amm, rate, dt, admin, accounts):
     assert rate_mul_1 == rate_mul_0 * (10**18 + dt * rate) // 10**18
 
 
+def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, accounts):
+    collateral_amount = 1000 * 10**18
+    p_o = price_oracle.price()
+    debt = (p_o * collateral_amount // 10**18) // 2
+    fee = amm.fee() / 1e18
+
+    with boa.env.prank(admin):
+        amm._deposit(collateral_amount, debt)
+
+    assert amm.get_debt() == debt
+    assert amm.get_state()[:2] == (collateral_amount, debt)
+
+    p_amm = amm.get_p()
+    assert abs(p_amm - p_o) / p_o < 1e-7
+    p_buy = 10**10 / amm.get_dy(0, 1, 10**10)
+    p_sell = amm.get_dy(1, 0, 10**10) / 10**10
+    assert abs(p_buy - p_o / (1 - fee) / 1e18) / p_o < 1e-7
+    assert abs(p_sell - p_o * (1 - fee) / 1e18) / p_o < 1e-7
+
+    assert stablecoin.address == amm.coins(0)
+    assert collateral_token.address == amm.coins(1)
+
+    _p_o, _value = amm.value_oracle()
+    assert _p_o == p_o
+    assert abs(_value - debt) / debt < 1e-7
+
+    _p_o, _value = amm.value_oracle_for(collateral_amount * 2, debt * 2)
+    assert _p_o == p_o
+    assert abs(_value - 2 * debt) / (2 * debt) < 1e-7
+
+
 @given(
     collateral_amount=st.integers(min_value=0, max_value=10**25),
     debt_multiplier=st.floats(min_value=0.9, max_value=1.1),
     withdraw_fraction=st.floats(min_value=0, max_value=1.1)
 )
 @settings(max_examples=1000)
-def test_deposit_withdraw(stablecoin, collateral_token, amm, price_oracle,
-                          admin, accounts,
+def test_deposit_withdraw(amm, price_oracle, admin, accounts,
                           collateral_amount, debt_multiplier, withdraw_fraction):
     p_o = price_oracle.price()
     debt = int(debt_multiplier * (p_o * collateral_amount // 10**18) / 2)

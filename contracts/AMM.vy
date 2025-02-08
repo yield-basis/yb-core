@@ -318,14 +318,14 @@ def value_oracle() -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
-    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 10**18))
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
 @view
 def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
-    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 10**18))
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
@@ -348,8 +348,8 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
 
     return ValueChange(
         p_o = p_o,
-        value_before = x0_before // (2 * LEVERAGE - 10**18),
-        value_after = x0_after // (2 * LEVERAGE - 10**18))
+        value_before = x0_before * 10**18 // (2 * LEVERAGE - 10**18),
+        value_after = x0_after * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
