@@ -60,6 +60,8 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
     assert pool_value == _v_before
     assert abs(_v_after - _v_before // 2) // _v_after < 1e-7
 
+    assert amm.admin_fees() == 0
+
 
 @given(
     collateral_amount=st.integers(min_value=0, max_value=10**25),
