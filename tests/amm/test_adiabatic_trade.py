@@ -28,7 +28,7 @@ def test_adiabatic(collateral_token, stablecoin, amm, admin, price_oracle, p_ini
     collateral_token._mint_for_testing(admin, 10**30)
     stablecoin._mint_for_testing(admin, 10**30)
 
-    for i in range(N_STEPS):
+    for step in range(N_STEPS):
         p *= step_mul
         with boa.env.prank(admin):
             price_oracle.set_price(int(p * 1e18))
@@ -61,4 +61,8 @@ def test_adiabatic(collateral_token, stablecoin, amm, admin, price_oracle, p_ini
             if d_amount > 0:
                 amm.exchange(i, j, d_amount, 0)
 
-            # XXX check price and quantity
+            assert abs(amm.get_p() / 1e18 - p) / p < 0.005
+
+            growth = (amm.value_oracle()[1] / p) / (collateral_amount / 2)
+            assert growth >= p / p_initial
+            assert abs(growth - p / p_initial) / growth < 0.1 / N_STEPS * (step + 1)
