@@ -36,8 +36,8 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
     assert abs(p_amm - p_o) / p_o < 1e-7
     p_buy = 10**10 / amm.get_dy(0, 1, 10**10)
     p_sell = amm.get_dy(1, 0, 10**10) / 10**10
-    assert abs(p_buy - p_o / (1 - fee) / 1e18) / p_o < 1e-7
-    assert abs(p_sell - p_o * (1 - fee) / 1e18) / p_o < 1e-7
+    assert abs(p_buy - p_o / (1 - fee) / 1e18) / p_buy < 1e-7
+    assert abs(p_sell - p_o * (1 - fee) / 1e18) / p_sell < 1e-7
 
     assert stablecoin.address == amm.coins(0)
     assert collateral_token.address == amm.coins(1)
@@ -105,3 +105,41 @@ def test_deposit_withdraw(amm, price_oracle, admin, accounts,
             else:
                 with boa.reverts():
                     amm._withdraw(frac)
+
+
+def test_exchange(collateral_token, stablecoin, amm, admin, price_oracle):
+    collateral_amount = 100 * 10**18
+    collateral_token._mint_for_testing(admin, collateral_amount)
+    stablecoin._mint_for_testing(amm.address, 10**60)  # Really HUGE allocation
+    p_o = price_oracle.price()
+    debt = p_o * collateral_amount // (2 * 10**18)
+    fee = amm.fee() / 1e18
+
+    with boa.env.prank(admin):
+        amm._deposit(collateral_amount, debt)
+        collateral_token.transfer(amm.address, collateral_amount)
+        stablecoin.transferFrom(amm.address, admin, debt)
+
+        c0 = collateral_token.balanceOf(admin)
+        s0 = stablecoin.balanceOf(admin)
+
+        out0 = amm.exchange(0, 1, 10**18)
+
+        c1 = collateral_token.balanceOf(admin)
+        s1 = stablecoin.balanceOf(admin)
+
+        assert s0 - s1 == 10**18
+        assert c1 - c0 == out0
+        assert abs(10**18 * (1 - fee) / out0 - p_o / 1e18) / (p_o / 1e18) < 1e-6
+
+        collateral_token._mint_for_testing(admin, 10**13)
+        c1 += 10**13
+
+        out1 = amm.exchange(1, 0, 10**13)
+
+        c2 = collateral_token.balanceOf(admin)
+        s2 = stablecoin.balanceOf(admin)
+
+        assert s2 - s1 == out1
+        assert c1 - c2 == 10**13
+        assert abs(out1 / (1 - fee) / 10**13 - p_o / 1e18) / (p_o / 1e18) < 1e-6
