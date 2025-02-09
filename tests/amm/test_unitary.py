@@ -123,7 +123,11 @@ def test_exchange(collateral_token, stablecoin, amm, admin, price_oracle):
         c0 = collateral_token.balanceOf(admin)
         s0 = stablecoin.balanceOf(admin)
 
-        out0 = amm.exchange(0, 1, 10**18)
+        expected_out = amm.get_dy(0, 1, 10**18)
+        with boa.reverts():
+            amm.exchange(0, 1, 10**18, int(1.0001 * expected_out))
+
+        out0 = amm.exchange(0, 1, 10**18, expected_out)
 
         c1 = collateral_token.balanceOf(admin)
         s1 = stablecoin.balanceOf(admin)
@@ -135,7 +139,11 @@ def test_exchange(collateral_token, stablecoin, amm, admin, price_oracle):
         collateral_token._mint_for_testing(admin, 10**13)
         c1 += 10**13
 
-        out1 = amm.exchange(1, 0, 10**13)
+        expected_out = amm.get_dy(1, 0, 10**13)
+        with boa.reverts():
+            amm.exchange(1, 0, 10**13, int(1.0001 * expected_out))
+
+        out1 = amm.exchange(1, 0, 10**13, expected_out)
 
         c2 = collateral_token.balanceOf(admin)
         s2 = stablecoin.balanceOf(admin)

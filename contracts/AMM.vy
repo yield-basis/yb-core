@@ -227,7 +227,16 @@ def get_p() -> uint256:
 
 @external
 @nonreentrant
-def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sender) -> uint256:
+def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
+    """
+    @notice Exchanges two coins, callable by anyone
+    @param i Input coin index
+    @param j Output coin index
+    @param in_amount Amount of input coin to swap
+    @param min_out Minimal amount to get as output
+    @param _for Address to send coins to
+    @return Amount of coins given in/out
+    """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
 
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
@@ -242,6 +251,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
         x: uint256 = x_initial + in_amount
         y: uint256 = x_initial * collateral // x
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
+        assert out_amount >= min_out, "Slippage"
         self.debt -= in_amount
         self.collateral_amount -= out_amount
         self.redeemed += in_amount
@@ -252,6 +262,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, _for: address = msg.sen
         y: uint256 = collateral + in_amount
         x: uint256 = x_initial * collateral // y
         out_amount = (x_initial - x) * (10**18 - fee) // 10**18
+        assert out_amount >= min_out, "Slippage"
         self.debt += out_amount
         self.minted += out_amount
         self.collateral_amount += in_amount
