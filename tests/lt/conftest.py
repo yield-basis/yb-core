@@ -19,26 +19,27 @@ def cryptopool(stablecoin, collateral_token, admin):
         factory.set_math_implementation(math_impl)
 
         # Params have nothing to do with reality!
-        return factory.deploy_pool(
-            "Test pool",  # _name: String[64]
-            "TST",  # _symbol: String[32]
-            [stablecoin.address, collateral_token.address],
-            0,  # implementation_id: uint256
-            5 * 10000 * 2**2,  # A: uint256
-            int(1e-5 * 1e18),  # gamma: uint256
-            int(0.0025 * 1e10),  # mid_fee: uint256
-            int(0.0045 * 1e10),  # out_fee: uint256
-            int(0.01 * 1e18),  # fee_gamma: uint256
-            int(1e-10 * 1e18),  # allowed_extra_profit: uint256
-            int(1e-6 * 1e18),  # adjustment_step: uint256
-            600,  # ma_exp_time: uint256
-            100_000 * 10**18  # initial_price: uint256
-        )
+        return amm_interface.at(
+                factory.deploy_pool(
+                    "Test pool",  # _name: String[64]
+                    "TST",  # _symbol: String[32]
+                    [stablecoin.address, collateral_token.address],
+                    0,  # implementation_id: uint256
+                    5 * 10000 * 2**2,  # A: uint256
+                    int(1e-5 * 1e18),  # gamma: uint256
+                    int(0.0025 * 1e10),  # mid_fee: uint256
+                    int(0.0045 * 1e10),  # out_fee: uint256
+                    int(0.01 * 1e18),  # fee_gamma: uint256
+                    int(1e-10 * 1e18),  # allowed_extra_profit: uint256
+                    int(1e-6 * 1e18),  # adjustment_step: uint256
+                    600,  # ma_exp_time: uint256
+                    100_000 * 10**18  # initial_price: uint256
+                ))
 
 
-@pytest.fixutre(scope="session")
-def cryptopool_oracle():
-    pass
+@pytest.fixture(scope="session")
+def cryptopool_oracle(cryptopool):
+    return boa.load('contracts/CryptopoolLPOracle.vy', cryptopool.address)
 
 
 @pytest.fixture(scope="session")
