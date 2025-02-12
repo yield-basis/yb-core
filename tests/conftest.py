@@ -49,10 +49,14 @@ def price_oracle(admin):
 
 
 @pytest.fixture(scope="session")
-def amm(admin, stablecoin, collateral_token, price_oracle, accounts):
+def amm_deployer():
+    return boa.load_partial('contracts/AMM.vy')
+
+
+@pytest.fixture(scope="session")
+def amm(amm_deployer, admin, stablecoin, collateral_token, price_oracle, accounts):
     with boa.env.prank(admin):
-        amm = boa.load(
-                'contracts/AMM.vy',
+        amm = amm_deployer.deploy(
                 stablecoin.address,
                 collateral_token.address,
                 2 * 10**18,
