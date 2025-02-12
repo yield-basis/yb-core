@@ -43,5 +43,10 @@ def cryptopool_oracle(cryptopool):
 
 
 @pytest.fixture(scope="session")
+def leverage_mm(cryptopool_oracle, cryptopool):
+    pass
+
+
+@pytest.fixture(scope="session")
 def yb_liquidity():
     pass

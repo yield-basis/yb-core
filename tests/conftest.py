@@ -53,13 +53,13 @@ def amm(admin, stablecoin, collateral_token, price_oracle, accounts):
     with boa.env.prank(admin):
         amm = boa.load(
                 'contracts/AMM.vy',
-                admin,  # Depositor
                 stablecoin.address,
                 collateral_token.address,
                 2 * 10**18,
                 int(0.007e18),
                 price_oracle.address
         )
+        amm.set_depositor(admin)
         for a in accounts + [admin]:
             with boa.env.prank(a):
                 stablecoin.approve(amm.address, 2**256-1)
