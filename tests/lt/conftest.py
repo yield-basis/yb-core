@@ -43,10 +43,36 @@ def cryptopool_oracle(cryptopool):
 
 
 @pytest.fixture(scope="session")
-def leverage_mm(cryptopool_oracle, cryptopool):
-    pass
+def leverage_mm(cryptopool, cryptopool_oracle, amm_deployer,
+                stablecoin, collateral_token, admin):
+    with boa.env.prank(admin):
+        return amm_deployer.deploy(
+            stablecoin.address,
+            collateral_token.address,
+            2 * 10**18,  # leverage = 2.0
+            int(0.007e18),  # fee
+            cryptopool_oracle.address
+        )
 
 
 @pytest.fixture(scope="session")
-def yb_liquidity():
-    pass
+def yb_lt(leverage_mm, amm_deployer, cryptopool, collateral_token, stablecoin, admin):
+    with boa.env.prank(admin):
+        lt = boa.load(
+            'contracts/LT.vy',
+            collateral_token.address,
+            stablecoin.address,
+            cryptopool.address,
+            admin)
+
+        amm = amm_deployer.deploy(
+            lt.address,
+            stablecoin.address,
+            collateral_token.address,
+            2 * 10**18,  # leverage = 2.0
+            int(0.007e18),  # fee
+            cryptopool_oracle.address
+        )
+        lt.set_amm(amm.address)
+
+        return lt
