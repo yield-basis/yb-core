@@ -1,2 +1,2 @@
-def test_something(cryptopool, cryptopool_oracle):
+def test_something(cryptopool, cryptopool_oracle, yb_lt):
     pass
