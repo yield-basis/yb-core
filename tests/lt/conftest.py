@@ -7,8 +7,8 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
     with boa.env.prank(admin):
         amm_interface = boa.load_partial('contracts/twocrypto/CurveTwocryptoOptimized.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
-        math_impl = boa.load_partial('contracts/twocrypto/CurveCryptoMathOptimized2.vy').deploy_as_blueprint()
-        views_impl = boa.load_partial('contracts/twocrypto/CurveCryptoViews2Optimized.vy').deploy_as_blueprint()
+        math_impl = boa.load('contracts/twocrypto/CurveCryptoMathOptimized2.vy')
+        views_impl = boa.load('contracts/twocrypto/CurveCryptoViews2Optimized.vy')
         gauge_impl = "0x0000000000000000000000000000000000000000"
 
         factory = boa.load('contracts/twocrypto/CurveTwocryptoFactory.vy')
@@ -42,6 +42,14 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
                 collateral_token.approve(pool.address, 2**256-1)
 
         return pool
+
+
+@pytest.fixture(scope="function")
+def seed_cryptopool(stablecoin, collateral_token, cryptopool, admin):
+    stablecoin._mint_for_testing(admin, 100_000 * 10**18)
+    collateral_token._mint_for_testing(admin, 10**18)
+    with boa.env.prank(admin):
+        cryptopool.add_liquidity([100_000 * 10**18, 10**18], 0)
 
 
 @pytest.fixture(scope="session")
