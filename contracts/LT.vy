@@ -313,8 +313,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
 
     else:
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
-        # Value is measured in USD, and p_o is also provided
-        shares = v.value_after * 10**18 // v.p_o
+        # Value is measured in USD
+        shares = v.value_after * 10**18 // staticcall COLLATERAL.price_oracle()
         # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
         self.liquidity.ideal_staked = 0  # Likely already 0 since supply was 0
         self.liquidity.staked = 0        # Same: nothing staked when supply is 0

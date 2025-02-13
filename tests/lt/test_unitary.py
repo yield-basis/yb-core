@@ -23,4 +23,6 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
     collateral_token._mint_for_testing(user, amount)
 
     with boa.env.prank(user):
-        yb_lt.deposit(amount, p * amount, 0)
+        shares = yb_lt.deposit(amount, p * amount, 0)
+        assert shares == yb_lt.balanceOf(user)
+        assert abs(shares - amount) / amount < 1e-4
