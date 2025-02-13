@@ -77,3 +77,15 @@ def yb_lt(amm_deployer, cryptopool, cryptopool_oracle, collateral_token, stablec
                 stablecoin.approve(amm.address, 2**256-1)
 
         return lt
+
+
+@pytest.fixture(scope="session")
+def yb_amm(yb_lt, amm_deployer):
+    return amm_deployer.at(yb_lt.amm())
+
+
+@pytest.fixture(scope="function")
+def yb_allocated(yb_lt, stablecoin, admin):
+    stablecoin._mint_for_testing(admin, 10**30)
+    with boa.env.prank(admin):
+        yb_lt.allocate_stablecoins(admin, 10**30)
