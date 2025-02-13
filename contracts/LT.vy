@@ -268,7 +268,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
     crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
 
-    r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
+    r: uint256 = supply_of_cswap * 10**18 // stables_in_cswap
     # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
     reps_factor: uint256 = (2 * supply * tokens - tokens**2) // supply * r // supply
 
@@ -276,6 +276,9 @@ def preview_withdraw(tokens: uint256) -> uint256:
     b = max(b, state.collateral) - min(b, state.collateral)  # = abs(r(x0 - d1) - c1)
     D: uint256 = b**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
     to_return: uint256 = (self.sqrt(D) - b) * 10**18 // (2 * r)
+
+    if True:
+        raise "Debug"
 
     return crypto_in_cswap * min(to_return, stables_in_cswap) // stables_in_cswap
 
