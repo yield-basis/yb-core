@@ -23,14 +23,18 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
     collateral_token._mint_for_testing(user, amount)
 
     with boa.env.prank(user):
+        preview_shares = yb_lt.preview_deposit(amount, p * amount)
         shares = yb_lt.deposit(amount, p * amount, int(amount * 0.9999))
         assert shares == yb_lt.balanceOf(user)
+        assert (shares - preview_shares) / shares < 1e-4  # Not exact equality because calc_token_amount is not exact
         assert abs(shares - amount) / amount < 1e-4
 
         new_amount = amount // 2
         collateral_token._mint_for_testing(user, new_amount)
         with boa.reverts():
             yb_lt.deposit(new_amount, p * new_amount, int(new_amount * 1.0001))
+        preview_shares = yb_lt.preview_deposit(new_amount, p * new_amount)
         new_shares = yb_lt.deposit(new_amount, p * new_amount, int(new_amount * 0.9999))
         assert new_shares + shares == yb_lt.balanceOf(user)
+        assert (new_shares - preview_shares) / new_shares < 1e-4  # Not exact equality because calc_token_amount is not exact
         assert abs(new_shares - new_amount) / new_amount < 1e-4

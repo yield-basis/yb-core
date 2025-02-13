@@ -225,7 +225,7 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     @param assets Amount of crypto to deposit
     @param debt Amount of stables to borrow for MMing (approx same value as crypto) or best guess if max_value
     """
-    lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([assets, debt], True)
+    lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values()
@@ -234,7 +234,7 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
             return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
-    return v.value * 10**18 // v.p_o
+    return v.value * 10**18 // staticcall COLLATERAL.price_oracle()
 
 
 @external
