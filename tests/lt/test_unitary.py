@@ -29,6 +29,8 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
 
         new_amount = amount // 2
         collateral_token._mint_for_testing(user, new_amount)
+        with boa.reverts():
+            yb_lt.deposit(new_amount, p * new_amount, int(new_amount * 1.0001))
         new_shares = yb_lt.deposit(new_amount, p * new_amount, int(new_amount * 0.9999))
         assert new_shares + shares == yb_lt.balanceOf(user)
         assert abs(new_shares - new_amount) / new_amount < 1e-4
