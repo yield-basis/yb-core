@@ -282,7 +282,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
 
-    value_before: uint256 = self.get_x0(p_o, collateral, debt) // (2 * LEVERAGE - 10**18)  # Value in fiat
+    value_before: uint256 = self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     debt += d_debt
     collateral += d_collateral
