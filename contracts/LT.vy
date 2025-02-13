@@ -293,12 +293,12 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
     assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
-    lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([assets, debt], 0, amm.address)
+    lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
 
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
-    v: ValueChange = extcall amm._deposit(assets, debt)
+    v: ValueChange = extcall amm._deposit(lp_tokens, debt)
 
     if supply > 0:
         liquidity_values: LiquidityValuesOut = self._calculate_values()
