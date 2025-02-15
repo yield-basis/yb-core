@@ -352,12 +352,6 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     self.liquidity.staked = liquidity_values.staked
     self.totalSupply = supply
     self.balanceOf[self.staker] = liquidity_values.staked_tokens
-    state: AMMState = staticcall amm.get_state()
-
-    # These values ARE affected by sandwiches, however they give us REAL amounts.
-    # Sandwiches are prevented by looking at min_assets
-    supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
 
     # In the sequence if actions, we withdraw crypto+stable from cryptoswap at
     # the current split, and use the stables to repay the debt, returning however
@@ -367,10 +361,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     # Nevertheless, we still have the min_assets to receive for safety, as typically
     # done in AMMs.
 
-    to_return: uint256 = self._withdrawable_debt(shares, supply, state, stables_in_cswap)
-
     # We pass the fraction to withdraw as an argument, limited by 1.0
-    withdrawn: Pair = extcall amm._withdraw(min(10**18 * to_return // state.debt, 10**18))
+    withdrawn: Pair = extcall amm._withdraw(min(10**18 * shares // supply, 10**18))
 
     self._burn(msg.sender, shares)
     assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
