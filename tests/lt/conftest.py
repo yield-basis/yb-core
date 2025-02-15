@@ -70,7 +70,7 @@ def yb_lt(amm_deployer, cryptopool, cryptopool_oracle, collateral_token, stablec
         amm = amm_deployer.deploy(
             lt.address,
             stablecoin.address,
-            collateral_token.address,
+            cryptopool.address,
             2 * 10**18,  # leverage = 2.0
             int(0.007e18),  # fee
             cryptopool_oracle.address

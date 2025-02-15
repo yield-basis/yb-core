@@ -42,11 +42,17 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         assert abs(new_shares - new_amount) / new_amount < 1e-4
 
         # Test withdrawal of the amount equal to assets deposited for this amount of shares
-        preview_assets = yb_lt.preview_withdraw(shares)
-        assert abs(preview_assets - 10**18) / 10**18 < 1e-5
-
         preview_assets = yb_lt.preview_withdraw(shares // 100)
         assert abs(preview_assets - 10**16) / 10**16 < 1e-5
 
         preview_assets = yb_lt.preview_withdraw(shares // 10**8)
         assert abs(preview_assets - 10**10) / 10**10 < 1e-5
+
+        preview_assets = yb_lt.preview_withdraw(shares)
+        assert abs(preview_assets - 10**18) / 10**18 < 1e-5
+
+        # Actually withdraw
+        with boa.reverts():
+            yb_lt.withdraw(shares, int(1.001e18))
+        yb_lt.withdraw(shares, int(0.9999e18))
+        assert collateral_token.balanceOf(user) == preview_assets
