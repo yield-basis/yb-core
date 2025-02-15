@@ -367,16 +367,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     # Nevertheless, we still have the min_assets to receive for safety, as typically
     # done in AMMs.
 
-    r: uint256 = staticcall COLLATERAL.totalSupply() * 10**18 // stables_in_cswap
-    # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
-    reps_factor: uint256 = (2 * supply * shares - shares**2) // supply * r // supply
-
-    # Solving quadratic equation to find the amount of debt to_return we can return
-    # See the description in preview_withdraw()
-    b: uint256 = r * (state.x0 - state.debt) // 10**18
-    b = max(b, state.collateral) - min(b, state.collateral)  # = abs(r(x0 - d1) - c1)
-    D: uint256 = b**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
-    to_return: uint256 = (self.sqrt(D) - b) * 10**18 // (2 * r)
+    to_return: uint256 = self._withdrawable_debt(shares, supply, state, stables_in_cswap)
 
     # We pass the fraction to withdraw as an argument, limited by 1.0
     withdrawn: Pair = extcall amm._withdraw(min(10**18 * to_return // state.debt, 10**18))
