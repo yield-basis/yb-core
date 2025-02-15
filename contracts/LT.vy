@@ -237,17 +237,9 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     return v.value * 10**18 // staticcall COLLATERAL.price_oracle()
 
 
-@external
+@internal
 @view
-@nonreentrant
-def preview_withdraw(tokens: uint256) -> uint256:
-    """
-    @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
-    """
-    amm: LevAMM = self.amm
-    supply: uint256 = self._calculate_values().supply_tokens
-    state: AMMState = staticcall amm.get_state()
-
+def _withdrawable_debt(tokens: uint256, supply: uint256, state: AMMState, stables_in_cswap: uint256) -> uint256:
     # 1. Measure lp_token/stable ratio of Cryptopool
     # 2. lp_token/debt = r ratio must be the same
     # 3. Measure initial c1, d1 (collateral, debt)
@@ -266,8 +258,6 @@ def preview_withdraw(tokens: uint256) -> uint256:
     #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
 
     supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
-    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
 
     r: uint256 = supply_of_cswap * 10**18 // stables_in_cswap
     w: uint256 = tokens * 10**18 // supply  # 1 - eps
@@ -279,9 +269,23 @@ def preview_withdraw(tokens: uint256) -> uint256:
         b**2 + convert(4*r*state.collateral // 10**18 * w // 10**18, int256) * (
             convert(eps * (state.x0 - state.debt) // 10**18, int256) - convert(state.debt, int256)
         ), uint256)
-    to_return: uint256 = convert(b + convert(self.sqrt(D), int256), uint256) * 10**18 // (2 * r)
+    return min(
+        convert(b + convert(self.sqrt(D), int256), uint256) * 10**18 // (2 * r),
+        stables_in_cswap)
 
-    return crypto_in_cswap * min(to_return, stables_in_cswap) // stables_in_cswap
+
+@external
+@view
+@nonreentrant
+def preview_withdraw(tokens: uint256) -> uint256:
+    """
+    @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
+    """
+    supply: uint256 = self._calculate_values().supply_tokens
+    state: AMMState = staticcall self.amm.get_state()
+    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
+    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
+    return crypto_in_cswap * self._withdrawable_debt(tokens, supply, state, stables_in_cswap) // stables_in_cswap
 
 
 @external
