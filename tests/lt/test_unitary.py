@@ -44,3 +44,9 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         # Test withdrawal of the amount equal to assets deposited for this amount of shares
         preview_assets = yb_lt.preview_withdraw(shares)
         assert abs(preview_assets - 10**18) / 10**18 < 1e-5
+
+        preview_assets = yb_lt.preview_withdraw(shares // 100)
+        assert abs(preview_assets - 10**16) / 10**16 < 1e-5
+
+        preview_assets = yb_lt.preview_withdraw(shares // 10**8)
+        assert abs(preview_assets - 10**10) / 10**10 < 1e-5
