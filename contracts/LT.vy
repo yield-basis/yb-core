@@ -251,17 +251,18 @@ def preview_withdraw(tokens: uint256) -> uint256:
     # 1. Measure lp_token/stable ratio of Cryptopool
     # 2. lp_token/debt = r ratio must be the same
     # 3. Measure initial c1, d1 (collateral, debt)
-    # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply:
-    #       sqrt((x0 - d2) * c2) = sqrt((x0 - d1) * c1) * (supply - tokens) / supply
+    # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply == Inv1 * eps:
+    #       eps=(supply - tokens) / supply
+    #       sqrt((eps * x0 - d2) * c2) = sqrt((x0 - d1) * c1) * eps
     #   c1 is initial collateral (lp token amount), d1 is initial debt; c2, d2 are final values of those.
     #   Debt is reduced and collateral also, but let us express everything in terms of ratio r and collateral c:
     #       d2 = d1 - d
     #       c2 = c1 - r * d
     #   So we solve against d:
-    #       (x0 - d1 + d) * (c1 - r * d) = (x0 - d1) * c1 * ((supply - tokens) / supply)**2
-    #   It's a quadratic equation. Let's say eps=(supply - tokens) / supply, then:
-    #       D = (r*(x0-d1) - c1)**2 + 4*r*c1 * (1 - eps**2) * (x0 - d1)
-    #       d = (-|r*(x0-d1)-c1| + sqrt(D)) / (2*r)
+    #       (eps * x0 - d1 + d) * (c1 - r * d) = (x0 - d1) * c1 * eps**2
+    #   It's a quadratic equation.
+    #       D = (c1 + r*d1 - r*eps*x0)**2 + 4*r*c1 * (1 - eps) * (eps*(x0-d1) - d1)
+    #       d = (c1 + r*d1 - r*eps*x0 + sqrt(D)) / (2*r)
     #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
 
     supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
@@ -269,16 +270,16 @@ def preview_withdraw(tokens: uint256) -> uint256:
     crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
 
     r: uint256 = supply_of_cswap * 10**18 // stables_in_cswap
-    # reps_factor = r * (1 - eps**2) = r * (1 - ((s - t) / s)**2) = r * ((2*s*t - t**2) / s**2)
-    reps_factor: uint256 = (2 * supply * tokens - tokens**2) // supply * r // supply
+    w: uint256 = tokens * 10**18 // supply  # 1 - eps
+    eps: uint256 = 10**18 - w
 
-    b: uint256 = r * (state.x0 - state.debt) // 10**18
-    b = max(b, state.collateral) - min(b, state.collateral)  # = abs(r(x0 - d1) - c1)
-    D: uint256 = b**2 + 4 * reps_factor * state.collateral // 10**18 * (state.x0 - state.debt)
-    to_return: uint256 = (self.sqrt(D) - b) * 10**18 // (2 * r)
-
-    if True:
-        raise "Debug"
+    # b = c1 + r*d1 - r*eps*x0
+    b: int256 = convert(state.collateral + r * state.debt // 10**18, int256) - convert(r * eps // 10**18 * state.x0 // 10**18, int256)
+    D: uint256 = convert(
+        b**2 + convert(4*r*state.collateral // 10**18 * w // 10**18, int256) * (
+            convert(eps * (state.x0 - state.debt) // 10**18, int256) - convert(state.debt, int256)
+        ), uint256)
+    to_return: uint256 = convert(b + convert(self.sqrt(D), int256), uint256) * 10**18 // (2 * r)
 
     return crypto_in_cswap * min(to_return, stables_in_cswap) // stables_in_cswap
 

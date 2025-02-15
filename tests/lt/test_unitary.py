@@ -41,6 +41,6 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         assert (new_shares - preview_shares) / new_shares < 1e-4  # Not exact equality because calc_token_amount is not exact
         assert abs(new_shares - new_amount) / new_amount < 1e-4
 
-        # Test withdrawal of the amount equal to "shares"
-        preview_shares = yb_lt.preview_withdraw(shares)
-        assert preview_shares == shares
+        # Test withdrawal of the amount equal to assets deposited for this amount of shares
+        preview_assets = yb_lt.preview_withdraw(shares)
+        assert abs(preview_assets - 10**18) / 10**18 < 1e-5
