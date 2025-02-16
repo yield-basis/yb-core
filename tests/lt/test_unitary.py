@@ -56,3 +56,7 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
             yb_lt.withdraw(shares, int(1.001e18))
         yb_lt.withdraw(shares, int(0.9999e18))
         assert abs(collateral_token.balanceOf(user) - preview_assets) < 5
+
+        # And the last bits
+        yb_lt.withdraw(new_shares, 0)
+        assert abs(collateral_token.balanceOf(user) - 1.5e18) / 1.5e18 < 1e-5
