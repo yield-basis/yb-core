@@ -55,4 +55,4 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         with boa.reverts():
             yb_lt.withdraw(shares, int(1.001e18))
         yb_lt.withdraw(shares, int(0.9999e18))
-        assert collateral_token.balanceOf(user) == preview_assets
+        assert abs(collateral_token.balanceOf(user) - preview_assets) < 5

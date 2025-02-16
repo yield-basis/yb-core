@@ -246,6 +246,7 @@ def _withdrawable_debt(tokens: uint256, supply: uint256, state: AMMState, stable
     # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply == Inv1 * eps:
     #       eps=(supply - tokens) / supply
     #       sqrt((eps * x0 - d2) * c2) = sqrt((x0 - d1) * c1) * eps
+    #   ! it is absolutely not obvious that if invariant changes by eps - x0 changes by eps also. But it can be proved !
     #   c1 is initial collateral (lp token amount), d1 is initial debt; c2, d2 are final values of those.
     #   Debt is reduced and collateral also, but let us express everything in terms of ratio r and collateral c:
     #       d2 = d1 - d
