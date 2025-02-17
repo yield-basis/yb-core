@@ -92,6 +92,11 @@ if __name__ == '__main__':
         )
         lt.set_amm(amm.address)
 
+        # Seed liqudiity with 2 dollars
+        btc.approve(pool.address, 2**256-1)
+        usd.approve(pool.address, 2**256-1)
+        pool.add_liquidity([10**18, 10**18 // 100_000], 0)
+
     print(f"Pool:   {pool.address}")
     print(f"AMM:    {amm.address}")
     print(f"LT:     {lt.address}")
