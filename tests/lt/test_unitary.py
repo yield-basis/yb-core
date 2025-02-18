@@ -30,6 +30,8 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         assert (shares - preview_shares) / shares < 1e-4  # Not exact equality because calc_token_amount is not exact
         assert abs(shares - amount) / amount < 1e-4
 
+        # values_0 = yb_lt.internal._calculate_values()
+
         # Test second deposit
         new_amount = amount // 2
         collateral_token._mint_for_testing(user, new_amount)
@@ -41,6 +43,8 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         assert (new_shares - preview_shares) / new_shares < 1e-4  # Not exact equality because calc_token_amount is not exact
         assert abs(new_shares - new_amount) / new_amount < 1e-4
 
+        # values_1 = yb_lt.internal._calculate_values()
+
         # Test withdrawal of the amount equal to assets deposited for this amount of shares
         preview_assets = yb_lt.preview_withdraw(shares // 100)
         assert abs(preview_assets - 10**16) / 10**16 < 1e-5
@@ -51,11 +55,19 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         preview_assets = yb_lt.preview_withdraw(shares)
         assert abs(preview_assets - 10**18) / 10**18 < 1e-5
 
+        # values_2 = yb_lt.internal._calculate_values()
+
         # Actually withdraw
         with boa.reverts():
             yb_lt.withdraw(shares, int(1.001e18))
         yb_lt.withdraw(shares, int(0.9999e18))
         assert abs(collateral_token.balanceOf(user) - preview_assets) < 5
+
+        # values_3 = yb_lt.internal._calculate_values()
+
+        # Check pricePerShare
+        assert yb_lt.pricePerShare() > 1e18
+        assert yb_lt.pricePerShare() < 1.1e18
 
         # And the last bits
         yb_lt.withdraw(new_shares, 0)

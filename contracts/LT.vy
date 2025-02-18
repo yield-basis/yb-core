@@ -307,15 +307,18 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
+    liquidity_values: LiquidityValuesOut = empty(LiquidityValuesOut)
+    if supply > 0:
+        liquidity_values = self._calculate_values()
+
     v: ValueChange = extcall amm._deposit(lp_tokens, debt)
 
     if supply > 0:
-        liquidity_values: LiquidityValuesOut = self._calculate_values()
         supply = liquidity_values.supply_tokens
         self.liquidity.admin = liquidity_values.admin
-        self.liquidity.total = liquidity_values.total
+        self.liquidity.total = liquidity_values.total * v.value_after // v.value_before
         self.liquidity.staked = liquidity_values.staked
-        self.totalSupply = liquidity_values.supply_tokens
+        self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
         self.balanceOf[self.staker] = liquidity_values.staked_tokens
         # ideal_staked is only changed when we transfer coins to staker
         shares = supply * v.value_after // v.value_before - supply
@@ -373,7 +376,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     # We pass the fraction to withdraw as an argument, limited by 1.0
     withdrawn: Pair = extcall amm._withdraw(min(10**18 * to_return // (stables_in_cswap * state.collateral // cswap_supply), 10**18))
 
-    self._burn(msg.sender, shares)
+    self._burn(msg.sender, shares)  # Changes self.totalSupply
+    self.liquidity.total = liquidity_values.total * (supply - shares) // supply
     assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
     cswap_withdrawn: uint256[2] = extcall COLLATERAL.remove_liquidity(withdrawn.collateral, [0, 0], self)
     assert cswap_withdrawn[1] >= min_assets, "Slippage"
