@@ -37,8 +37,10 @@ if __name__ == '__main__':
     boa.env._rpc.fetch("hardhat_impersonateAccount", [TEST_RESERVE])
     boa.env.add_account(ExternalAccount(_rpc=boa.env._rpc, address=TEST_RESERVE))
     boa.env._rpc.fetch("hardhat_setBalance", [TEST_RESERVE, "0x1000000000000000000"])
-    btc.transfer(demo_user_address, 10**18, sender=TEST_RESERVE)
-    usd.transfer(demo_user_address, 10**18, sender=TEST_RESERVE)
+    with boa.env.prank(TEST_RESERVE):
+        btc.transfer(demo_user_address, 10**18)
+        usd.transfer(demo_user_address, 10**18)
+        usd.transfer(admin, 200_000 * 10**18)
 
     with boa.env.prank(admin):
         amm_interface = boa.load_partial('contracts/twocrypto/CurveTwocryptoOptimized.vy')
@@ -97,6 +99,9 @@ if __name__ == '__main__':
         usd.approve(pool.address, 2**256-1)
         pool.add_liquidity([10**18, 10**18 // 100_000], 0)
 
+        usd.approve(lt.address, 2**256-1)
+        lt.allocate_stablecoins(admin, 200_000 * 10**18)
+
     print(f"Pool:   {pool.address}")
     print(f"AMM:    {amm.address}")
     print(f"LT:     {lt.address}")
@@ -109,6 +114,12 @@ if __name__ == '__main__':
 
     with open('lt_abi.json', 'w') as f:
         json.dump(lt.abi, f)
+
+    if '--deposit' in sys.argv[1:]:
+        print('Simulating deposit')
+        btc.approve(lt.address, 2**256-1)
+        lt.deposit(int(0.5e18), int(50_000e18), 0)
+        print('Deposited')
 
     if '--hardhat' in sys.argv[1:]:
         hardhat.wait()

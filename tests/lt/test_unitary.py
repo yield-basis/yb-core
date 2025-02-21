@@ -75,3 +75,22 @@ def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, see
         # And the last bits
         yb_lt.withdraw(new_shares, 0)
         assert abs(collateral_token.balanceOf(user) - 1.5e18) / 1.5e18 < 1e-5
+
+
+def test_stake(cryptopool, yb_lt, collateral_token, yb_allocated, seed_cryptopool, accounts, admin):
+    user = accounts[0]
+    staker = accounts[1]
+
+    p = 100_000
+    amount = 10**18
+    collateral_token._mint_for_testing(user, amount)
+
+    with boa.env.prank(admin):
+        yb_lt.set_staker(staker)
+
+    with boa.env.prank(user):
+        # Deposit
+        shares = yb_lt.deposit(amount, p * amount, int(amount * 0.9999))
+
+        # Stake 25%
+        yb_lt.transfer(staker, shares // 4)
