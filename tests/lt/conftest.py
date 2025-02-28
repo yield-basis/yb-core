@@ -53,8 +53,13 @@ def seed_cryptopool(stablecoin, collateral_token, cryptopool, admin):
 
 
 @pytest.fixture(scope="session")
-def cryptopool_oracle(cryptopool):
-    return boa.load('contracts/CryptopoolLPOracle.vy', cryptopool.address)
+def mock_agg(admin):
+    return boa.load('contracts/testing/DummyPriceOracle.vy', admin, 10**18)
+
+
+@pytest.fixture(scope="session")
+def cryptopool_oracle(cryptopool, mock_agg):
+    return boa.load('contracts/CryptopoolLPOracle.vy', cryptopool.address, mock_agg.address)
 
 
 @pytest.fixture(scope="session")
