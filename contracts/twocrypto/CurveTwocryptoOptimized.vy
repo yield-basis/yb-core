@@ -2032,6 +2032,7 @@ def apply_new_parameters(
 
 
 @external
-def donate(token: address, amount: uint256):
+def donate(amounts: uint256[N_COINS], min_amount: uint256):
     # XXX this is JUST a stub!!
-    extcall ERC20(token).transferFrom(msg.sender, self, amount)
+    for i: uint256 in range(N_COINS):
+        extcall ERC20(coins[i]).transferFrom(msg.sender, self, amounts[i])
