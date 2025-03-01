@@ -1,4 +1,4 @@
-# @version 0.4.0
+# @version 0.4.1
 """
 @title LEVAMM
 @notice Automatic market maker which keeps constant leverage
@@ -159,7 +159,7 @@ def set_rate(rate: uint256) -> uint256:
     self.rate_mul = rate_mul
     self.rate_time = block.timestamp
     self.rate = rate
-    log SetRate(rate, rate_mul, block.timestamp)
+    log SetRate(rate=rate, rate_mul=rate_mul, time=block.timestamp)
     return rate_mul
 
 
@@ -269,7 +269,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
-    log TokenExchange(msg.sender, i, in_amount, j, out_amount, fee, p_o)
+    log TokenExchange(buyer=msg.sender, sold_id=i, tokens_sold=in_amount,
+                      bought_id=j, tokens_bought=out_amount, fee=fee, price_oracle=p_o)
 
     return out_amount
 
@@ -294,7 +295,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
 
     value_after: uint256 = self.get_x0(p_o, collateral, debt) * 10** 18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
-    log AddLiquidityRaw([d_collateral, d_debt], value_after, p_o)
+    log AddLiquidityRaw(token_amounts=[d_collateral, d_debt], invariant=value_after, price_oracle=p_o)
     return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
 
 
@@ -312,7 +313,7 @@ def _withdraw(frac: uint256) -> Pair:
     self.debt = debt - d_debt
     self.redeemed += d_debt
 
-    log RemoveLiquidityRaw(d_collateral, d_debt)
+    log RemoveLiquidityRaw(collateral_change=d_collateral, debt_change=d_debt)
 
     return Pair(collateral=d_collateral, debt=d_debt)
 
@@ -387,8 +388,8 @@ def collect_fees() -> uint256:
         self.minted = to_be_redeemed
         to_be_redeemed = unsafe_sub(to_be_redeemed, minted)  # Now this is the fees to charge
         extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed)
-        log CollectFees(to_be_redeemed, debt)
+        log CollectFees(amount=to_be_redeemed, new_supply=debt)
         return to_be_redeemed
     else:
-        log CollectFees(0, debt)
+        log CollectFees(amount=0, new_supply=debt)
         return 0

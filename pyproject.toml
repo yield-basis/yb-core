@@ -8,9 +8,9 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4"
-vyper = "0.4.0"
+vyper = "0.4.1"
 poetry = "^1"
-titanoboa = "0.2.5"
+titanoboa = {git = "git@github.com:vyperlang/titanoboa.git", rev = "ee4cb70a5e41713dd863f4fa1e0b6d8c53180cd2"}
 hypothesis = "^6"
 pdbpp = "^0.10.3"
 jedi = "^0.19.1"

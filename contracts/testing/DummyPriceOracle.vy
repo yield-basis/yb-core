@@ -1,4 +1,4 @@
-# @version 0.4.0
+# @version 0.4.1
 
 """
 This contract is for testing only.

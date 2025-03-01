@@ -1,4 +1,4 @@
-# @version 0.4.0
+# @version 0.4.1
 """
 @title crvUSD Fake FlashLender
 @notice ERC3156 contract for crvUSD flash loans
@@ -52,7 +52,7 @@ def flashLoan(receiver: ERC3156FlashBorrower, token: address, amount: uint256, d
     extcall receiver.onFlashLoan(msg.sender, CRVUSD, amount, 0, data)
     assert staticcall ERC20(CRVUSD).balanceOf(self) >= self.ceiling, "FlashLender: Repay failed"
 
-    log FlashLoan(msg.sender, receiver.address, amount)
+    log FlashLoan(caller=msg.sender, receiver=receiver.address, amount=amount)
 
     return True
 

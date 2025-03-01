@@ -1,4 +1,4 @@
-# pragma version 0.4.0
+# pragma version 0.4.1
 # (c) Curve.Fi, 2020-2024
 # AMM Math for 2-coin Curve Cryptoswap Pools
 #

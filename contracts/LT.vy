@@ -1,4 +1,4 @@
-# @version 0.4.0
+# @version 0.4.1
 """
 @title LT
 @notice AMM for leveraging 2-token liquidity
@@ -107,6 +107,10 @@ event Withdraw:
     shares: uint256
 
 
+event SetAdmin:
+    admin: address
+
+
 COLLATERAL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
 STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
 DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
@@ -114,9 +118,6 @@ DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
 admin: public(address)
 amm: public(LevAMM)
-
-event SetAdmin:
-    admin: address
 
 staker: public(address)
 
@@ -335,7 +336,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     assert shares >= min_shares, "Slippage"
 
     self._mint(receiver, shares)
-    log Deposit(msg.sender, receiver, assets, shares)
+    log Deposit(sender=msg.sender, owner=receiver, assets=assets, shares=shares)
     return shares
 
 
@@ -384,7 +385,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     assert extcall STABLECOIN.transfer(amm.address, cswap_withdrawn[0])
     assert extcall DEPOSITED_TOKEN.transfer(receiver, cswap_withdrawn[1])
 
-    log Withdraw(msg.sender, receiver, msg.sender, cswap_withdrawn[1], shares)
+    log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=cswap_withdrawn[1], shares=shares)
     return cswap_withdrawn[1]
 
 
@@ -411,7 +412,7 @@ def set_amm(amm: LevAMM):
 def set_admin(new_admin: address):
     assert msg.sender == self.admin, "Access"
     self.admin = new_admin
-    log SetAdmin(new_admin)
+    log SetAdmin(admin=new_admin)
 
 
 @external
@@ -464,7 +465,7 @@ def distrubute_borrower_fees(discount: uint256 = 10**16):  # This will JUST dona
 def set_staker(staker: address):
     assert msg.sender == self.admin, "Access"
     self.staker = staker
-    log SetStaker(staker)
+    log SetStaker(staker=staker)
 
 
 # ERC20 methods
@@ -473,7 +474,7 @@ def set_staker(staker: address):
 def _approve(_owner: address, _spender: address, _value: uint256):
     self.allowance[_owner][_spender] = _value
 
-    log Approval(_owner, _spender, _value)
+    log Approval(owner=_owner, spender=_spender, value=_value)
 
 
 @internal
@@ -481,7 +482,7 @@ def _burn(_from: address, _value: uint256):
     self.balanceOf[_from] -= _value
     self.totalSupply -= _value
 
-    log Transfer(_from, empty(address), _value)
+    log Transfer(sender=_from, receiver=empty(address), value=_value)
 
 
 @internal
@@ -489,7 +490,7 @@ def _mint(_to: address, _value: uint256):
     self.balanceOf[_to] += _value
     self.totalSupply += _value
 
-    log Transfer(empty(address), _to, _value)
+    log Transfer(sender=empty(address), receiver=_to, value=_value)
 
 
 @internal
@@ -522,7 +523,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
     self.balanceOf[_from] -= _value
     self.balanceOf[_to] += _value
 
-    log Transfer(_from, _to, _value)
+    log Transfer(sender=_from, receiver=_to, value=_value)
 
 
 @external
