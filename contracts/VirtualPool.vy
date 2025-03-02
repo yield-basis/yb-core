@@ -69,7 +69,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
         b: uint256 = state.x0 - state.debt + in_amount - r0fee * state.collateral // 10**18
         D: uint256 = b**2 + 4 * state.collateral * r0fee // 10**18 * in_amount
 
-        return (isqrt(D) - in_amount) // 2
+        return (isqrt(D) - b) // 2
 
     elif i == 1 and j == 0:
         return 0
