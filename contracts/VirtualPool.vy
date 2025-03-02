@@ -60,19 +60,29 @@ def coins(i: uint256) -> ERC20:
 @view
 def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
-    if i == 0 and j == 1:
-        state: AMMState = staticcall AMM.get_state()
-        fee: uint256 = staticcall AMM.fee()
-        r0fee: uint256 = staticcall POOL.balances(0) * (10**18 - fee) // staticcall POOL.totalSupply()
 
-        # Solving quadratic eqn
+    stables_in_pool: uint256 = staticcall POOL.balances(0)
+    crypto_in_pool: uint256 = staticcall POOL.balances(1)
+    pool_supply: uint256 = staticcall POOL.totalSupply()
+    fee: uint256 = staticcall AMM.fee()
+    state: AMMState = staticcall AMM.get_state()
+
+    if i == 0 and j == 1:
+        r0fee: uint256 = stables_in_pool * (10**18 - fee) // pool_supply
+
+        # Solving quadratic eqn instead of calling the AMM b/c we have a special case
         b: uint256 = state.x0 - state.debt + in_amount - r0fee * state.collateral // 10**18
         D: uint256 = b**2 + 4 * state.collateral * r0fee // 10**18 * in_amount
+        flash_amount: uint256 = (isqrt(D) - b) // 2  # We received this withdrawing from the pool
 
-        return (isqrt(D) - b) // 2
+        # Withdrawal was ideally balanced
+        return flash_amount * crypto_in_pool // stables_in_pool
 
     elif i == 1 and j == 0:
-        return 0
+        flash_amount: uint256 = in_amount * stables_in_pool // crypto_in_pool
+        lp_amount: uint256 = pool_supply * in_amount // crypto_in_pool
+        stable_out: uint256 = staticcall AMM.get_dy(1, 0, lp_amount)
+        return stable_out - flash_amount
 
     else:
         raise "i!=j"
