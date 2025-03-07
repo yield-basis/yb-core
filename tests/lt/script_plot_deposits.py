@@ -48,6 +48,7 @@ def test_deposit_cryptopool(cryptopool, seed_cryptopool, yb_allocated, yb_lt, yb
     misbalances = []
     values_by_price = []
     values_by_balances = []
+    values_by_spot = []
 
     with boa.env.prank(admin):
         yb_lt.deposit(deposit_amount, p * deposit_amount, 0)
@@ -68,7 +69,10 @@ def test_deposit_cryptopool(cryptopool, seed_cryptopool, yb_allocated, yb_lt, yb
                 values_by_price.append(value)
                 value = yb_lt.preview_deposit(deposit_amount, deposit_amount * cryptopool.balances(0) // cryptopool.balances(1))
                 values_by_balances.append(value)
+                value = yb_lt.preview_deposit(deposit_amount, deposit_amount * cryptopool.get_dy(1, 0, 10**14) // 10**14)
+                values_by_spot.append(value)
 
     pylab.plot(misbalances, values_by_price, c="blue")
     pylab.plot(misbalances, values_by_balances, c="red")
+    pylab.plot(misbalances, values_by_spot, c="green")
     pylab.show()
