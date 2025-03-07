@@ -253,7 +253,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         y: uint256 = x_initial * collateral // x
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
-        self.debt -= in_amount
+        self.debt = debt - in_amount
         self.collateral_amount -= out_amount
         self.redeemed += in_amount
         assert extcall STABLECOIN.transferFrom(msg.sender, self, in_amount, default_return_value=True)
@@ -264,7 +264,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         x: uint256 = x_initial * collateral // y
         out_amount = (x_initial - x) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
-        self.debt += out_amount
+        self.debt = debt + out_amount
         self.minted += out_amount
         self.collateral_amount += in_amount
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
@@ -388,6 +388,7 @@ def collect_fees() -> uint256:
     @notice Collect the fees charged as interest.
     """
     debt: uint256 = self._debt_w()
+    self.debt = debt
     minted: uint256 = self.minted
     to_be_redeemed: uint256 = debt + self.redeemed
     # Difference between to_be_redeemed and minted amount is exactly due to interest charged
