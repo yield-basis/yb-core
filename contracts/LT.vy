@@ -201,17 +201,15 @@ def _calculate_values() -> LiquidityValuesOut:
     token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, total - staked)
     # token_reduction = 0 if nothing is staked
 
-    prev.total = convert(new_total_value, uint256)
-    prev.staked = convert(new_staked_value, uint256)
     # Supply changes each time:
     # value split reduces the amount of staked tokens (but not others),
     # and this also reduces the supply of LP tokens
 
     return LiquidityValuesOut(
         admin=prev.admin,
-        total=prev.total,
+        total=convert(new_total_value, uint256),
         ideal_staked=prev.ideal_staked,
-        staked=prev.staked,
+        staked=convert(new_staked_value, uint256),
         staked_tokens=convert(staked - token_reduction, uint256),
         supply_tokens=convert(total - token_reduction, uint256)
     )

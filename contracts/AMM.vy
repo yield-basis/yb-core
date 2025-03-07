@@ -11,6 +11,7 @@ interface IERC20:
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
+    def balanceOf(user: address) -> uint256: view
 
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
@@ -362,6 +363,12 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
         p_o = p_o,
         value_before = x0_before * 10**18 // (2 * LEVERAGE - 10**18),
         value_after = x0_after * 10**18 // (2 * LEVERAGE - 10**18))
+
+
+@external
+@view
+def max_debt() -> uint256:
+    return staticcall STABLECOIN.balanceOf(self) + self._debt()
 
 
 @external
