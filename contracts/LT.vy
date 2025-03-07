@@ -173,11 +173,10 @@ def _calculate_values() -> LiquidityValuesOut:
     total: int256 = convert(self.totalSupply, int256)
 
     f_a: int256 = convert(
-        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**18 - staked // total, uint256)) // 10**18,
+        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // total, uint256)) // 10**18,
         int256)
 
-    v: OraclizedValue = staticcall self.amm.value_oracle()
-    cur_value: int256 = convert(v.value * 10**18 // v.p_o, int256)
+    cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // staticcall COLLATERAL.price_oracle(), int256)
     prev_value: int256 = convert(prev.total, int256)
 
     v_st: int256 = convert(prev.staked, int256)

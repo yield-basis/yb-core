@@ -16,7 +16,7 @@ def test_allocate_stablecoins(cryptopool, cryptopool_oracle, yb_lt, yb_amm, stab
         assert stablecoin.balanceOf(yb_amm.address) == 10**24
 
 
-def test_deposit_withdraw(cryptopool, yb_lt, collateral_token, yb_allocated, seed_cryptopool, accounts):
+def test_deposit_withdraw(cryptopool, yb_lt, yb_amm, collateral_token, yb_allocated, seed_cryptopool, accounts):
     user = accounts[0]
     p = 100_000
     amount = 10**18
