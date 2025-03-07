@@ -498,6 +498,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
 
     staker: address = self.staker
     if staker in [_from, _to]:
+        assert _from != _to
         liquidity: LiquidityValuesOut = self._calculate_values()
         self.liquidity.admin = liquidity.admin
         self.liquidity.total = liquidity.total
