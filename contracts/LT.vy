@@ -198,8 +198,9 @@ def _calculate_values() -> LiquidityValuesOut:
     # staked - token_reduction       new_staked_value
     # -------------------------  =  -------------------
     # total - token_reduction         new_token_value
-    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, total - staked)
+    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, new_total_value - new_staked_value)
     # token_reduction = 0 if nothing is staked
+    # XXX need to consider situation when denominator is very close to zero
 
     # Supply changes each time:
     # value split reduces the amount of staked tokens (but not others),
