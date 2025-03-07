@@ -17,6 +17,7 @@ jedi = "^0.19.1"
 pytest-xdist = "^3.6"
 pytest-forked = "^1.6.0"
 ipython = "^8"
+matplotlib = "^3"  # Only for graphs, otherwise not needed
 
 [build-system]
 requires = ["poetry-core"]
