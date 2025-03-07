@@ -46,7 +46,7 @@ def test_deposit_withdraw(cryptopool, yb_lt, yb_amm, collateral_token, yb_alloca
 
         values_1 = yb_lt.internal._calculate_values()
         assert (values_1[1] - 1.5 * amount) / (1.5 * amount) < 1e-5
-        assert values_1[0] > values_0[0]  # admin
+        assert values_1[0] == values_0[0]  # admin fees are not earned because there were no swaps - test later
 
         # Test withdrawal of the amount equal to assets deposited for this amount of shares
         preview_assets = yb_lt.preview_withdraw(shares // 100)
@@ -66,7 +66,7 @@ def test_deposit_withdraw(cryptopool, yb_lt, yb_amm, collateral_token, yb_alloca
 
         values_2 = yb_lt.internal._calculate_values()
         assert (values_2[1] - 0.5 * amount) / (0.5 * amount) < 1e-5
-        assert values_2[0] > values_1[0]  # admin
+        assert values_2[0] == values_1[0]  # admin fees not earned yet
 
         # Check pricePerShare
         assert yb_lt.pricePerShare() > 1e18
