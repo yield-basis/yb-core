@@ -453,7 +453,8 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
 @nonreentrant
 def distrubute_borrower_fees(discount: uint256 = 10**16):  # This will JUST donate to the crypto pool
     assert msg.sender == self.admin, "Access"
-    amount: uint256 = extcall self.amm.collect_fees()
+    extcall self.amm.collect_fees()
+    amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     min_amount: uint256 = (10**18 - discount) * amount // staticcall COLLATERAL.lp_price()
     extcall COLLATERAL.donate([amount, 0], min_amount)
 
