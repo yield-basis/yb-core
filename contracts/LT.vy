@@ -228,9 +228,8 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     supply: uint256 = self.totalSupply
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values()
-        if liquidity.supply_tokens > liquidity.staked_tokens:
-            v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
-            return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
+        v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
+        return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
     return v.value * 10**18 // staticcall COLLATERAL.price_oracle()
