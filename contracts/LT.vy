@@ -351,6 +351,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     @param min_assets Minimal amount of assets to receive (important to calculate to exclude sandwich attacks)
     @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
     """
+    assert shares > 0, "Withdrawing nothing"
+
     amm: LevAMM = self.amm
     liquidity_values: LiquidityValuesOut = self._calculate_values()
     supply: uint256 = liquidity_values.supply_tokens
