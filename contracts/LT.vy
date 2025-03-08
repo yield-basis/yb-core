@@ -169,7 +169,10 @@ def sqrt(arg: uint256) -> uint256:
 @view
 def _calculate_values() -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
-    staked: int256 = convert(self.balanceOf[self.staker], int256)
+    staker: address = self.staker
+    staked: int256 = 0
+    if staker != empty(address):
+        staked = convert(self.balanceOf[self.staker], int256)
     total: int256 = convert(self.totalSupply, int256)
 
     f_a: int256 = convert(
@@ -317,7 +320,9 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.total = liquidity_values.total * v.value_after // v.value_before
         self.liquidity.staked = liquidity_values.staked
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
-        self.balanceOf[self.staker] = liquidity_values.staked_tokens
+        staker: address = self.staker
+        if staker != empty(address):
+            self.balanceOf[staker] = liquidity_values.staked_tokens
         # ideal_staked is only changed when we transfer coins to staker
         shares = supply * v.value_after // v.value_before - supply
 
@@ -353,7 +358,9 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     self.liquidity.total = liquidity_values.total
     self.liquidity.staked = liquidity_values.staked
     self.totalSupply = supply
-    self.balanceOf[self.staker] = liquidity_values.staked_tokens
+    staker: address = self.staker
+    if staker != empty(address):
+        self.balanceOf[staker] = liquidity_values.staked_tokens
     state: AMMState = staticcall amm.get_state()
 
     # These values ARE affected by sandwiches, however they give us REAL amounts.
