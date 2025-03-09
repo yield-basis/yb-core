@@ -91,6 +91,13 @@ event RemoveLiquidityOne:
     approx_fee: uint256
     packed_price_scale: uint256
 
+event RemoveLiquidityImbalance:
+    provider: indexed(address)
+    token_amount: uint256
+    token_amounts: uint256[N_COINS]
+    approx_fee: uint256
+    packed_price_scale: uint256
+
 event NewParameters:
     mid_fee: uint256
     out_fee: uint256
@@ -699,7 +706,6 @@ def remove_liquidity_one_coin(
 
     dy: uint256 = 0
     D: uint256 = 0
-    p: uint256 = 0
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
     approx_fee: uint256 = 0
 
@@ -731,6 +737,71 @@ def remove_liquidity_one_coin(
     log RemoveLiquidityOne(
         provider=msg.sender, token_amount=token_amount, coin_index=i, coin_amount=dy,
         approx_fee=approx_fee, packed_price_scale=packed_price_scale
+    )
+
+    return dy
+
+
+@external
+@nonreentrant
+def remove_liquidity_fixed_out(
+    token_amount: uint256,
+    i: uint256,
+    amount_i: uint256,
+    min_amount_j: uint256,
+    receiver: address = msg.sender
+) -> uint256:
+    """
+    @notice Withdrawal where amount of token i is specified
+    @param token_amount LP Token amount to burn
+    @param i token in which amount is specified
+    @param amount_i exact amount of token i which will be withdrawn
+    @param min_amount_j Minimum amount of token j=1-i to withdraw.
+    @param receiver Address to send the withdrawn tokens to
+    @return Amount of tokens at index j=1-i received by the `receiver`
+    """
+    self._claim_admin_fees()  # <--------- Auto-claim admin fees occasionally.
+
+    A_gamma: uint256[2] = self._A_gamma()
+
+    dy: uint256 = 0
+    D: uint256 = 0
+    xp: uint256[N_COINS] = empty(uint256[N_COINS])
+    approx_fee: uint256 = 0
+
+    # ------------------------------------------------------------------------
+
+    dy, D, xp, approx_fee = self._calc_withdraw_fixed_out(
+        A_gamma,
+        token_amount,
+        i,
+        amount_i,
+        (self.future_A_gamma_time > block.timestamp),  # <------- During ramps
+    )  #                                                  we need to update D.
+
+    assert dy >= min_amount_j, "Slippage"
+
+    # ---------------------------- State Updates -----------------------------
+
+    # Burn user's tokens:
+    self.burnFrom(msg.sender, token_amount)
+
+    packed_price_scale: uint256 = self.tweak_price(A_gamma, xp, D, 0)
+    #        Safe to use D from _calc_withdraw_one_coin here ---^
+
+    # ------------------------- Transfers ------------------------------------
+
+    # _transfer_out updates self.balances here. Update to state occurs before
+    # external calls:
+    self._transfer_out(i, amount_i, receiver)
+    self._transfer_out(1 - i, dy, receiver)
+    token_amounts: uint256[N_COINS] = empty(uint256[N_COINS])
+    token_amounts[i] = amount_i
+    token_amounts[1-i] = dy
+
+    log RemoveLiquidityImbalance(
+        provider=msg.sender, token_amount=token_amount, token_amounts=token_amounts,
+        approx_fee=approx_fee * token_amount // PRECISION, packed_price_scale=packed_price_scale
     )
 
     return dy
@@ -1353,6 +1424,68 @@ def _calc_withdraw_one_coin(
     return dy, D, xp, approx_fee
 
 
+@internal
+@view
+def _calc_withdraw_fixed_out(
+    A_gamma: uint256[2],
+    token_amount: uint256,
+    i: uint256,
+    amount_i: uint256,
+    update_D: bool
+) -> (uint256, uint256, uint256[N_COINS], uint256):
+    """
+    Withdraws specified number of tokens while amount of coin `i` is also specified
+    """
+
+    token_supply: uint256 = self.totalSupply
+    assert token_amount <= token_supply  # dev: token amount more than supply
+    assert i < N_COINS  # dev: coin out of range
+
+    j: uint256 = 1 - i
+
+    xx: uint256[N_COINS] = self.balances
+    D0: uint256 = 0
+
+    # -------------------------- Calculate D0 and xp -------------------------
+
+    price_scale: uint256[N_COINS] = [PRECISION * PRECISIONS[0], self.cached_price_scale * PRECISIONS[1]]
+    xp: uint256[N_COINS] = [
+        xx[0] * PRECISIONS[0],
+        unsafe_div(xx[1] * price_scale[1], PRECISION)
+    ]
+
+    if update_D:  # <-------------- D is updated if pool is undergoing a ramp.
+        D0 = staticcall MATH.newton_D(A_gamma[0], A_gamma[1], xp, 0)
+    else:
+        D0 = self.D
+
+    D: uint256 = D0
+
+    # ------------------------------ Amounts calc ----------------------------
+    dD: uint256 = unsafe_div(token_amount * D, token_supply)
+    xp_new: uint256[N_COINS] = xp
+    amountsp: uint256[N_COINS] = empty(uint256[N_COINS])
+    amountsp[i] = unsafe_div(amount_i * price_scale[i], PRECISION)
+    xp_new[i] -= amountsp[i]
+
+    # first attempt - calculate xp_new
+    y: uint256 = (staticcall MATH.get_y(A_gamma[0], A_gamma[1], xp_new, D - dD, j))[0]
+    amountsp[j] = xp[j] - y
+    xp_new[j] = y
+
+    # calculate fee
+    fee: uint256 = self._calc_token_fee(amountsp, xp_new)
+    dD -= dD * fee // 10**10 + 1
+
+    # second attempt - recalc xp
+    D -= dD
+    y = (staticcall MATH.get_y(A_gamma[0], A_gamma[1], xp_new, D, j))[0]
+    dy: uint256 = (xp[j] - y) * PRECISION // price_scale[j]
+    xp_new[j] = y
+
+    return dy, D, xp_new, fee
+
+
 # ------------------------ ERC20 functions -----------------------------------
 
 
@@ -1737,6 +1870,25 @@ def calc_withdraw_one_coin(token_amount: uint256, i: uint256) -> uint256:
         self._A_gamma(),
         token_amount,
         i,
+        (self.future_A_gamma_time > block.timestamp)
+    )[0]
+
+
+@view
+@external
+def calc_withdraw_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256) -> uint256:
+    """
+    @notice Calculation for withdrawal where amount of token i is specified
+    @param token_amount LP Token amount to burn
+    @param i token in which amount is specified
+    @param amount_i exact amount of token i which will be withdrawn
+    @return uint256 Amount of jth tokens received for burning token_amount LP tokens and withdrawing amount_i of i.
+    """
+    return self._calc_withdraw_fixed_out(
+        self._A_gamma(),
+        token_amount,
+        i,
+        amount_i,
         (self.future_A_gamma_time > block.timestamp)
     )[0]
 
