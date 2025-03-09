@@ -122,7 +122,7 @@ class StatefulTrader(RuleBasedStateMachine):
 
 def test_stateful_lendborrow(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
                              yb_allocated, seed_cryptopool, accounts, admin):
-    StatefulTrader.TestCase.settings = settings(max_examples=200, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)

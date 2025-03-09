@@ -40,6 +40,8 @@ interface CurveCryptoPool:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
     def donate(amounts: uint256[2], min_amount: uint256): nonpayable
+    def remove_liquidity_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256, min_amount_j: uint256) -> uint256: nonpayable
+    def calc_withdraw_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256) -> uint256: view
 
 
 struct AMMState:
@@ -238,44 +240,6 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     return v.value * 10**18 // staticcall COLLATERAL.price_oracle()
 
 
-@internal
-@view
-def _withdrawable_debt(tokens: uint256, supply: uint256, state: AMMState, stables_in_cswap: uint256) -> uint256:
-    # 1. Measure lp_token/stable ratio of Cryptopool
-    # 2. lp_token/debt = r ratio must be the same
-    # 3. Measure initial c1, d1 (collateral, debt)
-    # 4. Solve Inv2 = Inv1 * (supply - tokens) / supply == Inv1 * eps:
-    #       eps=(supply - tokens) / supply
-    #       sqrt((eps * x0 - d2) * c2) = sqrt((x0 - d1) * c1) * eps
-    #   ! it is absolutely not obvious that if invariant changes by eps - x0 changes by eps also. But it can be proved !
-    #   c1 is initial collateral (lp token amount), d1 is initial debt; c2, d2 are final values of those.
-    #   Debt is reduced and collateral also, but let us express everything in terms of ratio r and collateral c:
-    #       d2 = d1 - d
-    #       c2 = c1 - r * d
-    #   So we solve against d:
-    #       (eps * x0 - d1 + d) * (c1 - r * d) = (x0 - d1) * c1 * eps**2
-    #   It's a quadratic equation.
-    #       D = (c1 + r*d1 - r*eps*x0)**2 + 4*r*c1 * (1 - eps) * (eps*(x0-d1) - d1)
-    #       d = (c1 + r*d1 - r*eps*x0 + sqrt(D)) / (2*r)
-    #   This d is the amount of debt we can repay, and r*d is amount of LP tokens to withdraw for that
-
-    supply_of_cswap: uint256 = staticcall COLLATERAL.totalSupply()
-
-    r: uint256 = supply_of_cswap * 10**18 // stables_in_cswap
-    w: uint256 = tokens * 10**18 // supply  # 1 - eps
-    eps: uint256 = 10**18 - w
-
-    # b = c1 + r*d1 - r*eps*x0
-    b: int256 = convert(state.collateral + r * state.debt // 10**18, int256) - convert(r * eps // 10**18 * state.x0 // 10**18, int256)
-    D: uint256 = convert(
-        b**2 + convert(4*r*state.collateral // 10**18 * w // 10**18, int256) * (
-            convert(eps * (state.x0 - state.debt) // 10**18, int256) - convert(state.debt, int256)
-        ), uint256)
-    return min(
-        convert(b + convert(self.sqrt(D), int256), uint256) * 10**18 // (2 * r),
-        stables_in_cswap)
-
-
 @external
 @view
 @nonreentrant
@@ -285,9 +249,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     """
     supply: uint256 = self._calculate_values().supply_tokens
     state: AMMState = staticcall self.amm.get_state()
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
-    crypto_in_cswap: uint256 = staticcall COLLATERAL.balances(1)
-    return crypto_in_cswap * self._withdrawable_debt(tokens, supply, state, stables_in_cswap) // stables_in_cswap
+    return staticcall COLLATERAL.calc_withdraw_fixed_out(state.collateral * tokens // supply, 0, state.debt * tokens // supply)
 
 
 @external
@@ -365,34 +327,18 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
         self.balanceOf[staker] = liquidity_values.staked_tokens
     state: AMMState = staticcall amm.get_state()
 
-    # These values ARE affected by sandwiches, however they give us REAL amounts.
-    # Sandwiches are prevented by looking at min_assets
-    stables_in_cswap: uint256 = staticcall COLLATERAL.balances(0)
-    cswap_supply: uint256 = staticcall COLLATERAL.totalSupply()
-
-    # In the sequence if actions, we withdraw crypto+stable from cryptoswap at
-    # the current split, and use the stables to repay the debt, returning however
-    # much crypto we've got. Sandwiches will get MORE funds for receiver, not less
-    # (because the bonding curve always has a positive second derivative), so
-    # manipulations give the recipient more funds than fair, at a loss of the manipulator.
-    # Nevertheless, we still have the min_assets to receive for safety, as typically
-    # done in AMMs.
-
-    to_return: uint256 = self._withdrawable_debt(shares, supply, state, stables_in_cswap)
-
-    # We pass the fraction to withdraw as an argument, limited by 1.0
-    withdrawn: Pair = extcall amm._withdraw(min(10**18 * to_return // (stables_in_cswap * state.collateral // cswap_supply), 10**18))
+    withdrawn: Pair = extcall amm._withdraw(10**18 * shares // supply)
+    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
+    crypto_received: uint256 = extcall COLLATERAL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
 
     self._burn(msg.sender, shares)  # Changes self.totalSupply
     self.liquidity.total = liquidity_values.total * (supply - shares) // supply
-    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
-    cswap_withdrawn: uint256[2] = extcall COLLATERAL.remove_liquidity(withdrawn.collateral, [0, 0], self)
-    assert cswap_withdrawn[1] >= min_assets, "Slippage"
-    assert extcall STABLECOIN.transfer(amm.address, cswap_withdrawn[0])
-    assert extcall DEPOSITED_TOKEN.transfer(receiver, cswap_withdrawn[1])
+    assert crypto_received >= min_assets, "Slippage"
+    assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt)
+    assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received)
 
-    log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=cswap_withdrawn[1], shares=shares)
-    return cswap_withdrawn[1]
+    log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
+    return crypto_received
 
 
 @external
