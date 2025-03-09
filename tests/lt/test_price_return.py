@@ -5,7 +5,7 @@
 import boa
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 
 
 class StatefulTrader(RuleBasedStateMachine):
@@ -22,7 +22,7 @@ class StatefulTrader(RuleBasedStateMachine):
         self.p = self.cryptopool.price_oracle()
         with boa.env.prank(self.admin):
             self.test_shares = self.yb_lt.deposit(self.TEST_DEPOSIT, self.p * self.TEST_DEPOSIT // 10**18, 0)
-            self.pps = self.yb_lt.pricePerShare()
+        self.pps = self.yb_lt.pricePerShare()
         for user in self.accounts:
             self.collateral_token._mint_for_testing(user, 100 * 100 * 10**18)
 
@@ -110,9 +110,14 @@ class StatefulTrader(RuleBasedStateMachine):
     def trade_in_levamm(self, amount, is_stablecoin):
         pass
 
-    # invariant
+    @invariant()
     def propagate(self):
-        pass
+        pps = self.yb_lt.pricePerShare()
+        assert pps >= self.pps
+        self.pps = pps
+        # Deposit and withdraw to make AMM balanced
+        # Increase time
+        # Check that pricePerShare did not decrease
 
 
 def test_stateful_lendborrow(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
