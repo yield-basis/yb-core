@@ -103,8 +103,20 @@ class StatefulTrader(RuleBasedStateMachine):
                 # We are not testing exchanges here, so we are not checking all the corner cases where it may revert
                 return
 
+    @rule(amount=amount, is_stablecoin=is_stablecoin)
     def trade_in_levamm(self, amount, is_stablecoin):
-        pass
+        if is_stablecoin:
+            self.stablecoin._mint_for_testing(self.admin, amount)
+            with boa.env.prank(self.admin):
+                try:
+                    self.yb_amm.exchange(0, 1, amount, 0)
+                except Exception:
+                    if self.yb_amm.debt() > amount:
+                        return
+                    raise
+        else:
+            pass
+
 
     @rule(dt=dt)
     def propagate(self, dt):
