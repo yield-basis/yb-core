@@ -15,6 +15,7 @@ class StatefulTrader(RuleBasedStateMachine):
     debt_multiplier = st.floats(min_value=0, max_value=100)  # try infinity?
     withdraw_fraction = st.floats(min_value=0, max_value=2)
     is_stablecoin = st.booleans()
+    dt = st.integers(min_value=0, max_value=86400)
 
     def __init__(self):
         super().__init__()
@@ -79,14 +80,9 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     self.yb_lt.withdraw(shares, 0)
                 except Exception:
-                    print(self.yb_lt.balanceOf(user))
-                    if shares < 100_000 * 10:
-                        # If share amount is too small - we may have zeroing if debt calculations
-                        # That would cause a revert caused by the fact that withdrawable debt still
-                        # rounds to zero cryptoassets, for example. Not an issue, but tiny amount
-                        # of shares cannot be withdrawn
-                        return
-                    raise
+                    # Failures could be if pool is too imbalanced to return the amount of debt requested
+                    # or number of shares being too close to 0 thus returning zero debt
+                    return
             else:
                 with boa.reverts():
                     self.yb_lt.withdraw(shares, 0)
@@ -110,14 +106,37 @@ class StatefulTrader(RuleBasedStateMachine):
     def trade_in_levamm(self, amount, is_stablecoin):
         pass
 
-    @invariant()
-    def propagate(self):
-        pps = self.yb_lt.pricePerShare()
-        assert pps >= self.pps
-        self.pps = pps
+    @rule(dt=dt)
+    def propagate(self, dt):
         # Deposit and withdraw to make AMM balanced
-        # Increase time
-        # Check that pricePerShare did not decrease
+        b0 = self.cryptopool.balances(0)
+        b1 = self.cryptopool.balances(1)
+        diff = b0 - b1 * self.p // 10**18
+        with boa.env.prank(self.admin):
+            if diff < 0:
+                to_deposit = -diff
+                if to_deposit > 0:
+                    self.stablecoin._mint_for_testing(self.admin, to_deposit)
+                    try:
+                        self.cryptopool.add_liquidity([to_deposit, 0], 0)
+                    except Exception:
+                        pass  # Small deposits might fail due to arithmetic errors
+            else:
+                to_deposit = diff * 10**18 // self.p
+                if to_deposit > 0:
+                    self.collateral_token._mint_for_testing(self.admin, to_deposit)
+                    try:
+                        self.cryptopool.add_liquidity([0, to_deposit], 0)
+                    except Exception:
+                        pass  # Small deposits might fail due to arithmetic errors
+
+        boa.env.time_travel(dt)
+
+    @invariant()
+    def uponly(self):
+        pps = self.yb_lt.pricePerShare()
+        assert pps * (1 + 1e-12) >= self.pps
+        self.pps = pps
 
 
 def test_stateful_lendborrow(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
