@@ -114,7 +114,8 @@ class StatefulTrader(RuleBasedStateMachine):
                     if amount > self.yb_amm.debt():
                         return
                     raise
-                self.cryptopool.remove_liquidity(out, [0, 0])
+                if out > 10**6:
+                    self.cryptopool.remove_liquidity(self.cryptopool.balanceOf(self.admin), [0, 0])
         else:
             crypto_amount = amount * 10**18 // self.p
             self.collateral_token._mint_for_testing(self.admin, crypto_amount)
@@ -123,7 +124,7 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
                 except Exception:
-                    if amount < 10**8:
+                    if amount < 10**10:
                         return
                     raise
                 self.yb_amm.exchange(1, 0, lp, 0)
