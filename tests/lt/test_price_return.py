@@ -109,11 +109,12 @@ class StatefulTrader(RuleBasedStateMachine):
             self.stablecoin._mint_for_testing(self.admin, amount)
             with boa.env.prank(self.admin):
                 try:
-                    self.yb_amm.exchange(0, 1, amount, 0)
+                    out = self.yb_amm.exchange(0, 1, amount, 0)
                 except Exception:
                     if amount > self.yb_amm.debt():
                         return
                     raise
+                self.cryptopool.remove_liquidity(out, [0, 0])
         else:
             crypto_amount = amount * 10**18 // self.p
             self.collateral_token._mint_for_testing(self.admin, crypto_amount)
