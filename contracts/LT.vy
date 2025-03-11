@@ -23,6 +23,7 @@ interface LevAMM:
     def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
+    def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -42,6 +43,11 @@ interface CurveCryptoPool:
     def donate(amounts: uint256[2], min_amount: uint256): nonpayable
     def remove_liquidity_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256, min_amount_j: uint256) -> uint256: nonpayable
     def calc_withdraw_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256) -> uint256: view
+
+interface PriceOracle:
+    def price_w() -> uint256: nonpayable
+    def price() -> uint256: view
+    def AGG() -> address: view
 
 
 struct AMMState:
@@ -120,6 +126,7 @@ DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
 admin: public(address)
 amm: public(LevAMM)
+agg: public(PriceOracle)
 
 staker: public(address)
 
@@ -169,7 +176,18 @@ def sqrt(arg: uint256) -> uint256:
 
 @internal
 @view
-def _calculate_values() -> LiquidityValuesOut:
+def _price_oracle() -> uint256:
+    return staticcall COLLATERAL.price_oracle() * staticcall self.agg.price() // 10**18
+
+
+@internal
+def _price_oracle_w() -> uint256:
+    return staticcall COLLATERAL.price_oracle() * extcall self.agg.price_w() // 10**18
+
+
+@internal
+@view
+def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
     staker: address = self.staker
     staked: int256 = 0
@@ -181,7 +199,7 @@ def _calculate_values() -> LiquidityValuesOut:
         10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // total, uint256)) // 10**18,
         int256)
 
-    cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // staticcall COLLATERAL.price_oracle(), int256)
+    cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
 
     v_st: int256 = convert(prev.staked, int256)
@@ -231,13 +249,14 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     """
     lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
+    p_o: uint256 = self._price_oracle()
     if supply > 0:
-        liquidity: LiquidityValuesOut = self._calculate_values()
+        liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
         return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
-    return v.value * 10**18 // staticcall COLLATERAL.price_oracle()
+    return v.value * 10**18 // p_o
 
 
 @external
@@ -247,7 +266,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     """
     @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
     """
-    supply: uint256 = self._calculate_values().supply_tokens
+    supply: uint256 = self._calculate_values(self._price_oracle()).supply_tokens
     state: AMMState = staticcall self.amm.get_state()
     return staticcall COLLATERAL.calc_withdraw_fixed_out(state.collateral * tokens // supply, 0, state.debt * tokens // supply)
 
@@ -266,13 +285,14 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
     assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
     lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
+    p_o: uint256 = self._price_oracle_w()
 
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
     liquidity_values: LiquidityValuesOut = empty(LiquidityValuesOut)
     if supply > 0:
-        liquidity_values = self._calculate_values()
+        liquidity_values = self._calculate_values(p_o)
 
     v: ValueChange = extcall amm._deposit(lp_tokens, debt)
 
@@ -291,7 +311,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     else:
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
         # Value is measured in USD
-        shares = v.value_after * 10**18 // staticcall COLLATERAL.price_oracle()
+        shares = v.value_after * 10**18 // p_o
         # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
         self.liquidity.ideal_staked = 0  # Likely already 0 since supply was 0
         self.liquidity.staked = 0        # Same: nothing staked when supply is 0
@@ -316,7 +336,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     assert shares > 0, "Withdrawing nothing"
 
     amm: LevAMM = self.amm
-    liquidity_values: LiquidityValuesOut = self._calculate_values()
+    liquidity_values: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     supply: uint256 = liquidity_values.supply_tokens
     self.liquidity.admin = liquidity_values.admin
     self.liquidity.total = liquidity_values.total
@@ -347,7 +367,7 @@ def pricePerShare() -> uint256:
     """
     Non-manipulatable "fair price per share" oracle
     """
-    v: LiquidityValuesOut = self._calculate_values()
+    v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
     return v.total * 10**18 // v.supply_tokens
 
 
@@ -357,6 +377,7 @@ def set_amm(amm: LevAMM):
     assert msg.sender == self.admin, "Access"
     assert self.amm == empty(LevAMM), "Already set"
     self.amm = amm
+    self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
 
 
 @external
@@ -454,7 +475,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
     staker: address = self.staker
     if staker != empty(address) and staker in [_from, _to]:
         assert _from != _to
-        liquidity: LiquidityValuesOut = self._calculate_values()
+        liquidity: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
         self.liquidity.admin = liquidity.admin
         self.liquidity.total = liquidity.total
         self.totalSupply = liquidity.supply_tokens
