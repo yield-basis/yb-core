@@ -1,9 +1,9 @@
 # @version 0.4.1
 """
 @title LT
-@notice AMM for leveraging 2-token liquidity
-@author Michael Egorov
-@license Copyright (c) 2024
+@notice Implementation of leveraged liquidity for Yield Basis
+@author Scientia Spectra AG
+@license Copyright (c) 2025
 """
 
 interface IERC20:
@@ -409,6 +409,7 @@ def distrubute_borrower_fees(discount: uint256 = 10**16):  # This will JUST dona
     assert msg.sender == self.admin, "Access"
     extcall self.amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
+    # We price to the stablecoin we use, not the aggregated USD here, and this is correct
     min_amount: uint256 = (10**18 - discount) * amount // staticcall COLLATERAL.lp_price()
     extcall COLLATERAL.donate([amount, 0], min_amount)
 

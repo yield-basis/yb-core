@@ -1,7 +1,10 @@
 # @version 0.4.1
 
 """
-LP oracle for cryptopools
+@title CryptopoolLPOracle
+@notice LP oracle for Curve cryptopools
+@author Scientia Spectra AG
+@license Copyright (c) 2025
 """
 
 interface Cryptopool:

@@ -2,8 +2,8 @@
 """
 @title LEVAMM
 @notice Automatic market maker which keeps constant leverage
-@author Michael Egorov
-@license Copyright (c) 2024
+@author Scientia Spectra AG
+@license Copyright (c) 2025
 """
 
 interface IERC20:

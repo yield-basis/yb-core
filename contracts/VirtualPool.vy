@@ -1,6 +1,9 @@
 # @version 0.4.1
 """
-@title Virtual pool to swap LP in Yield Basis without touching the LP token
+@title VirtualPool
+@notice Virtual pool to swap LP in Yield Basis without touching the LP token
+@author Scientia Spectra AG
+@license Copyright (c) 2025
 """
 
 from ethereum.ercs import IERC20 as ERC20
