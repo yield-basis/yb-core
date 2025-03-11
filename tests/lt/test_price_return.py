@@ -111,12 +111,21 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     self.yb_amm.exchange(0, 1, amount, 0)
                 except Exception:
-                    if self.yb_amm.debt() > amount:
+                    if amount > self.yb_amm.debt():
                         return
                     raise
         else:
-            pass
-
+            crypto_amount = amount * 10**18 // self.p
+            self.collateral_token._mint_for_testing(self.admin, crypto_amount)
+            self.stablecoin._mint_for_testing(self.admin, amount)
+            with boa.env.prank(self.admin):
+                try:
+                    lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
+                except Exception:
+                    if amount < 10**8:
+                        return
+                    raise
+                self.yb_amm.exchange(1, 0, lp, 0)
 
     @rule(dt=dt)
     def propagate(self, dt):
