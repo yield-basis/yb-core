@@ -294,7 +294,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     self.collateral_amount = collateral
     # Assume that transfer of collateral happened already (as a result of exchange)
 
-    value_after: uint256 = self.get_x0(p_o, collateral, debt) * 10** 18 // (2 * LEVERAGE - 10**18)  # Value in fiat
+    value_after: uint256 = self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     log AddLiquidityRaw(token_amounts=[d_collateral, d_debt], invariant=value_after, price_oracle=p_o)
     return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
