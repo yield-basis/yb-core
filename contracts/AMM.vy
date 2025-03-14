@@ -243,7 +243,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
-    x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
+    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    x_initial: uint256 = x0 - debt
 
     out_amount: uint256 = 0
     fee: uint256 = self.fee
@@ -253,8 +254,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         y: uint256 = x_initial * collateral // x
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
-        self.debt = debt - in_amount
-        self.collateral_amount -= out_amount
+        debt -= in_amount
+        collateral = self.collateral_amount - out_amount
         self.redeemed += in_amount
         assert extcall STABLECOIN.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall COLLATERAL.transfer(_for, out_amount, default_return_value=True)
@@ -264,11 +265,16 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         x: uint256 = x_initial * collateral // y
         out_amount = (x_initial - x) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
-        self.debt = debt + out_amount
+        debt += out_amount
         self.minted += out_amount
-        self.collateral_amount += in_amount
+        collateral = self.collateral_amount + in_amount
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
+
+    assert self.get_x0(p_o, collateral, debt) >= x0, "Bad final state"
+
+    self.collateral_amount = collateral
+    self.debt = debt
 
     log TokenExchange(buyer=msg.sender, sold_id=i, tokens_sold=in_amount,
                       bought_id=j, tokens_bought=out_amount, fee=fee, price_oracle=p_o)

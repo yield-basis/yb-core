@@ -13,6 +13,10 @@ class StatefulTrader(RuleBasedStateMachine):
     frac = st.floats(min_value=0, max_value=1)
     user_id = st.integers(min_value=0, max_value=9)
 
+    def __init__(self):
+        super().__init__()
+        self.value = 0
+
     @rule(c_value=collateral_value, debt=debt_value)
     def deposit(self, c_value, debt):
         p = self.price_oracle.price()
@@ -27,7 +31,6 @@ class StatefulTrader(RuleBasedStateMachine):
             c_value = (self.amm.collateral_amount() + c_amount) * 10**(18 - self.collateral_decimals) * p // 10**18
             if c_value**2 - 4 * c_value * LEV_RATIO // 10**18 * debt < 0:
                 return
-
             raise
 
     @rule(frac=frac)
@@ -53,6 +56,7 @@ class StatefulTrader(RuleBasedStateMachine):
             self.collateral_token._mint_for_testing(user, amount)
         j = int(is_stablecoin)
         i = 1 - j
+        value_before = self.amm.value_oracle()[1]
         with boa.env.prank(user):
             try:
                 min_out = self.amm.get_dy(i, j, amount)
@@ -66,7 +70,15 @@ class StatefulTrader(RuleBasedStateMachine):
                     return
                 if 'D: uint256 = coll_value' in str(e) or 'self.get_x0' in str(e):
                     return
+                if 'Bad final state' in str(e):
+                    return  # Protection worked
                 raise
+        value_after = self.amm.value_oracle()[1]
+        print(self.amm.collateral_amount(), self.amm.debt())
+        if self.fee > 0:
+            assert value_after + value_after // 10**18 >= value_before
+        else:
+            assert value_after + 1 >= value_before
 
     # invaraint to check sum of coins
     # set_price (and change the profit tracker)
