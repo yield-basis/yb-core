@@ -5,6 +5,8 @@
 @author Scientia Spectra AG
 @license Copyright (c) 2025
 """
+from snekmate.utils import math
+
 
 interface IERC20:
     def decimals() -> uint256: view
@@ -208,12 +210,12 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 
     if i == 0:  # Buy collateral
         x: uint256 = x_initial + in_amount
-        y: uint256 = x_initial * collateral // x
+        y: uint256 = math._ceil_div(x_initial * collateral, x)
         return (collateral - y) * (10**18 - self.fee) // 10**18
 
     else:  # Sell collateral
         y: uint256 = collateral + in_amount
-        x: uint256 = x_initial * collateral // y
+        x: uint256 = math._ceil_div(x_initial * collateral, y)
         return (x_initial - x) * (10**18 - self.fee) // 10**18
 
 
@@ -251,7 +253,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
     if i == 0:  # Trader buys collateral from us
         x: uint256 = x_initial + in_amount
-        y: uint256 = x_initial * collateral // x
+        y: uint256 = math._ceil_div(x_initial * collateral, x)
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
         debt -= in_amount
@@ -262,7 +264,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
     else:  # Trader sells collateral to us
         y: uint256 = collateral + in_amount
-        x: uint256 = x_initial * collateral // y
+        x: uint256 = math._ceil_div(x_initial * collateral, y)
         out_amount = (x_initial - x) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
         debt += out_amount
@@ -314,7 +316,7 @@ def _withdraw(frac: uint256) -> Pair:
     debt: uint256 = self._debt_w()
 
     d_collateral: uint256 = collateral * frac // 10**18
-    d_debt: uint256 = debt * frac // 10**18
+    d_debt: uint256 = math._ceil_div(debt * frac, 10**18)
 
     self.collateral_amount -= d_collateral
     self.debt = debt - d_debt

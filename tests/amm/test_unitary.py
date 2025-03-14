@@ -34,10 +34,14 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
 
     p_amm = amm.get_p()
     assert abs(p_amm - p_o) / p_o < 1e-7
-    p_buy = 10**10 / amm.get_dy(0, 1, 10**10)
-    p_sell = amm.get_dy(1, 0, 10**10) / 10**10
-    assert abs(p_buy - p_o / (1 - fee) / 1e18) / p_buy < 1e-7
-    assert abs(p_sell - p_o * (1 - fee) / 1e18) / p_sell < 1e-7
+    dy = amm.get_dy(0, 1, 10**10)
+    p_buy = 10**10 / dy
+    err_buy = 1 / dy + 1e-7
+    dy = amm.get_dy(1, 0, 10**10)
+    p_sell = dy / 10**10
+    err_sell = 1 / dy + 1e-7
+    assert abs(p_buy - p_o / (1 - fee) / 1e18) / p_buy < err_buy
+    assert abs(p_sell - p_o * (1 - fee) / 1e18) / p_sell < err_sell
 
     assert stablecoin.address == amm.coins(0)
     assert collateral_token.address == amm.coins(1)

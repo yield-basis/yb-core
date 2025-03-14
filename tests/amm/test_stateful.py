@@ -74,7 +74,6 @@ class StatefulTrader(RuleBasedStateMachine):
                     return  # Protection worked
                 raise
         value_after = self.amm.value_oracle()[1]
-        print(self.amm.collateral_amount(), self.amm.debt())
         if self.fee > 0:
             assert value_after + value_after // 10**18 >= value_before
         else:

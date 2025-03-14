@@ -18,6 +18,7 @@ pytest-xdist = "^3.6"
 pytest-forked = "^1.6.0"
 ipython = "^8"
 matplotlib = "^3"  # Only for graphs, otherwise not needed
+snekmate = "0.1.1rc1"
 
 [build-system]
 requires = ["poetry-core"]
