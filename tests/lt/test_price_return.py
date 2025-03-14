@@ -162,8 +162,8 @@ class StatefulTrader(RuleBasedStateMachine):
         self.pps = pps
 
 
-def test_stateful_lendborrow(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
-                             yb_allocated, seed_cryptopool, accounts, admin):
+def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
+                      yb_allocated, seed_cryptopool, accounts, admin):
     StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
