@@ -54,9 +54,11 @@ class StatefulTrader(RuleBasedStateMachine):
         j = int(is_stablecoin)
         i = 1 - j
         with boa.env.prank(user):
-            # XXX test min_amount
             try:
-                self.amm.exchange(i, j, amount, 0)
+                min_out = self.amm.get_dy(i, j, amount)
+                with boa.reverts():
+                    self.amm.exchange(i, j, amount, min_out + 1)
+                self.amm.exchange(i, j, amount, min_out)
             except Exception as e:
                 if amount == 0:
                     return
