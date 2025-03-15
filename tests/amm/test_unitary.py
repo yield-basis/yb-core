@@ -69,7 +69,7 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
 
 @given(
     collateral_amount=st.integers(min_value=0, max_value=10**25),
-    debt_multiplier=st.floats(min_value=0.9, max_value=1.1),
+    debt_multiplier=st.floats(min_value=0.5, max_value=1.5),
     withdraw_fraction=st.floats(min_value=0, max_value=1.1)
 )
 @settings(max_examples=1000)
@@ -77,6 +77,13 @@ def test_deposit_withdraw(amm, price_oracle, admin, accounts,
                           collateral_amount, debt_multiplier, withdraw_fraction):
     p_o = price_oracle.price()
     debt = int(debt_multiplier * (p_o * collateral_amount // 10**18) / 2)
+
+    try:
+        amm.value_change(collateral_amount, debt, True)
+    except Exception as e:
+        if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+            return
+        raise
 
     with boa.env.prank(accounts[0]):
         with boa.reverts('Access violation'):

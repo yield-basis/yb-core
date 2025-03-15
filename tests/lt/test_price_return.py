@@ -42,10 +42,13 @@ class StatefulTrader(RuleBasedStateMachine):
             else:
                 try:
                     self.yb_lt.deposit(amount, debt, 0)
-                except Exception:
+                except Exception as e:
                     if amount < 10**7:
                         # Amount being too small could be causing math precision errors in cryptoswap
                         # That will prevent a deposit, and that is normal
+                        return
+                    if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+                        # Not allowing unsafe states
                         return
 
                     balances = [self.cryptopool.balances(0) + debt, (self.cryptopool.balances(1) + amount) * self.p / 1e18]

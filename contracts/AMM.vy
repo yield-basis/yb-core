@@ -41,6 +41,8 @@ struct OraclizedValue:
 
 LEVERAGE: public(immutable(uint256))
 LEV_RATIO: immutable(uint256)
+MIN_SAFE_DEBT: immutable(uint256)
+MAX_SAFE_DEBT: immutable(uint256)
 DEPOSITOR: public(immutable(address))
 COLLATERAL: public(immutable(IERC20))
 STABLECOIN: public(immutable(IERC20))
@@ -106,6 +108,11 @@ def __init__(depositor: address,
     denominator: uint256 = 2 * leverage - 10**18
     LEV_RATIO = leverage**2 // denominator * 10**18 // denominator
 
+    # 1 / (4 * L**2)
+    MIN_SAFE_DEBT = 10**36 // leverage * 10**18 // leverage // 4
+    # (2 * L - 1)**2 / (4 * L**2) - 1 / (16 * L**2)
+    MAX_SAFE_DEBT = denominator**2 // leverage * 10**18 // leverage // 4 - 10**36 // leverage * 10**18 // leverage // 16
+
     self.rate_mul = 10**18
     self.rate_time = block.timestamp
 
@@ -122,8 +129,19 @@ def sqrt(arg: uint256) -> uint256:
 
 @internal
 @view
-def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> uint256:
+def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256, safe_limits: bool) -> uint256:
+    # Safe limits:
+    # debt >= 0
+    # debt <= coll_value * 10**18 // (4 * LEV_RATIO)  ( == 9 / 16 * coll_value)
+    # debt in equilibrium = coll_value * (LEVERAGE - 1.0) / LEVERAGE  ( == 1/2 * coll_value)
+    # When L=2, critical value of debt corresponds to p_amm = 9/16 * p_o
+
     coll_value: uint256 = p_oracle * collateral * COLLATERAL_PRECISION // 10**18
+
+    if safe_limits:
+        assert debt >= coll_value * MIN_SAFE_DEBT // 10**18, "Unsafe min"
+        assert debt <= coll_value * MAX_SAFE_DEBT // 10**18, "Unsafe max"
+
     D: uint256 = coll_value**2 - 4 * coll_value * LEV_RATIO // 10**18 * debt
     return (coll_value + self.sqrt(D)) * 10**18 // (2 * LEV_RATIO)
 ###
@@ -194,7 +212,7 @@ def get_state() -> AMMState:
     state: AMMState = empty(AMMState)
     state.collateral = self.collateral_amount
     state.debt = self._debt()
-    state.x0 = self.get_x0(p_o, state.collateral, state.debt)
+    state.x0 = self.get_x0(p_o, state.collateral, state.debt, False)
     return state
 
 
@@ -206,7 +224,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
-    x_initial: uint256 = self.get_x0(p_o, collateral, debt) - debt
+    x_initial: uint256 = self.get_x0(p_o, collateral, debt, False) - debt
 
     if i == 0:  # Buy collateral
         x: uint256 = x_initial + in_amount
@@ -225,7 +243,7 @@ def get_p() -> uint256:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount
     debt: uint256 = self._debt()
-    return (self.get_x0(p_o, collateral, debt) - debt) * (10**18 // COLLATERAL_PRECISION) // collateral
+    return (self.get_x0(p_o, collateral, debt, False) - debt) * (10**18 // COLLATERAL_PRECISION) // collateral
 
 
 @external
@@ -245,7 +263,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
-    x0: uint256 = self.get_x0(p_o, collateral, debt)
+    x0: uint256 = self.get_x0(p_o, collateral, debt, False)
     x_initial: uint256 = x0 - debt
 
     out_amount: uint256 = 0
@@ -273,7 +291,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
-    assert self.get_x0(p_o, collateral, debt) >= x0, "Bad final state"
+    # This call also will not allow to get too close to the untradable region
+    assert self.get_x0(p_o, collateral, debt, True) >= x0, "Bad final state"
 
     self.collateral_amount = collateral
     self.debt = debt
@@ -292,7 +311,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
 
-    value_before: uint256 = self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
+    value_before: uint256 = self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     debt += d_debt
     collateral += d_collateral
@@ -302,7 +321,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     self.collateral_amount = collateral
     # Assume that transfer of collateral happened already (as a result of exchange)
 
-    value_after: uint256 = self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
+    value_after: uint256 = self.get_x0(p_o, collateral, debt, True) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     log AddLiquidityRaw(token_amounts=[d_collateral, d_debt], invariant=value_after, price_oracle=p_o)
     return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
@@ -339,14 +358,14 @@ def value_oracle() -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
-    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18))
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
 @view
 def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
-    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt) * 10**18 // (2 * LEVERAGE - 10**18))
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
@@ -356,7 +375,7 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
 
-    x0_before: uint256 = self.get_x0(p_o, collateral, debt)
+    x0_before: uint256 = self.get_x0(p_o, collateral, debt, False)
 
     if is_deposit:
         collateral += collateral_amount
@@ -365,7 +384,7 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
         collateral -= collateral_amount
         debt -= borrowed_amount
 
-    x0_after: uint256 = self.get_x0(p_o, collateral, debt)
+    x0_after: uint256 = self.get_x0(p_o, collateral, debt, is_deposit)
 
     return ValueChange(
         p_o = p_o,

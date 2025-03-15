@@ -12,6 +12,9 @@ class StatefulTrader(RuleBasedStateMachine):
     is_stablecoin = st.booleans()
     frac = st.floats(min_value=0, max_value=1)
     user_id = st.integers(min_value=0, max_value=9)
+    dt = st.integers(min_value=0, max_value=86400)
+    rate = st.integers(min_value=0, max_value=10**18 // (365 * 86400))
+    price_shift = st.floats(min_value=0.8, max_value=1.2)
 
     def __init__(self):
         super().__init__()
@@ -30,6 +33,10 @@ class StatefulTrader(RuleBasedStateMachine):
             debt = self.amm.debt() + debt
             c_value = (self.amm.collateral_amount() + c_amount) * 10**(18 - self.collateral_decimals) * p // 10**18
             if c_value**2 - 4 * c_value * LEV_RATIO // 10**18 * debt < 0:
+                return
+            if debt >= (LEV_RATIO / 1e18 - 1 / 64) * c_value:
+                return
+            if debt <= c_value / 16:
                 return
             raise
 
@@ -71,7 +78,9 @@ class StatefulTrader(RuleBasedStateMachine):
                 if 'D: uint256 = coll_value' in str(e) or 'self.get_x0' in str(e):
                     return
                 if 'Bad final state' in str(e):
-                    return  # Protection worked
+                    return  # Do not allow to have a loss
+                if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+                    return  # Do not allow to end up in a bad state
                 raise
         value_after = self.amm.value_oracle()[1]
         if self.fee > 0:
@@ -79,11 +88,24 @@ class StatefulTrader(RuleBasedStateMachine):
         else:
             assert value_after + 1 >= value_before
 
+    @rule(dt=dt)
+    def rule_propagate(self, dt):
+        boa.env.time_travel(dt)
+
+    @rule(rate=rate)
+    def set_rate(self, rate):
+        with boa.env.prank(self.admin):
+            self.amm.set_rate(rate)
+
+    @rule(dp=price_shift)
+    def change_oracle(self, dp):
+        with boa.env.prank(self.admin):
+            self.price_oracle.set_price(int(self.price_oracle.price() * dp))
+
     # invaraint to check sum of coins
     # set_price (and change the profit tracker)
     # set_rate
     # collect fees and donate
-    # propagate
 
 
 @given(
