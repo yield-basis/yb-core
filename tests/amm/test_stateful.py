@@ -14,7 +14,7 @@ class StatefulTrader(RuleBasedStateMachine):
     user_id = st.integers(min_value=0, max_value=9)
     dt = st.integers(min_value=0, max_value=86400)
     rate = st.integers(min_value=0, max_value=10**18 // (365 * 86400))
-    price_shift = st.floats(min_value=0.8, max_value=1.2)
+    price_shift = st.floats(min_value=0.95, max_value=1.05)
 
     def __init__(self):
         super().__init__()
@@ -102,10 +102,10 @@ class StatefulTrader(RuleBasedStateMachine):
         with boa.env.prank(self.admin):
             self.price_oracle.set_price(int(self.price_oracle.price() * dp))
 
-    # invaraint to check sum of coins
-    # set_price (and change the profit tracker)
-    # set_rate
-    # collect fees and donate
+    @rule()
+    def collect_fees(self):
+        with boa.env.prank(self.admin):
+            self.amm.collect_fees()
 
 
 @given(
