@@ -24,6 +24,7 @@ interface LevAMM:
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
+    def max_debt() -> uint256: view
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -297,6 +298,12 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         liquidity_values = self._calculate_values(p_o)
 
     v: ValueChange = extcall amm._deposit(lp_tokens, debt)
+
+    # Value is measured in USD
+    # Do not allow value to become larger than HALF of the available stablecoins after the deposit
+    # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
+    assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
+
 
     if supply > 0:
         supply = liquidity_values.supply_tokens
