@@ -124,6 +124,8 @@ STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
 DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
 DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
+FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
+
 admin: public(address)
 amm: public(LevAMM)
 agg: public(PriceOracle)
@@ -426,8 +428,9 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
 
 @external
 @nonreentrant
-def distrubute_borrower_fees(discount: uint256 = 10**16):  # This will JUST donate to the crypto pool
-    assert msg.sender == self.admin, "Access"
+def distrubute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This will JUST donate to the crypto pool
+    if discount > FEE_CLAIM_DISCOUNT:
+        assert msg.sender == self.admin, "Access"
     extcall self.amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
