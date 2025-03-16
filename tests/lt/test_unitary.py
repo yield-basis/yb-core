@@ -94,3 +94,22 @@ def test_stake(cryptopool, yb_lt, collateral_token, yb_allocated, seed_cryptopoo
 
         # Stake 25%
         yb_lt.transfer(staker, shares // 4)
+
+
+def test_collect_fees(cryptopool, yb_lt, collateral_token, stablecoin, yb_allocated, seed_cryptopool, admin):
+    with boa.env.prank(admin):
+        yb_lt.set_rate(10**18 // 365 // 86400 // 2)
+
+        collateral_token._mint_for_testing(admin, 5 * 10**17)
+        yb_lt.deposit(5 * 10**17, 5 * 10**17 * 100_000, 0)
+
+        stables_before = cryptopool.balances(0)
+        assert stables_before == stablecoin.balanceOf(cryptopool.address)
+        assert cryptopool.balances(1) == collateral_token.balanceOf(cryptopool.address)
+
+        boa.env.time_travel(7 * 86400)
+
+        yb_lt.distrubute_borrower_fees()
+
+        assert cryptopool.balances(0) == stables_before
+        assert stablecoin.balanceOf(cryptopool.address) > stables_before
