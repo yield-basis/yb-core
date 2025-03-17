@@ -196,23 +196,24 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     staked: int256 = 0
     if staker != empty(address):
         staked = convert(self.balanceOf[self.staker], int256)
-    total: int256 = convert(self.totalSupply, int256)
+    supply: int256 = convert(self.totalSupply, int256)
 
     f_a: int256 = convert(
-        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // total, uint256)) // 10**18,
+        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
     cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
+    value_change: int256 = cur_value - (prev_value + prev.admin)
 
     v_st: int256 = convert(prev.staked, int256)
     v_st_ideal: int256 = convert(prev.ideal_staked, int256)
     # ideal_staked is set when some tokens are transferred to staker address
 
-    prev.admin += (cur_value - prev_value) * f_a // 10**18
-    dv_use: int256 = (cur_value - prev_value) * (10**18 - f_a) // 10**18
+    dv_use: int256 = value_change * (10**18 - f_a) // 10**18
+    prev.admin += (value_change - dv_use)
 
-    dv_s: int256 = dv_use * staked // total
+    dv_s: int256 = dv_use * staked // supply
     if dv_use > 0:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
@@ -222,8 +223,8 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # Solution of:
     # staked - token_reduction       new_staked_value
     # -------------------------  =  -------------------
-    # total - token_reduction         new_token_value
-    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * total, new_total_value - new_staked_value)
+    # supply - token_reduction         new_token_value
+    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
     # token_reduction = 0 if nothing is staked
     # XXX need to consider situation when denominator is very close to zero
 
@@ -237,7 +238,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         ideal_staked=prev.ideal_staked,
         staked=convert(new_staked_value, uint256),
         staked_tokens=convert(staked - token_reduction, uint256),
-        supply_tokens=convert(total - token_reduction, uint256)
+        supply_tokens=convert(supply - token_reduction, uint256)
     )
 
 
@@ -256,7 +257,11 @@ def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
-        return liquidity.supply_tokens * v.value_after // v.value_before - liquidity.supply_tokens
+        # Liquidity contains admin fees, so we need to subtract
+        # If admin fees are negative - we get LESS LP tokens
+        # value_before = v.value_before - liquidity.admin = total
+        value_after: uint256 = convert(convert(v.value_after * 10**18 // p_o, int256) - liquidity.admin, uint256)
+        return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
     return v.value * 10**18 // p_o
@@ -269,9 +274,14 @@ def preview_withdraw(tokens: uint256) -> uint256:
     """
     @notice Returns the amount of assets which can be obtained upon withdrawing from tokens
     """
-    supply: uint256 = self._calculate_values(self._price_oracle()).supply_tokens
+    v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
     state: AMMState = staticcall self.amm.get_state()
-    return staticcall COLLATERAL.calc_withdraw_fixed_out(state.collateral * tokens // supply, 0, state.debt * tokens // supply)
+    # Total does NOT include uncollected admin fees
+    # however we account only for positive admin balance. This "socializes" losses if they happen
+    admin_balance: uint256 = convert(max(v.admin, 0), uint256)
+    withdrawn_lp: uint256 = state.collateral * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
+    withdrawn_debt: uint256 = state.debt * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
+    return staticcall COLLATERAL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
 
 
 @external
@@ -298,33 +308,36 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         liquidity_values = self._calculate_values(p_o)
 
     v: ValueChange = extcall amm._deposit(lp_tokens, debt)
+    value_after: uint256 = v.value_after * 10**18 // p_o
 
     # Value is measured in USD
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
     assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
 
-
     if supply > 0:
         supply = liquidity_values.supply_tokens
         self.liquidity.admin = liquidity_values.admin
-        self.liquidity.total = liquidity_values.total * v.value_after // v.value_before
+        value_before: uint256 = liquidity_values.total
+        value_after = convert(convert(value_after, int256) - liquidity_values.admin, uint256)
+        self.liquidity.total = value_after
         self.liquidity.staked = liquidity_values.staked
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
         staker: address = self.staker
         if staker != empty(address):
             self.balanceOf[staker] = liquidity_values.staked_tokens
         # ideal_staked is only changed when we transfer coins to staker
-        shares = supply * v.value_after // v.value_before - supply
+        shares = supply * value_after // value_before - supply
 
     else:
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
         # Value is measured in USD
-        shares = v.value_after * 10**18 // p_o
+        shares = value_after
         # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
         self.liquidity.ideal_staked = 0  # Likely already 0 since supply was 0
         self.liquidity.staked = 0        # Same: nothing staked when supply is 0
         self.liquidity.total = shares    # 1 share = 1 crypto at first deposit
+        self.liquidity.admin = 0         # if we had admin fees - give them to the first depositor; simpler to handle
 
     assert shares >= min_shares, "Slippage"
 
@@ -356,12 +369,17 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
         self.balanceOf[staker] = liquidity_values.staked_tokens
     state: AMMState = staticcall amm.get_state()
 
-    withdrawn: Pair = extcall amm._withdraw(10**18 * shares // supply)
+    admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
+
+    withdrawn: Pair = extcall amm._withdraw(10**18 * liquidity_values.total // (liquidity_values.total + admin_balance) * shares // supply)
     assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
     crypto_received: uint256 = extcall COLLATERAL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
 
     self._burn(msg.sender, shares)  # Changes self.totalSupply
     self.liquidity.total = liquidity_values.total * (supply - shares) // supply
+    if liquidity_values.admin < 0:
+        # If admin fees are negative - we are skipping them, so reduce proportionally
+        self.liquidity.admin = liquidity_values.admin * convert(supply - shares, int256) // convert(supply, int256)
     assert crypto_received >= min_assets, "Slippage"
     assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt)
     assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received)
