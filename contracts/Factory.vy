@@ -7,15 +7,6 @@
 """
 from ethereum.ercs import IERC20
 
-# Creates the following:
-# AMM
-# LT
-# Virtual pool for arbing easily
-# Allocates stables
-
-# Can deallocate stables as well
-# fee receiver is in factory
-
 
 interface LT:
     def set_amm(amm: address): nonpayable

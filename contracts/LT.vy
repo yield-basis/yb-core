@@ -50,6 +50,9 @@ interface PriceOracle:
     def price() -> uint256: view
     def AGG() -> address: view
 
+interface Factory:
+    def admin() -> address: view
+
 
 struct AMMState:
     collateral: uint256
@@ -175,6 +178,16 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCrypt
 @pure
 def sqrt(arg: uint256) -> uint256:
     return isqrt(arg)
+
+
+@internal
+@view
+def _check_admin():
+    admin: address = self.admin
+    if admin.is_contract:
+        assert msg.sender == staticcall Factory(admin).admin(), "Access"
+    else:
+        assert msg.sender == admin, "Access"
 
 
 @internal
@@ -401,7 +414,7 @@ def pricePerShare() -> uint256:
 @external
 @nonreentrant
 def set_amm(amm: LevAMM):
-    assert msg.sender == self.admin, "Access"
+    self._check_admin()
     assert self.amm == empty(LevAMM), "Already set"
     self.amm = amm
     self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
@@ -410,7 +423,7 @@ def set_amm(amm: LevAMM):
 @external
 @nonreentrant
 def set_admin(new_admin: address):
-    assert msg.sender == self.admin, "Access"
+    self._check_admin()
     self.admin = new_admin
     log SetAdmin(admin=new_admin)
 
@@ -418,7 +431,7 @@ def set_admin(new_admin: address):
 @external
 @nonreentrant
 def set_rate(rate: uint256):
-    assert msg.sender == self.admin, "Access"
+    self._check_admin()
     extcall self.amm.set_rate(rate)
 
 
@@ -430,7 +443,7 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
     @param allocator Address of the allocator to provide stables for us
     @param limit Limit to allocate for this pool from this allocator. Max uint256 = do not change
     """
-    assert msg.sender == self.admin, "Access"
+    self._check_admin()
 
     allocation: uint256 = limit
     allocated: uint256 = self.stablecoin_allocated[allocator]
@@ -455,7 +468,7 @@ def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)
 @nonreentrant
 def distrubute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This will JUST donate to the crypto pool
     if discount > FEE_CLAIM_DISCOUNT:
-        assert msg.sender == self.admin, "Access"
+        self._check_admin()
     extcall self.amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
@@ -466,7 +479,7 @@ def distrubute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
 @external
 @nonreentrant
 def set_staker(staker: address):
-    assert msg.sender == self.admin, "Access"
+    self._check_admin()
     self.staker = staker
     log SetStaker(staker=staker)
 
