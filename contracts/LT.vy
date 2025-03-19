@@ -55,6 +55,7 @@ interface PriceOracle:
 
 interface Factory:
     def admin() -> address: view
+    def fee_receiver() -> address: view
 
 
 struct AMMState:
@@ -320,6 +321,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
     assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
 
+    staker: address = self.staker
+
     if supply > 0:
         supply = liquidity_values.supply_tokens
         self.liquidity.admin = liquidity_values.admin
@@ -328,7 +331,6 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.total = value_after
         self.liquidity.staked = liquidity_values.staked
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
-        staker: address = self.staker
         if staker != empty(address):
             self.balanceOf[staker] = liquidity_values.staked_tokens
         # ideal_staked is only changed when we transfer coins to staker
@@ -343,6 +345,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.staked = 0        # Same: nothing staked when supply is 0
         self.liquidity.total = shares    # 1 share = 1 crypto at first deposit
         self.liquidity.admin = 0         # if we had admin fees - give them to the first depositor; simpler to handle
+        self.balanceOf[staker] = 0
 
     assert shares >= min_shares, "Slippage"
 
@@ -466,6 +469,27 @@ def distrubute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
     min_amount: uint256 = (10**18 - discount) * amount // staticcall COLLATERAL.lp_price()
     extcall COLLATERAL.donate([amount, 0], min_amount)
+
+
+@external
+@nonreentrant
+def withdraw_admin_fees():
+    admin: address = self.admin
+    assert admin.is_contract, "Need factory"
+    assert msg.sender == staticcall Factory(admin).admin(), "Access"
+
+    fee_receiver: address = staticcall Factory(admin).fee_receiver()
+    v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
+    # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
+    # fee_receiver is just a normal user
+    new_total: uint256 = v.total + convert(v.admin, uint256)
+    self._mint(fee_receiver, v.supply_tokens * new_total // v.total)
+    self.liquidity.total = new_total
+    self.liquidity.admin = 0
+    self.liquidity.staked = v.staked
+    staker: address = self.staker
+    if staker != empty(address):
+        self.balanceOf[staker] = v.staked_tokens
 
 
 @external
