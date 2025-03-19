@@ -13,6 +13,9 @@ interface IERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
+interface IERC20Slice:
+    def symbol() -> String[29]: view
+
 interface LevAMM:
     def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange: nonpayable
     def _withdraw(frac: uint256) -> Pair: nonpayable
@@ -143,6 +146,7 @@ liquidity: public(LiquidityValues)
 allowance: public(HashMap[address, HashMap[address, uint256]])
 balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
+decimals: public(constant(uint8)) = 18
 
 stablecoin_allocations: public(HashMap[address, uint256])
 stablecoin_allocated: public(HashMap[address, uint256])
@@ -485,6 +489,18 @@ def set_staker(staker: address):
 
 
 # ERC20 methods
+
+@external
+@view
+def symbol() -> String[32]:
+    return concat('yb-', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+
+
+@external
+@view
+def name() -> String[58]:
+    return concat('Yield Basis liquidity for ', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+
 
 @internal
 def _approve(_owner: address, _spender: address, _value: uint256):

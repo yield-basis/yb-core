@@ -1,6 +1,12 @@
 import boa
 
 
+def test_informational(yb_lt):
+    assert yb_lt.symbol() == 'yb-xxxBTC'
+    assert yb_lt.name() == 'Yield Basis liquidity for xxxBTC'
+    assert yb_lt.decimals() == 18
+
+
 def test_allocate_stablecoins(cryptopool, cryptopool_oracle, yb_lt, yb_amm, stablecoin, collateral_token, admin):
     stablecoin._mint_for_testing(admin, 10**30)
 
