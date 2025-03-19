@@ -113,8 +113,12 @@ class StatefulTrader(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 try:
                     out = self.yb_amm.exchange(0, 1, amount, 0)
-                except Exception:
+                except Exception as e:
                     if amount > self.yb_amm.debt():
+                        return
+                    if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+                        # Trade leads to the state which we may not come back from
+                        # so AMM blocks it (correctly)
                         return
                     raise
                 if out > 10**6:
