@@ -5,13 +5,13 @@
 @author Scientia Spectra AG
 @license Copyright (c) 2025
 """
+from ethereum.ercs import IERC20
 
-interface IERC20:
+implements: IERC20
+
+
+interface IERC20Detailed:
     def decimals() -> uint256: view
-    def balanceOf(_user: address) -> uint256: view
-    def approve(_to: address, _value: uint256) -> bool: nonpayable
-    def transfer(_to: address, _value: uint256) -> bool: nonpayable
-    def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface IERC20Slice:
     def symbol() -> String[29]: view
@@ -93,18 +93,6 @@ struct LiquidityValuesOut:
 event SetStaker:
     staker: indexed(address)
 
-# ERC20 events
-
-event Approval:
-    owner: indexed(address)
-    spender: indexed(address)
-    value: uint256
-
-event Transfer:
-    sender: indexed(address)
-    receiver: indexed(address)
-    value: uint256
-
 
 # ERC4626 events
 
@@ -170,7 +158,7 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCrypt
     STABLECOIN = stablecoin
     COLLATERAL = collateral
     DEPOSITED_TOKEN = deposited_token
-    DEPOSITED_TOKEN_PRECISION = 10**(18 - staticcall deposited_token.decimals())
+    DEPOSITED_TOKEN_PRECISION = 10**(18 - staticcall IERC20Detailed(deposited_token.address).decimals())
     self.admin = admin
     assert extcall deposited_token.approve(collateral.address, max_value(uint256), default_return_value=True)
     assert extcall stablecoin.approve(collateral.address, max_value(uint256), default_return_value=True)
@@ -506,7 +494,7 @@ def name() -> String[58]:
 def _approve(_owner: address, _spender: address, _value: uint256):
     self.allowance[_owner][_spender] = _value
 
-    log Approval(owner=_owner, spender=_spender, value=_value)
+    log IERC20.Approval(owner=_owner, spender=_spender, value=_value)
 
 
 @internal
@@ -514,7 +502,7 @@ def _burn(_from: address, _value: uint256):
     self.balanceOf[_from] -= _value
     self.totalSupply -= _value
 
-    log Transfer(sender=_from, receiver=empty(address), value=_value)
+    log IERC20.Transfer(sender=_from, receiver=empty(address), value=_value)
 
 
 @internal
@@ -522,7 +510,7 @@ def _mint(_to: address, _value: uint256):
     self.balanceOf[_to] += _value
     self.totalSupply += _value
 
-    log Transfer(sender=empty(address), receiver=_to, value=_value)
+    log IERC20.Transfer(sender=empty(address), receiver=_to, value=_value)
 
 
 @internal
@@ -556,7 +544,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
     self.balanceOf[_from] -= _value
     self.balanceOf[_to] += _value
 
-    log Transfer(sender=_from, receiver=_to, value=_value)
+    log IERC20.Transfer(sender=_from, receiver=_to, value=_value)
 
 
 @external
@@ -600,49 +588,4 @@ def approve(_spender: address, _value: uint256) -> bool:
     @param _value The amount of tokens `_spender` is allowed to spend.
     """
     self._approve(msg.sender, _spender, _value)
-    return True
-
-
-@external
-def increaseAllowance(_spender: address, _add_value: uint256) -> bool:
-    """
-    @notice Increase the allowance granted to `_spender`.
-    @dev This function will never overflow, and instead will bound
-        allowance to MAX_UINT256. This has the potential to grant an
-        infinite approval.
-    @param _spender The account to increase the allowance of.
-    @param _add_value The amount to increase the allowance by.
-    """
-    cached_allowance: uint256 = self.allowance[msg.sender][_spender]
-    allowance: uint256 = unsafe_add(cached_allowance, _add_value)
-
-    # check for an overflow
-    if allowance < cached_allowance:
-        allowance = max_value(uint256)
-
-    if allowance != cached_allowance:
-        self._approve(msg.sender, _spender, allowance)
-
-    return True
-
-
-@external
-def decreaseAllowance(_spender: address, _sub_value: uint256) -> bool:
-    """
-    @notice Decrease the allowance granted to `_spender`.
-    @dev This function will never underflow, and instead will bound
-        allowance to 0.
-    @param _spender The account to decrease the allowance of.
-    @param _sub_value The amount to decrease the allowance by.
-    """
-    cached_allowance: uint256 = self.allowance[msg.sender][_spender]
-    allowance: uint256 = unsafe_sub(cached_allowance, _sub_value)
-
-    # check for an underflow
-    if cached_allowance < allowance:
-        allowance = 0
-
-    if allowance != cached_allowance:
-        self._approve(msg.sender, _spender, allowance)
-
     return True
