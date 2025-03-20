@@ -95,6 +95,11 @@ event SetStaker:
     staker: indexed(address)
 
 
+event WithdrawAdminFees:
+    receiver: address
+    amount: uint256
+
+
 # ERC4626 events
 
 event Deposit:
@@ -483,13 +488,16 @@ def withdraw_admin_fees():
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
     # fee_receiver is just a normal user
     new_total: uint256 = v.total + convert(v.admin, uint256)
-    self._mint(fee_receiver, v.supply_tokens * new_total // v.total)
+    to_mint: uint256 = v.supply_tokens * new_total // v.total
+    self._mint(fee_receiver, to_mint)
     self.liquidity.total = new_total
     self.liquidity.admin = 0
     self.liquidity.staked = v.staked
     staker: address = self.staker
     if staker != empty(address):
         self.balanceOf[staker] = v.staked_tokens
+
+    log WithdrawAdminFees(receiver=fee_receiver, amount=to_mint)
 
 
 @external
