@@ -147,6 +147,7 @@ def add_market(
     )
     extcall LT(market.lt).set_amm(market.amm)
     extcall LT(market.lt).set_rate(rate)
+    extcall STABLECOIN.approve(market.lt, max_value(uint256))
     extcall LT(market.lt).allocate_stablecoins(self, debt_ceiling)
 
     if self.virtual_pool_impl != empty(address) and self.flash != empty(address):

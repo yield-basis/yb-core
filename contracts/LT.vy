@@ -183,7 +183,7 @@ def sqrt(arg: uint256) -> uint256:
 def _check_admin():
     admin: address = self.admin
     if admin.is_contract:
-        assert msg.sender == staticcall Factory(admin).admin(), "Access"
+        assert msg.sender == admin or msg.sender == staticcall Factory(admin).admin(), "Access"
     else:
         assert msg.sender == admin, "Access"
 

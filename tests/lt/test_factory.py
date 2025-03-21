@@ -51,7 +51,7 @@ def flash(stablecoin):
 
 @pytest.fixture(scope="session")
 def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, mock_agg, flash, admin):
-    return boa.load(
+    factory = boa.load(
         'contracts/Factory.vy',
         stablecoin.address,
         amm_impl.address,
@@ -63,7 +63,24 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, mock_agg, fl
         flash.address,
         admin,  # Fee receiver
         admin)  # Admin
+    with boa.env.prank(admin):
+        factory.set_mint_factory(admin)
+        stablecoin._mint_for_testing(factory.address, 1000 * 10**6 * 10**18)
+    return factory
 
 
 def test_factory(factory):
     pass
+
+
+def test_create_market(factory, cryptopool, seed_cryptopool, accounts, admin):
+    fee = int(0.007e18)
+    rate = int(0.1e18 / (365 * 86400))
+    ceiling = 100 * 10**6 * 10**18
+
+    with boa.reverts('Access'):
+        with boa.env.prank(accounts[0]):
+            factory.add_market(cryptopool.address, fee, rate, ceiling)
+
+    with boa.env.prank(admin):
+        factory.add_market(cryptopool.address, fee, rate, ceiling)
