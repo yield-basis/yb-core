@@ -213,7 +213,7 @@ def set_mint_factory(mint_factory: address):
 @nonreentrant
 def set_allocator(allocator: address, amount: uint256):
     assert msg.sender == self.admin, "Access"
-    assert allocator != self.mint_factory
+    assert allocator != self.mint_factory, "Minter"
     assert allocator != empty(address)
 
     old_allocation: uint256 = self.allocators[allocator]
