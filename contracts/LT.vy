@@ -142,8 +142,8 @@ balanceOf: public(HashMap[address, uint256])
 totalSupply: public(uint256)
 decimals: public(constant(uint8)) = 18
 
-stablecoin_allocations: public(HashMap[address, uint256])
-stablecoin_allocated: public(HashMap[address, uint256])
+stablecoin_allocation: public(uint256)
+stablecoin_allocated: public(uint256)
 
 
 @deploy
@@ -437,31 +437,31 @@ def set_rate(rate: uint256):
 
 @external
 @nonreentrant
-def allocate_stablecoins(allocator: address, limit: uint256 = max_value(uint256)):
+def allocate_stablecoins(limit: uint256 = max_value(uint256)):
     """
     @notice This method has to be used once this contract has received allocation of stablecoins
-    @param allocator Address of the allocator to provide stables for us
     @param limit Limit to allocate for this pool from this allocator. Max uint256 = do not change
     """
     self._check_admin()
 
+    allocator: address = self.admin
     allocation: uint256 = limit
-    allocated: uint256 = self.stablecoin_allocated[allocator]
+    allocated: uint256 = self.stablecoin_allocated
     if limit == max_value(uint256):
-        allocation = self.stablecoin_allocations[allocator]
+        allocation = self.stablecoin_allocation
     else:
-        self.stablecoin_allocations[allocator] = limit
+        self.stablecoin_allocation = limit
 
     if allocation > allocated:
         # Assume that allocator has everything
         extcall STABLECOIN.transferFrom(allocator, self.amm.address, allocation - allocated)
-        self.stablecoin_allocated[allocator] = allocation
+        self.stablecoin_allocated = allocation
 
     elif allocation < allocated:
         to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
         allocated -= to_transfer
         extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer)
-        self.stablecoin_allocated[allocator] = allocated
+        self.stablecoin_allocated = allocated
 
 
 @external

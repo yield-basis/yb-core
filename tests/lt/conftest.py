@@ -101,4 +101,4 @@ def yb_amm(yb_lt, amm_deployer):
 def yb_allocated(yb_lt, stablecoin, admin):
     stablecoin._mint_for_testing(admin, 10**30)
     with boa.env.prank(admin):
-        yb_lt.allocate_stablecoins(admin, 10**30)
+        yb_lt.allocate_stablecoins(10**30)

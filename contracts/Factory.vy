@@ -11,7 +11,7 @@ from ethereum.ercs import IERC20
 interface LT:
     def set_amm(amm: address): nonpayable
     def set_rate(rate: uint256): nonpayable
-    def allocate_stablecoins(allocator: address, limit: uint256): nonpayable
+    def allocate_stablecoins(limit: uint256): nonpayable
 
 interface CurveCryptoPool:
     def coins(i: uint256) -> address: view
@@ -148,7 +148,7 @@ def add_market(
     extcall LT(market.lt).set_amm(market.amm)
     extcall LT(market.lt).set_rate(rate)
     extcall STABLECOIN.approve(market.lt, max_value(uint256))
-    extcall LT(market.lt).allocate_stablecoins(self, debt_ceiling)
+    extcall LT(market.lt).allocate_stablecoins(debt_ceiling)
 
     if self.virtual_pool_impl != empty(address) and self.flash != empty(address):
         market.virtual_pool = create_from_blueprint(
