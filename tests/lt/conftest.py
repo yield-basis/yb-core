@@ -1,6 +1,8 @@
 import boa
 import pytest
 
+from eth.constants import ZERO_ADDRESS
+
 
 @pytest.fixture(scope="session")
 def cryptopool(stablecoin, collateral_token, admin, accounts):
@@ -9,7 +11,7 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
         amm_impl = amm_interface.deploy_as_blueprint()
         math_impl = boa.load('contracts/twocrypto/CurveCryptoMathOptimized2.vy')
         views_impl = boa.load('contracts/twocrypto/CurveCryptoViews2Optimized.vy')
-        gauge_impl = "0x0000000000000000000000000000000000000000"
+        gauge_impl = ZERO_ADDRESS.hex()
 
         factory = boa.load('contracts/twocrypto/CurveTwocryptoFactory.vy')
         factory.initialise_ownership(admin, admin)
@@ -58,47 +60,106 @@ def mock_agg(admin):
 
 
 @pytest.fixture(scope="session")
-def cryptopool_oracle(cryptopool, mock_agg):
-    return boa.load('contracts/CryptopoolLPOracle.vy', cryptopool.address, mock_agg.address)
+def amm_interface():
+    return boa.load_partial('contracts/AMM.vy')
 
 
 @pytest.fixture(scope="session")
-def yb_lt(amm_deployer, cryptopool, cryptopool_oracle, collateral_token, stablecoin, accounts, admin):
+def amm_impl(amm_interface):
+    return amm_interface.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
+def lt_interface():
+    return boa.load_partial('contracts/LT.vy')
+
+
+@pytest.fixture(scope="session")
+def lt_impl(lt_interface):
+    return lt_interface.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
+def vpool_interface():
+    return boa.load_partial('contracts/VirtualPool.vy')
+
+
+@pytest.fixture(scope="session")
+def vpool_impl(vpool_interface):
+    return vpool_interface.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
+def oracle_interface():
+    return boa.load_partial('contracts/CryptopoolLPOracle.vy')
+
+
+@pytest.fixture(scope="session")
+def oracle_impl(oracle_interface):
+    return oracle_interface.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
+def flash(stablecoin):
+    return boa.load('contracts/testing/FlashLender.vy', stablecoin.address, 10**12 * 10**18)
+
+
+@pytest.fixture(scope="session")
+def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, mock_agg, flash, admin):
+    factory = boa.load(
+        'contracts/Factory.vy',
+        stablecoin.address,
+        amm_impl.address,
+        lt_impl.address,
+        vpool_impl.address,
+        oracle_impl.address,
+        ZERO_ADDRESS.hex(),  # Staker
+        mock_agg.address,
+        flash.address,
+        admin,  # Fee receiver
+        admin)  # Admin
     with boa.env.prank(admin):
-        lt = boa.load(
-            'contracts/LT.vy',
-            collateral_token.address,
-            stablecoin.address,
-            cryptopool.address,
-            admin)
+        factory.set_mint_factory(admin)
+        stablecoin._mint_for_testing(factory.address, 10**30)
+    return factory
 
-        amm = amm_deployer.deploy(
-            lt.address,
-            stablecoin.address,
-            cryptopool.address,
-            2 * 10**18,  # leverage = 2.0
-            int(0.007e18),  # fee
-            cryptopool_oracle.address
-        )
-        lt.set_amm(amm.address)
 
+@pytest.fixture(scope="session")
+def yb_market(factory, cryptopool, admin):
+    fee = int(0.007e18)
+    rate = int(0.1e18 / (365 * 86400))
+    ceiling = 0
+
+    with boa.env.prank(admin):
+        return factory.add_market(cryptopool.address, fee, rate, ceiling)
+
+
+@pytest.fixture(scope="session")
+def yb_amm(amm_interface, yb_market):
+    return amm_interface.at(yb_market[2])
+
+
+@pytest.fixture(scope="session")
+def cryptopool_oracle(oracle_interface, yb_market):
+    return oracle_interface.at(yb_market[4])
+
+
+@pytest.fixture(scope="session")
+def yb_lt(lt_interface, yb_market, cryptopool, stablecoin, collateral_token, accounts, admin):
+    with boa.env.prank(admin):
+        lt = yb_market[3]
+        amm = yb_market[2]
         for addr in accounts + [admin]:
             with boa.env.prank(addr):
-                stablecoin.approve(lt.address, 2**256-1)
-                collateral_token.approve(lt.address, 2**256-1)
-                cryptopool.approve(amm.address, 2**256-1)
-                stablecoin.approve(amm.address, 2**256-1)
+                stablecoin.approve(lt, 2**256-1)
+                collateral_token.approve(lt, 2**256-1)
+                cryptopool.approve(amm, 2**256-1)
+                stablecoin.approve(amm, 2**256-1)
 
-        return lt
-
-
-@pytest.fixture(scope="session")
-def yb_amm(yb_lt, amm_deployer):
-    return amm_deployer.at(yb_lt.amm())
+        return lt_interface.at(lt)
 
 
 @pytest.fixture(scope="function")
-def yb_allocated(yb_lt, stablecoin, admin):
-    stablecoin._mint_for_testing(admin, 10**30)
+def yb_allocated(yb_lt, admin):
     with boa.env.prank(admin):
         yb_lt.allocate_stablecoins(10**30)

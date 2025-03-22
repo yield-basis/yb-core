@@ -7,11 +7,10 @@ def test_informational(yb_lt):
     assert yb_lt.decimals() == 18
 
 
-def test_allocate_stablecoins(yb_lt, yb_amm, stablecoin, admin):
-    stablecoin._mint_for_testing(admin, 10**30)
-
-    assert stablecoin.balanceOf(yb_amm.address) == 0
+def test_allocate_stablecoins(factory, yb_lt, yb_amm, stablecoin, admin):
     with boa.env.prank(admin):
+        assert stablecoin.balanceOf(yb_amm.address) == 0
+
         yb_lt.allocate_stablecoins(10**25)
         assert stablecoin.balanceOf(yb_amm.address) == 10**25
 

@@ -23,6 +23,7 @@ class StatefulTrader(RuleBasedStateMachine):
         self.p = self.cryptopool.price_oracle()
         with boa.env.prank(self.admin):
             self.test_shares = self.yb_lt.deposit(self.TEST_DEPOSIT, self.p * self.TEST_DEPOSIT // 10**18, 0)
+            self.yb_lt.set_rate(0)
         self.pps = self.yb_lt.pricePerShare()
         for user in self.accounts:
             self.collateral_token._mint_for_testing(user, 100 * 100 * 10**18)
