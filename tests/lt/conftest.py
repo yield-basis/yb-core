@@ -100,12 +100,22 @@ def oracle_impl(oracle_interface):
 
 
 @pytest.fixture(scope="session")
+def gauge_interface():
+    return boa.load_partial('contracts/LiquidityGauge.vy')
+
+
+@pytest.fixture(scope="session")
+def gauge_impl(gauge_interface):
+    return gauge_interface.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
 def flash(stablecoin):
     return boa.load('contracts/testing/FlashLender.vy', stablecoin.address, 10**12 * 10**18)
 
 
 @pytest.fixture(scope="session")
-def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, mock_agg, flash, admin):
+def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, mock_agg, flash, admin):
     factory = boa.load(
         'contracts/Factory.vy',
         stablecoin.address,
@@ -113,7 +123,7 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, mock_agg, fl
         lt_impl.address,
         vpool_impl.address,
         oracle_impl.address,
-        ZERO_ADDRESS.hex(),  # Staker
+        gauge_impl,
         mock_agg.address,
         flash.address,
         admin,  # Fee receiver
