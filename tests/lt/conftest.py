@@ -173,3 +173,8 @@ def yb_lt(lt_interface, yb_market, cryptopool, stablecoin, collateral_token, acc
 def yb_allocated(yb_lt, admin):
     with boa.env.prank(admin):
         yb_lt.allocate_stablecoins(10**30)
+
+
+@pytest.fixture(scope="session")
+def yb_staker(gauge_interface, yb_market):
+    return gauge_interface.at(yb_market[6])
