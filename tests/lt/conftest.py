@@ -176,5 +176,9 @@ def yb_allocated(yb_lt, admin):
 
 
 @pytest.fixture(scope="session")
-def yb_staker(gauge_interface, yb_market):
-    return gauge_interface.at(yb_market[6])
+def yb_staker(gauge_interface, yb_market, yb_lt, accounts, admin):
+    staker = gauge_interface.at(yb_market[6])
+    for addr in accounts + [admin]:
+        with boa.env.prank(addr):
+            yb_lt.approve(staker.address, 2**256-1)
+    return staker
