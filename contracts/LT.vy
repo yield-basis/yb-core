@@ -559,8 +559,9 @@ def _transfer(_from: address, _to: address, _value: uint256):
         self.balanceOf[staker] = liquidity.staked_tokens
         if _from == staker:
             # Reduce the staked part
-            liquidity.staked -= liquidity.total * _value // liquidity.supply_tokens
-            liquidity.ideal_staked = liquidity.ideal_staked * (liquidity.staked_tokens - _value) // liquidity.staked_tokens
+            # change by 0 if no supply_tokens or stake_tokens found
+            liquidity.staked -= unsafe_div(liquidity.total * _value, liquidity.supply_tokens)
+            liquidity.ideal_staked = unsafe_div(liquidity.ideal_staked * (liquidity.staked_tokens - _value), liquidity.staked_tokens)
         elif _to == staker:
             # Increase the staked part
             d_staked_value: uint256 = liquidity.total * _value // liquidity.supply_tokens
