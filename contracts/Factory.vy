@@ -11,6 +11,7 @@ from ethereum.ercs import IERC20
 interface LT:
     def set_amm(amm: address): nonpayable
     def set_rate(rate: uint256): nonpayable
+    def set_staker(staker: address): nonpayable
     def allocate_stablecoins(limit: uint256): nonpayable
 
 interface CurveCryptoPool:
@@ -160,6 +161,7 @@ def add_market(
         market.staker = create_from_blueprint(
             self.staker_impl,
             market.lt)
+        extcall LT(market.lt).set_staker(market.staker)
 
     i: uint256 = self.market_count
     if i < MAX_MARKETS:
