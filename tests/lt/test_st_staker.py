@@ -137,7 +137,8 @@ class StatefulTrader(RuleBasedStateMachine):
 
         if hasattr(self, 'lv'):
             if lv.staked_tokens > 0 and self.lv.staked_tokens > 0:
-                assert lv.staked / lv.staked_tokens == self.lv.staked / self.lv.staked_tokens
+                # Value per LP token can either stay the same or decrease
+                assert lv.staked / lv.staked_tokens <= self.lv.staked / self.lv.staked_tokens
 
             if lv.supply_tokens > lv.staked_tokens and self.lv.supply_tokens > self.lv.staked_tokens:
                 assert (lv.total - lv.staked) / (lv.supply_tokens - lv.staked_tokens) >= (self.lv.total - self.lv.staked) / (self.lv.supply_tokens - self.lv.staked_tokens)
