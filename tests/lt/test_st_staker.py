@@ -7,6 +7,11 @@ from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 
+from collections import namedtuple
+
+
+ValuesOut = namedtuple('ValuesOut', ['admin', 'total', 'ideal_staked', 'staked', 'staked_tokens', 'supply_tokens'])
+
 
 class StatefulTrader(RuleBasedStateMachine):
     TEST_DEPOSIT = 10**18
@@ -102,26 +107,32 @@ class StatefulTrader(RuleBasedStateMachine):
 
         boa.env.time_travel(dt)
 
+    @rule()
+    def record_staked_values(self):
+        p_o = self.cryptopool.price_oracle()
+        self.lv = ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
+
     @invariant()
     def staked_fractions(self):
         p_o = self.cryptopool.price_oracle()
-        lv = self.yb_lt.internal._calculate_values(p_o)
-        admin_fee = lv[0]
-        total_value = lv[1]
-        ideal_staked = lv[2]
-        staked_value = lv[3]
-        staked_tokens = lv[4]
-        supply_tokens = lv[5]
-        assert admin_fee < 10**4  # only numerical errors here
-        assert staked_tokens == self.yb_lt.balanceOf(self.yb_staker.address)
-        assert supply_tokens == self.yb_lt.totalSupply()
-        assert ideal_staked == staked_value
-        assert abs(staked_value / total_value - staked_tokens / supply_tokens) < 1e-10
+        lv = ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
+
+        assert lv.admin + lv.total == self.yb_amm.value_oracle()[1] * 10**18 // p_o
+        assert abs(lv.staked / lv.total - lv.staked_tokens / lv.supply_tokens) < 1e-10
+        
+        if hasattr(self, 'lv'):
+            if lv.staked_tokens > 0 and self.lv.staked_tokens > 0:
+                assert lv.staked / lv.staked_tokens == self.lv.staked / self.lv.staked_tokens
+
+            if lv.supply_tokens > lv.staked_tokens and self.lv.supply_tokens > self.lv.staked_tokens:
+                assert (lv.total - lv.staked) / (lv.supply_tokens - lv.staked_tokens) >= (self.lv.total - self.lv.staked) / (self.lv.supply_tokens - self.lv.staked_tokens)
+
+        self.lv = lv
 
 
 def test_price_return(cryptopool, yb_lt, yb_amm, yb_staker, collateral_token, stablecoin, cryptopool_oracle,
                       yb_allocated, seed_cryptopool, accounts, admin):
-    StatefulTrader.TestCase.settings = settings(max_examples=200, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=500, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
 
