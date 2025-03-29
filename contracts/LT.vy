@@ -488,7 +488,7 @@ def withdraw_admin_fees():
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
     # fee_receiver is just a normal user
     new_total: uint256 = v.total + convert(v.admin, uint256)
-    to_mint: uint256 = v.supply_tokens * new_total // v.total
+    to_mint: uint256 = v.supply_tokens * new_total // v.total - v.supply_tokens
     self._mint(fee_receiver, to_mint)
     self.liquidity.total = new_total
     self.liquidity.admin = 0

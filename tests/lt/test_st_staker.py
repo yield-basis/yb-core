@@ -112,6 +112,11 @@ class StatefulTrader(RuleBasedStateMachine):
         p_o = self.cryptopool.price_oracle()
         self.lv = ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
 
+    @rule()
+    def withdraw_admin_fees(self):
+        with boa.env.prank(self.admin):
+            self.yb_lt.withdraw_admin_fees()
+
     @invariant()
     def staked_fractions(self):
         p_o = self.cryptopool.price_oracle()
