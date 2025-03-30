@@ -32,28 +32,39 @@ class StatefulTrader(RuleBasedStateMachine):
         for user in self.accounts:
             self.collateral_token._mint_for_testing(user, 100 * 100 * 10**18)
 
+    def get_lv(self, p_o=None):
+        if p_o is None:
+            p_o = self.cryptopool.price_oracle()
+        return ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
+
     @rule(amount=amount, mul=debt_multiplier, uid=user_id)
     def deposit(self, amount, mul, uid):
         user = self.accounts[uid]
         debt = int(mul * amount * self.p / 1e18)
+        staked_before = self.get_lv().staked
         with boa.env.prank(user):
             try:
                 self.yb_lt.deposit(amount, debt, 0)
-            except Exception as e:
+            except Exception:
                 # We are not testing this function, this is tested elsewhere. So no tests
                 return
+        staked_after = self.get_lv().staked
+        assert staked_after == staked_before
 
     @rule(frac=withdraw_fraction, uid=user_id)
     def withdraw(self, frac, uid):
         user = self.accounts[uid]
         user_shares = self.yb_lt.balanceOf(user)
         shares = int(frac * user_shares)
+        staked_before = self.get_lv().staked
         with boa.env.prank(user):
             try:
                 self.yb_lt.withdraw(shares, 0)
             except Exception:
                 # We are not testing this function, this is tested elsewhere. So no tests
                 return
+        staked_after = self.get_lv().staked
+        assert staked_after == staked_before
 
     @rule(frac=withdraw_fraction, uid=user_id)
     def stake(self, frac, uid):
@@ -63,7 +74,7 @@ class StatefulTrader(RuleBasedStateMachine):
         with boa.env.prank(user):
             try:
                 self.yb_staker.deposit(lt, user)
-            except Exception as e:
+            except Exception:
                 if lt > user_lt:
                     return
                 raise
@@ -76,7 +87,7 @@ class StatefulTrader(RuleBasedStateMachine):
         with boa.env.prank(user):
             try:
                 self.yb_staker.redeem(shares, user, user)
-            except Exception as e:
+            except Exception:
                 if shares > user_shares:
                     return
                 raise
@@ -109,8 +120,7 @@ class StatefulTrader(RuleBasedStateMachine):
 
     @rule()
     def record_staked_values(self):
-        p_o = self.cryptopool.price_oracle()
-        self.lv = ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
+        self.lv = self.get_lv()
 
     @rule()
     def withdraw_admin_fees(self):
@@ -120,11 +130,11 @@ class StatefulTrader(RuleBasedStateMachine):
     @invariant()
     def staked_fractions(self):
         p_o = self.cryptopool.price_oracle()
-        lv = ValuesOut(*self.yb_lt.internal._calculate_values(p_o))
+        lv = self.get_lv(p_o)
 
         assert lv.admin + lv.total == self.yb_amm.value_oracle()[1] * 10**18 // p_o
         assert abs(lv.staked / lv.total - lv.staked_tokens / lv.supply_tokens) < 1e-10
-        
+
         if hasattr(self, 'lv'):
             if lv.staked_tokens > 0 and self.lv.staked_tokens > 0:
                 assert lv.staked / lv.staked_tokens == self.lv.staked / self.lv.staked_tokens
