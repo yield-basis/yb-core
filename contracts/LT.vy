@@ -234,7 +234,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # Solution of:
     # staked - token_reduction       new_staked_value
     # -------------------------  =  -------------------
-    # supply - token_reduction         new_token_value
+    # supply - token_reduction         new_total_value
     token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
     # token_reduction = 0 if nothing is staked
     # XXX need to consider situation when denominator is very close to zero
