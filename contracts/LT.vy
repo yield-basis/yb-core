@@ -127,6 +127,8 @@ DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
 
+SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14  # == 1e-4, avoiding infinite APR and 0/0 errors
+
 admin: public(address)
 amm: public(LevAMM)
 agg: public(PriceOracle)
@@ -208,6 +210,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     if staker != empty(address):
         staked = convert(self.balanceOf[self.staker], int256)
     supply: int256 = convert(self.totalSupply, int256)
+    # staked is guaranteed to be <= supply
 
     f_a: int256 = convert(
         10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
@@ -224,10 +227,13 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     dv_use: int256 = value_change * (10**18 - f_a) // 10**18
     prev.admin += (value_change - dv_use)
 
+    # dv_s is guaranteed to be <= dv_use
+    # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
     dv_s: int256 = dv_use * staked // supply
     if dv_use > 0:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
+    # new_staked_value is guaranteed to be <= new_total_value
     new_total_value: int256 = prev_value + dv_use
     new_staked_value: int256 = v_st + dv_s
 
@@ -235,9 +241,32 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # staked - token_reduction       new_staked_value
     # -------------------------  =  -------------------
     # supply - token_reduction         new_total_value
-    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
-    # token_reduction = 0 if nothing is staked
-    # XXX need to consider situation when denominator is very close to zero
+    #
+    # the result:
+    #                      new_total_value * staked - new_staked_value * supply
+    # token_reduction  =  ------------------------------------------------------
+    #                               new_total_value - new_staked_value
+    #
+    # When eps = (supply - staked) / supply << 1, it comes down to:
+    # token_reduction = value_change / total_value * (1.0 - min_admin_fee) / sqrt(eps) * supply
+    # So when eps < 1e-8 - we'll limit token_reduction
+
+    token_reduction: int256 = 0
+
+    token_reduction = (staked * new_total_value - new_staked_value * supply) // (new_total_value - new_staked_value)
+
+    max_token_reduction: int256 = value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION
+
+    # let's leave at least 1 LP token for staked and for total
+    if staked > 0:
+        token_reduction = min(token_reduction, staked - 1)
+    if supply > 0:
+        token_reduction = min(token_reduction, supply - 1)
+    # But most likely it's this condition to apply
+    token_reduction = min(token_reduction, max_token_reduction)
+    # And don't allow negatives if denominator was too small
+    if new_total_value - new_staked_value < 10**4:
+        token_reduction = max(token_reduction, 0)
 
     # Supply changes each time:
     # value split reduces the amount of staked tokens (but not others),
