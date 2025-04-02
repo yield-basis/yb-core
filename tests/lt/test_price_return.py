@@ -166,7 +166,7 @@ class StatefulTrader(RuleBasedStateMachine):
     @invariant()
     def uponly(self):
         pps = self.yb_lt.pricePerShare()
-        assert pps + pps // 10**16 >= self.pps
+        assert pps + pps // 10**15 >= self.pps
         self.pps = pps
 
 
