@@ -110,8 +110,8 @@ def __init__(depositor: address,
 
     # 1 / (4 * L**2)
     MIN_SAFE_DEBT = 10**36 // leverage * 10**18 // leverage // 4
-    # (2 * L - 1)**2 / (4 * L**2) - 1 / (16 * L**2)
-    MAX_SAFE_DEBT = denominator**2 // leverage * 10**18 // leverage // 4 - 10**36 // leverage * 10**18 // leverage // 16
+    # (2 * L - 1)**2 / (4 * L**2) - 1 / (8 * L**2)
+    MAX_SAFE_DEBT = denominator**2 // leverage * 10**18 // leverage // 4 - 10**36 // leverage * 10**18 // leverage // 8
 
     self.rate_mul = 10**18
     self.rate_time = block.timestamp
