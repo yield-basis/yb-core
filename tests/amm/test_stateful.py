@@ -80,7 +80,7 @@ class StatefulTrader(RuleBasedStateMachine):
             except Exception as e:
                 if amount == 0:
                     return
-                if is_stablecoin and amount > self.amm.debt():
+                if is_stablecoin and amount > self.amm.get_debt():
                     return
                 if 'D: uint256 = coll_value' in str(e) or 'self.get_x0' in str(e):
                     return

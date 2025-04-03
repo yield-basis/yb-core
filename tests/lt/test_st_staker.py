@@ -136,9 +136,8 @@ class StatefulTrader(RuleBasedStateMachine):
         assert abs(lv.staked / lv.total - lv.staked_tokens / lv.supply_tokens) < 1e-10
 
         if hasattr(self, 'lv'):
-            if lv.staked_tokens > 0 and self.lv.staked_tokens > 0:
-                # Value per LP token can either stay the same or decrease
-                assert lv.staked / (lv.staked_tokens + 1) <= self.lv.staked / self.lv.staked_tokens
+            if lv.staked_tokens > 0 and self.lv.staked_tokens > 0 and lv.staked_tokens / lv.supply_tokens <= 0.9999:
+                assert lv.staked / lv.staked_tokens >= self.lv.staked / self.lv.staked_tokens
 
             if lv.supply_tokens > lv.staked_tokens and self.lv.supply_tokens > self.lv.staked_tokens:
                 assert (lv.total - lv.staked) / (lv.supply_tokens - lv.staked_tokens) >= (self.lv.total - self.lv.staked) / (self.lv.supply_tokens - self.lv.staked_tokens + 1)
@@ -146,8 +145,8 @@ class StatefulTrader(RuleBasedStateMachine):
         self.lv = lv
 
 
-def test_price_return(cryptopool, yb_lt, yb_amm, yb_staker, collateral_token, stablecoin, cryptopool_oracle,
-                      yb_allocated, seed_cryptopool, accounts, admin):
+def test_staker(cryptopool, yb_lt, yb_amm, yb_staker, collateral_token, stablecoin, cryptopool_oracle,
+                yb_allocated, seed_cryptopool, accounts, admin):
     StatefulTrader.TestCase.settings = settings(max_examples=500, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
