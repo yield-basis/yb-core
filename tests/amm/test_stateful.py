@@ -19,6 +19,7 @@ class StatefulTrader(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
         self.value = 0
+        self.state_good = True
 
     @rule(c_value=collateral_value, debt=debt_value)
     def deposit(self, c_value, debt):
@@ -29,6 +30,8 @@ class StatefulTrader(RuleBasedStateMachine):
                 self.amm._deposit(c_amount, debt)
                 self.collateral_token.transfer(self.amm.address, c_amount)
                 self.stablecoin.transferFrom(self.amm.address, self.admin, debt)
+                if c_amount > 0 or debt > 0:
+                    self.state_good = True
         except Exception:
             debt = self.amm.debt() + debt
             c_value = (self.amm.collateral_amount() + c_amount) * 10**(18 - self.collateral_decimals) * p // 10**18
@@ -48,6 +51,8 @@ class StatefulTrader(RuleBasedStateMachine):
                 pair = self.amm._withdraw(f)
                 self.collateral_token.transferFrom(self.amm.address, self.admin, pair[0])
                 self.stablecoin.transfer(self.amm.address, pair[1])
+                if frac > 0:
+                    self.state_good = True
         except Exception:
             if f == 0:
                 return
@@ -70,6 +75,8 @@ class StatefulTrader(RuleBasedStateMachine):
                 with boa.reverts():
                     self.amm.exchange(i, j, amount, min_out + 1)
                 self.amm.exchange(i, j, amount, min_out)
+                if amount > 0:
+                    self.state_good = True
             except Exception as e:
                 if amount == 0:
                     return
@@ -99,8 +106,10 @@ class StatefulTrader(RuleBasedStateMachine):
 
     @rule(dp=price_shift)
     def change_oracle(self, dp):
-        with boa.env.prank(self.admin):
-            self.price_oracle.set_price(int(self.price_oracle.price() * dp))
+        if self.state_good:
+            with boa.env.prank(self.admin):
+                self.price_oracle.set_price(int(self.price_oracle.price() * dp))
+                self.state_good = False
 
     @rule()
     def collect_fees(self):
@@ -143,7 +152,7 @@ def test_stateful_amm(token_mock, price_oracle, amm_deployer,
             stablecoin.approve(amm.address, 2**256-1)
             collateral_token.approve(amm.address, 2**256-1)
 
-    StatefulTrader.TestCase.settings = settings(max_examples=200, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)
