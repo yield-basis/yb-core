@@ -126,7 +126,7 @@ DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
 DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
-
+MIN_SHARE_REMAINDER: constant(uint256) = 10**6  # We leave at least this much of shares if > 0
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14  # == 1e-4, avoiding infinite APR and 0/0 errors
 
 admin: public(address)
@@ -406,6 +406,9 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     self.liquidity.total = liquidity_values.total
     self.liquidity.staked = liquidity_values.staked
     self.totalSupply = supply
+
+    assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
+
     staker: address = self.staker
     if staker != empty(address):
         self.balanceOf[staker] = liquidity_values.staked_tokens
