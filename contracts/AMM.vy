@@ -227,6 +227,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     x_initial: uint256 = self.get_x0(p_o, collateral, debt, False) - debt
 
     if i == 0:  # Buy collateral
+        assert in_amount <= debt, "Amount too large"
         x: uint256 = x_initial + in_amount
         y: uint256 = math._ceil_div(x_initial * collateral, x)
         return (collateral - y) * (10**18 - self.fee) // 10**18
