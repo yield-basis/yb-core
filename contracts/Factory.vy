@@ -222,9 +222,12 @@ def set_allocator(allocator: address, amount: uint256):
     if amount > old_allocation:
         # Use transferFrom
         extcall STABLECOIN.transferFrom(allocator, self, amount - old_allocation)
+        self.allocators[allocator] = amount
+
     elif amount < old_allocation:
         # Allow to take back the allocation via transferFrom, but not more than the allocation reduction
         extcall STABLECOIN.approve(allocator, (staticcall STABLECOIN.allowance(self, allocator)) + old_allocation - amount)
+        self.allocators[allocator] = amount
 
     log SetAllocator(allocator=allocator, amount=amount)
 
