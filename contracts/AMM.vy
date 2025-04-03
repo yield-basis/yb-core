@@ -422,6 +422,10 @@ def collect_fees() -> uint256:
     if to_be_redeemed > minted:
         self.minted = to_be_redeemed
         to_be_redeemed = unsafe_sub(to_be_redeemed, minted)  # Now this is the fees to charge
+        stables_in_amm: uint256 = staticcall STABLECOIN.balanceOf(self)
+        if stables_in_amm < to_be_redeemed:
+            self.minted -= (to_be_redeemed - stables_in_amm)
+            to_be_redeemed = stables_in_amm
         extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed)
         log CollectFees(amount=to_be_redeemed, new_supply=debt)
         return to_be_redeemed
