@@ -1,5 +1,6 @@
 import boa
 from hypothesis import settings, given
+from hypothesis import HealthCheck
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
 
@@ -122,7 +123,7 @@ class StatefulTrader(RuleBasedStateMachine):
     fee=st.integers(min_value=0, max_value=10**17),
     price=st.integers(min_value=10**17, max_value=(10 * 10**6 * 10**18))
 )
-@settings(max_examples=10)
+@settings(max_examples=10, suppress_health_check=[HealthCheck.nested_given])
 def test_stateful_amm(token_mock, price_oracle, amm_deployer,
                       accounts, admin,
                       collateral_decimals, fee, price):
@@ -152,7 +153,7 @@ def test_stateful_amm(token_mock, price_oracle, amm_deployer,
             stablecoin.approve(amm.address, 2**256-1)
             collateral_token.approve(amm.address, 2**256-1)
 
-    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10, suppress_health_check=[HealthCheck.nested_given])
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)
