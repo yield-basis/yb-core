@@ -116,8 +116,8 @@ def __init__(depositor: address,
     self.rate_mul = 10**18
     self.rate_time = block.timestamp
 
-    extcall stablecoin.approve(DEPOSITOR, max_value(uint256))
-    extcall collateral.approve(DEPOSITOR, max_value(uint256))
+    extcall stablecoin.approve(DEPOSITOR, max_value(uint256), default_return_value=True)
+    extcall collateral.approve(DEPOSITOR, max_value(uint256), default_return_value=True)
 
 
 # Math
@@ -428,7 +428,7 @@ def collect_fees() -> uint256:
         if stables_in_amm < to_be_redeemed:
             self.minted -= (to_be_redeemed - stables_in_amm)
             to_be_redeemed = stables_in_amm
-        extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed)
+        assert extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed, default_return_value=True)
         log CollectFees(amount=to_be_redeemed, new_supply=debt)
         return to_be_redeemed
     else:

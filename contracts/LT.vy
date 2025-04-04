@@ -338,8 +338,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     assert receiver != staker, "Deposit to staker"
 
     amm: LevAMM = self.amm
-    assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
-    assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
+    assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
+    assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
     lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
     p_o: uint256 = self._price_oracle_w()
 
@@ -418,7 +418,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
     withdrawn: Pair = extcall amm._withdraw(10**18 * liquidity_values.total // (liquidity_values.total + admin_balance) * shares // supply)
-    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral)
+    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral, default_return_value=True)
     crypto_received: uint256 = extcall COLLATERAL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
 
     self._burn(msg.sender, shares)  # Changes self.totalSupply
@@ -427,8 +427,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
         # If admin fees are negative - we are skipping them, so reduce proportionally
         self.liquidity.admin = liquidity_values.admin * convert(supply - shares, int256) // convert(supply, int256)
     assert crypto_received >= min_assets, "Slippage"
-    assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt)
-    assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received)
+    assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt, default_return_value=True)
+    assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
 
     log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
     return crypto_received
@@ -489,13 +489,13 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
 
     if allocation > allocated:
         # Assume that allocator has everything
-        extcall STABLECOIN.transferFrom(allocator, self.amm.address, allocation - allocated)
+        assert extcall STABLECOIN.transferFrom(allocator, self.amm.address, allocation - allocated, default_return_value=True)
         self.stablecoin_allocated = allocation
 
     elif allocation < allocated:
         to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
         allocated -= to_transfer
-        extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer)
+        assert extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer, default_return_value=True)
         self.stablecoin_allocated = allocated
 
 
