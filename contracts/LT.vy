@@ -125,6 +125,7 @@ STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
 DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
 DEPOSITED_TOKEN_PRECISION: immutable(uint256)
 
+CRYPTOPOOL_N_COINS: constant(uint256) = 2
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
 MIN_SHARE_REMAINDER: constant(uint256) = 10**6  # We leave at least this much of shares if > 0
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14  # == 1e-4, avoiding infinite APR and 0/0 errors
@@ -172,6 +173,17 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCrypt
     assert extcall stablecoin.approve(collateral.address, max_value(uint256), default_return_value=True)
     assert staticcall collateral.coins(0) == stablecoin.address
     assert staticcall collateral.coins(1) == deposited_token.address
+
+    # Twocrypto has no N_COINS public, so we check that coins(2) reverts
+    success: bool = False
+    res: Bytes[32] = empty(Bytes[32])
+    success, res = raw_call(
+        collateral.address,
+        abi_encode(CRYPTOPOOL_N_COINS, method_id=method_id("coins(uint256)")),
+        max_outsize=32,
+        is_static_call=True,
+        revert_on_failure=False)
+    assert not success, "N>2"
 
 
 @internal
