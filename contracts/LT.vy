@@ -400,6 +400,9 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     """
     assert shares > 0, "Withdrawing nothing"
 
+    staker: address = self.staker
+    assert receiver != staker, "Withdraw to staker"
+
     amm: LevAMM = self.amm
     liquidity_values: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     supply: uint256 = liquidity_values.supply_tokens
@@ -410,7 +413,6 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
     assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
 
-    staker: address = self.staker
     if staker != empty(address):
         self.balanceOf[staker] = liquidity_values.staked_tokens
     state: AMMState = staticcall amm.get_state()
