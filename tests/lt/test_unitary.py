@@ -111,7 +111,7 @@ def test_collect_fees(cryptopool, yb_lt, collateral_token, stablecoin, yb_alloca
 
         boa.env.time_travel(7 * 86400)
 
-        yb_lt.distrubute_borrower_fees()
+        yb_lt.distribute_borrower_fees()
 
         assert cryptopool.balances(0) == stables_before
         assert stablecoin.balanceOf(cryptopool.address) > stables_before

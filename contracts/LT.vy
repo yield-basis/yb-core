@@ -503,7 +503,7 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
 
 @external
 @nonreentrant
-def distrubute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This will JUST donate to the crypto pool
+def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This will JUST donate to the crypto pool
     if discount > FEE_CLAIM_DISCOUNT:
         self._check_admin()
     extcall self.amm.collect_fees()
