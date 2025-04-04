@@ -334,6 +334,9 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     @param min_shares Minimal amount of shares to receive (important to calculate to exclude sandwich attacks)
     @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
     """
+    staker: address = self.staker
+    assert receiver != staker, "Deposit to staker"
+
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt)
     assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets)
@@ -354,8 +357,6 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
     assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
-
-    staker: address = self.staker
 
     if supply > 0:
         supply = liquidity_values.supply_tokens
