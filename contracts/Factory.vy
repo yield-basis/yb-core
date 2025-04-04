@@ -197,6 +197,7 @@ def fill_staker_vpool(i: uint256):
             self.staker_impl,
             market.lt)
     self.markets[i] = market
+    extcall LT(market.lt).set_staker(market.staker)
 
 
 @external

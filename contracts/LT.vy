@@ -540,7 +540,15 @@ def withdraw_admin_fees():
 @external
 @nonreentrant
 def set_staker(staker: address):
+    assert self.staker == empty(address), "Staker already set"
     self._check_admin()
+
+    staker_balance: uint256 = self.balanceOf[staker]
+    if staker_balance > 0:
+        # Take that all as admin fee, staker should not have this
+        fee_receiver: address = staticcall Factory(self.admin).fee_receiver()
+        self._transfer(staker, fee_receiver, staker_balance)
+
     self.staker = staker
     log SetStaker(staker=staker)
 
