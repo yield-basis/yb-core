@@ -177,6 +177,7 @@ def set_rate(rate: uint256) -> uint256:
     """
     assert msg.sender == DEPOSITOR, "Access"
     rate_mul: uint256 = self._rate_mul()
+    self.debt = self.debt * rate_mul // self.rate_mul
     self.rate_mul = rate_mul
     self.rate_time = block.timestamp
     self.rate = rate
