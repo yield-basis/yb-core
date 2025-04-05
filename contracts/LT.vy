@@ -331,8 +331,9 @@ def preview_withdraw(tokens: uint256) -> uint256:
     # Total does NOT include uncollected admin fees
     # however we account only for positive admin balance. This "socializes" losses if they happen
     admin_balance: uint256 = convert(max(v.admin, 0), uint256)
-    withdrawn_lp: uint256 = state.collateral * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
-    withdrawn_debt: uint256 = state.debt * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
+    frac: uint256 = 10**18 * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
+    withdrawn_lp: uint256 = state.collateral * frac // 10**18
+    withdrawn_debt: uint256 = state.debt * frac // 10**18
     return staticcall COLLATERAL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
 
 
