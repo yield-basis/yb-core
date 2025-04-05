@@ -54,6 +54,9 @@ event SetAdmin:
     admin: address
     old_admin: address
 
+event SetMinAdminFee:
+    admin_fee: uint256
+
 event NewMarket:
     idx: indexed(uint256)
     collateral_token: indexed(address)
@@ -79,6 +82,7 @@ flash: public(address)
 STABLECOIN: public(immutable(IERC20))
 fee_receiver: public(address)
 admin: public(address)
+min_admin_fee: public(uint256)
 
 markets: public(Market[MAX_MARKETS])
 market_count: public(uint256)
@@ -109,6 +113,7 @@ def __init__(
     self.flash = flash
     self.fee_receiver = fee_receiver
     self.admin = admin
+    self.min_admin_fee = 10**17
 
     log SetImplementations(amm=amm_impl, lt=lt_impl, virtual_pool=virtual_pool_impl, price_oracle=price_oracle_impl,
                            staker=staker_impl)
@@ -259,3 +264,11 @@ def set_fee_receiver(new_fee_receiver: address):
     assert msg.sender == self.admin, "Access"
     self.fee_receiver = new_fee_receiver
     log SetFeeReceiver(fee_receiver=new_fee_receiver)
+
+
+@external
+def set_min_admin_fee(new_min_admin_fee: uint256):
+    assert msg.sender == self.admin, "Access"
+    assert new_min_admin_fee <= 10**18, "Admin fee too high"
+    self.min_admin_fee = new_min_admin_fee
+    log SetMinAdminFee(admin_fee=new_min_admin_fee)

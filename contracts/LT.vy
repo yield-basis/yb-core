@@ -56,6 +56,7 @@ interface PriceOracle:
 interface Factory:
     def admin() -> address: view
     def fee_receiver() -> address: view
+    def min_admin_fee() -> uint256: view
 
 
 struct AMMState:
@@ -136,8 +137,6 @@ agg: public(PriceOracle)
 
 staker: public(address)
 
-min_admin_fee: public(uint256)
-
 liquidity: public(LiquidityValues)
 
 allowance: public(HashMap[address, HashMap[address, uint256]])
@@ -215,6 +214,22 @@ def _price_oracle_w() -> uint256:
 
 @internal
 @view
+def _min_admin_fee() -> uint256:
+    admin: address = self.admin
+    if admin.is_contract:
+        return staticcall Factory(admin).min_admin_fee()
+    else:
+        return 0
+
+
+@external
+@view
+def min_admin_fee() -> uint256:
+    return self._min_admin_fee()
+
+
+@internal
+@view
 def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
     staker: address = self.staker
@@ -225,7 +240,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # staked is guaranteed to be <= supply
 
     f_a: int256 = convert(
-        10**18 - (10**18 - self.min_admin_fee) * self.sqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
+        10**18 - (10**18 - self._min_admin_fee()) * self.sqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
     cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
