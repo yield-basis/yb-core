@@ -370,7 +370,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
     assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
 
-    if supply > 0:
+    if supply > 0 and liquidity_values.total > 0:
         supply = liquidity_values.supply_tokens
         self.liquidity.admin = liquidity_values.admin
         value_before: uint256 = liquidity_values.total
@@ -388,10 +388,10 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         # Value is measured in USD
         shares = value_after
         # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
-        self.liquidity.ideal_staked = 0  # Likely already 0 since supply was 0
-        self.liquidity.staked = 0        # Same: nothing staked when supply is 0
-        self.liquidity.total = shares    # 1 share = 1 crypto at first deposit
-        self.liquidity.admin = 0         # if we had admin fees - give them to the first depositor; simpler to handle
+        self.liquidity.ideal_staked = 0         # Likely already 0 since supply was 0
+        self.liquidity.staked = 0               # Same: nothing staked when supply is 0
+        self.liquidity.total = shares + supply  # 1 share = 1 crypto at first deposit
+        self.liquidity.admin = 0                # if we had admin fees - give them to the first depositor; simpler to handle
         self.balanceOf[staker] = 0
 
     assert shares >= min_shares, "Slippage"
