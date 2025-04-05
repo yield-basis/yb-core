@@ -427,7 +427,6 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
     if staker != empty(address):
         self.balanceOf[staker] = liquidity_values.staked_tokens
-    state: AMMState = staticcall amm.get_state()
 
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
