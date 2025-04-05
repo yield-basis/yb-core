@@ -262,9 +262,10 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
 
-    p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
+    assert collateral > 0, "Empty AMM"
     debt: uint256 = self._debt_w()
+    p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     x0: uint256 = self.get_x0(p_o, collateral, debt, False)
     x_initial: uint256 = x0 - debt
 
