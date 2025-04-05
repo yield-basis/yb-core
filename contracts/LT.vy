@@ -312,11 +312,11 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 @external
 @view
 @nonreentrant
-def preview_deposit(assets: uint256, debt: uint256 = max_value(uint256)) -> uint256:
+def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     """
     @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
     @param assets Amount of crypto to deposit
-    @param debt Amount of stables to borrow for MMing (approx same value as crypto) or best guess if max_value
+    @param debt Amount of stables to borrow for MMing (approx same value as crypto)
     """
     lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
