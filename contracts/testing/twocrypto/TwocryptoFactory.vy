@@ -1,16 +1,15 @@
-# pragma version 0.4.1
+# pragma version ~=0.4.1
 """
-@title CurveTwocryptoFactory
+@title TwocryptoFactory
 @author Curve.Fi
-@license Copyright (c) Curve.Fi, 2020-2024 - all rights reserved
+@license Copyright (c) Curve.Fi, 2025 - all rights reserved
 @notice Permissionless 2-coin cryptoswap pool deployer and registry
 """
 
+from ethereum.ercs import IERC20Detailed as IERC20
+
 interface TwocryptoPool:
     def balances(i: uint256) -> uint256: view
-
-interface ERC20:
-    def decimals() -> uint256: view
 
 
 event TwocryptoPoolDeployed:
@@ -33,29 +32,29 @@ event LiquidityGaugeDeployed:
     gauge: address
 
 event UpdateFeeReceiver:
-    _old_fee_receiver: address
-    _new_fee_receiver: address
+    old_fee_receiver: address
+    new_fee_receiver: address
 
 event UpdatePoolImplementation:
-    _implementation_id: uint256
-    _old_pool_implementation: address
-    _new_pool_implementation: address
+    implementation_id: uint256
+    old_pool_implementation: address
+    new_pool_implementation: address
 
 event UpdateGaugeImplementation:
-    _old_gauge_implementation: address
-    _new_gauge_implementation: address
+    old_gauge_implementation: address
+    new_gauge_implementation: address
 
 event UpdateMathImplementation:
-    _old_math_implementation: address
-    _new_math_implementation: address
+    old_math_implementation: address
+    new_math_implementation: address
 
 event UpdateViewsImplementation:
-    _old_views_implementation: address
-    _new_views_implementation: address
+    old_views_implementation: address
+    new_views_implementation: address
 
 event TransferOwnership:
-    _old_owner: address
-    _new_owner: address
+    old_owner: address
+    new_owner: address
 
 
 struct PoolArray:
@@ -99,14 +98,14 @@ def __init__():
 @external
 def initialise_ownership(_fee_receiver: address, _admin: address):
 
-    assert msg.sender == self.deployer
-    assert self.admin == empty(address)
+    assert msg.sender == self.deployer, "deployer only"
+    assert self.admin == empty(address), "already initialised"
 
     self.fee_receiver = _fee_receiver
     self.admin = _admin
 
-    log UpdateFeeReceiver(_old_fee_receiver=empty(address), _new_fee_receiver=_fee_receiver)
-    log TransferOwnership(_old_owner=empty(address), _new_owner=_admin)
+    log UpdateFeeReceiver(old_fee_receiver=empty(address), new_fee_receiver=_fee_receiver)
+    log TransferOwnership(old_owner=empty(address), new_owner=_admin)
 
 
 @internal
@@ -153,32 +152,32 @@ def deploy_pool(
     """
     pool_implementation: address = self.pool_implementations[implementation_id]
     _math_implementation: address = self.math_implementation
-    assert pool_implementation != empty(address), "Pool implementation not set"
-    assert _math_implementation != empty(address), "Math implementation not set"
+    assert pool_implementation != empty(address), "pool implementation not set"
+    assert _math_implementation != empty(address), "math implementation not set"
 
-    assert mid_fee < MAX_FEE-1  # mid_fee can be zero
-    assert out_fee >= mid_fee
-    assert out_fee < MAX_FEE-1
-    assert fee_gamma < 10**18+1
-    assert fee_gamma > 0
+    assert mid_fee < MAX_FEE-1, "fee mid>max"  # mid_fee can be zero
+    assert out_fee >= mid_fee, "fee out<mid"
+    assert out_fee < MAX_FEE-1, "fee out>max"
+    assert fee_gamma < 10**18+1, "fee_gamma>max"
+    assert fee_gamma > 0, "fee_gamma==0"
 
-    assert allowed_extra_profit < 10**18+1
+    assert allowed_extra_profit < 10**18+1, "allowed_extra_profit>max"
 
-    assert adjustment_step < 10**18+1
-    assert adjustment_step > 0
+    assert adjustment_step < 10**18+1, "adjustment_step>max"
+    assert adjustment_step > 0, "adjustment_step==0"
 
-    assert ma_exp_time < 872542  # 7 * 24 * 60 * 60 / ln(2)
-    assert ma_exp_time > 86  # 60 / ln(2)
+    assert ma_exp_time < 872542, "ma_exp_time>max"  # 7 * 24 * 60 * 60 / ln(2)
+    assert ma_exp_time > 86, "ma_exp_time<min" # 60 / ln(2)
 
-    assert initial_price > 10**6 and initial_price < 10**30  # dev: initial price out of bound
+    assert initial_price > 10**6 and initial_price < 10**30, "initial price out of bound"
 
-    assert _coins[0] != _coins[1], "Duplicate coins"
+    assert _coins[0] != _coins[1], "same coins"
 
     decimals: uint256[N_COINS] = empty(uint256[N_COINS])
     precisions: uint256[N_COINS] = empty(uint256[N_COINS])
     for i: uint256 in range(N_COINS):
-        d: uint256 = staticcall ERC20(_coins[i]).decimals()
-        assert d < 19, "Max 18 decimals for coins"
+        d: uint256 = convert(staticcall IERC20(_coins[i]).decimals(), uint256)
+        assert d < 19, "max 18 decimals for coins"
         decimals[i] = d
         precisions[i] = 10 ** (18 - d)
 
@@ -259,9 +258,9 @@ def deploy_gauge(_pool: address) -> address:
     @param _pool Factory pool address to deploy a gauge for
     @return Address of the deployed gauge
     """
-    assert self.pool_data[_pool].coins[0] != empty(address), "Unknown pool"
-    assert self.pool_data[_pool].liquidity_gauge == empty(address), "Gauge already deployed"
-    assert self.gauge_implementation != empty(address), "Gauge implementation not set"
+    assert self.pool_data[_pool].coins[0] != empty(address), "unknown pool"
+    assert self.pool_data[_pool].liquidity_gauge == empty(address), "gauge already deployed"
+    assert self.gauge_implementation != empty(address), "gauge implementation not set"
 
     gauge: address = create_from_blueprint(self.gauge_implementation, _pool, code_offset=3)
     self.pool_data[_pool].liquidity_gauge = gauge
@@ -279,9 +278,9 @@ def set_fee_receiver(_fee_receiver: address):
     @notice Set fee receiver
     @param _fee_receiver Address that fees are sent to
     """
-    assert msg.sender == self.admin, "dev: admin only"
+    assert msg.sender == self.admin, "admin only"
 
-    log UpdateFeeReceiver(_old_fee_receiver=self.fee_receiver, _new_fee_receiver=_fee_receiver)
+    log UpdateFeeReceiver(old_fee_receiver=self.fee_receiver, new_fee_receiver=_fee_receiver)
     self.fee_receiver = _fee_receiver
 
 
@@ -295,12 +294,12 @@ def set_pool_implementation(
     @param _pool_implementation Address of the new pool implementation
     @param _implementation_index Index of the pool implementation
     """
-    assert msg.sender == self.admin, "dev: admin only"
+    assert msg.sender == self.admin, "admin only"
 
     log UpdatePoolImplementation(
-        _implementation_id=_implementation_index,
-        _old_pool_implementation=self.pool_implementations[_implementation_index],
-        _new_pool_implementation=_pool_implementation
+        implementation_id=_implementation_index,
+        old_pool_implementation=self.pool_implementations[_implementation_index],
+        new_pool_implementation=_pool_implementation
     )
 
     self.pool_implementations[_implementation_index] = _pool_implementation
@@ -313,10 +312,9 @@ def set_gauge_implementation(_gauge_implementation: address):
     @dev Set to empty(address) to prevent deployment of new gauges
     @param _gauge_implementation Address of the new token implementation
     """
-    assert msg.sender == self.admin, "dev: admin only"
+    assert msg.sender == self.admin, "admin only"
 
-    log UpdateGaugeImplementation(_old_gauge_implementation=self.gauge_implementation,
-                                  _new_gauge_implementation=_gauge_implementation)
+    log UpdateGaugeImplementation(old_gauge_implementation=self.gauge_implementation, new_gauge_implementation=_gauge_implementation)
     self.gauge_implementation = _gauge_implementation
 
 
@@ -326,10 +324,9 @@ def set_views_implementation(_views_implementation: address):
     @notice Set views contract implementation
     @param _views_implementation Address of the new views contract
     """
-    assert msg.sender == self.admin,  "dev: admin only"
+    assert msg.sender == self.admin,  "admin only"
 
-    log UpdateViewsImplementation(_old_views_implementation=self.views_implementation,
-                                  _new_views_implementation=_views_implementation)
+    log UpdateViewsImplementation(old_views_implementation=self.views_implementation, new_views_implementation=_views_implementation)
     self.views_implementation = _views_implementation
 
 
@@ -339,10 +336,9 @@ def set_math_implementation(_math_implementation: address):
     @notice Set math implementation
     @param _math_implementation Address of the new math contract
     """
-    assert msg.sender == self.admin, "dev: admin only"
+    assert msg.sender == self.admin, "admin only"
 
-    log UpdateMathImplementation(_old_math_implementation=self.math_implementation,
-                                 _new_math_implementation=_math_implementation)
+    log UpdateMathImplementation(old_math_implementation=self.math_implementation, new_math_implementation=_math_implementation)
     self.math_implementation = _math_implementation
 
 
@@ -352,7 +348,7 @@ def commit_transfer_ownership(_addr: address):
     @notice Transfer ownership of this contract to `addr`
     @param _addr Address of the new owner
     """
-    assert msg.sender == self.admin, "dev: admin only"
+    assert msg.sender == self.admin, "admin only"
 
     self.future_admin = _addr
 
@@ -363,9 +359,9 @@ def accept_transfer_ownership():
     @notice Accept a pending ownership transfer
     @dev Only callable by the new owner
     """
-    assert msg.sender == self.future_admin, "dev: future admin only"
+    assert msg.sender == self.future_admin, "future admin only"
 
-    log TransferOwnership(_old_owner=self.admin, _new_owner=msg.sender)
+    log TransferOwnership(old_owner=self.admin, new_owner=msg.sender)
     self.admin = msg.sender
 
 

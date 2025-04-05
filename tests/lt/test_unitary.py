@@ -114,5 +114,5 @@ def test_collect_fees(cryptopool, yb_lt, collateral_token, stablecoin, yb_alloca
 
         yb_lt.distribute_borrower_fees()
 
-        assert cryptopool.balances(0) == stables_before
+        assert cryptopool.balances(0) > stables_before
         assert stablecoin.balanceOf(cryptopool.address) > stables_before

@@ -1,13 +1,13 @@
-# pragma version 0.4.1
+# pragma version ~=0.4.1
 """
-@title CurveCryptoViews2Optimized
+@title TwocryptoView
 @author Curve.Fi
-@license Copyright (c) Curve.Fi, 2020-2024 - all rights reserved
+@license Copyright (c) Curve.Fi, 2025 - all rights reserved
 @notice This contract contains view-only external methods which can be
         gas-inefficient when called from smart contracts.
 """
 
-from ethereum.ercs import IERC20 as ERC20
+from ethereum.ercs import IERC20
 
 
 interface Curve:
@@ -104,7 +104,7 @@ def calc_withdraw_one_coin(
 @view
 @external
 def calc_token_amount(
-    amounts: uint256[N_COINS], deposit: bool, swap: address
+    amounts: uint256[N_COINS], deposit: bool, swap: address, donation: bool = False
 ) -> uint256:
 
     d_token: uint256 = 0
@@ -112,9 +112,10 @@ def calc_token_amount(
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
 
     d_token, amountsp, xp = self._calc_dtoken_nofee(amounts, deposit, swap)
-    d_token -= (
-        staticcall Curve(swap).calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
-    )
+    if not donation:
+        d_token -= (
+            staticcall Curve(swap).calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
+        )
 
     return d_token
 
@@ -128,7 +129,7 @@ def calc_fee_get_dy(i: uint256, j: uint256, dx: uint256, swap: address
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
     dy, xp = self._get_dy_nofee(i, j, dx, swap)
 
-    return staticcall Curve(swap).fee_calc(xp) * dy // 10**10
+    return (staticcall Curve(swap).fee_calc(xp)) * dy // 10**10
 
 
 @external
@@ -151,7 +152,7 @@ def calc_fee_token_amount(
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
     d_token, amountsp, xp = self._calc_dtoken_nofee(amounts, deposit, swap)
 
-    return staticcall Curve(swap).calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
+    return (staticcall Curve(swap).calc_token_fee(amountsp, xp)) * d_token // 10**10 + 1
 
 
 @internal
@@ -309,8 +310,8 @@ def _calc_withdraw_one_coin(
 ) -> (uint256, uint256):
 
     token_supply: uint256 = staticcall Curve(swap).totalSupply()
-    assert token_amount <= token_supply  # dev: token amount more than supply
-    assert i < N_COINS  # dev: coin out of range
+    assert token_amount <= token_supply, "token amount more than supply"
+    assert i < N_COINS, "coin out of range"
 
     math: Math = staticcall Curve(swap).MATH()
 
