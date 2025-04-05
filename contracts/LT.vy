@@ -28,6 +28,8 @@ interface LevAMM:
     def collect_fees() -> uint256: nonpayable
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def max_debt() -> uint256: view
+    def COLLATERAL() -> address: view
+    def STABLECOIN() -> address: view
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -480,6 +482,8 @@ def pricePerShare() -> uint256:
 def set_amm(amm: LevAMM):
     self._check_admin()
     assert self.amm == empty(LevAMM), "Already set"
+    assert staticcall amm.STABLECOIN() == STABLECOIN.address
+    assert staticcall amm.COLLATERAL() == COLLATERAL.address
     self.amm = amm
     self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
 
