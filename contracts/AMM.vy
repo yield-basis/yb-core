@@ -53,7 +53,7 @@ COLLATERAL_PRECISION: immutable(uint256)
 fee: public(uint256)
 
 collateral_amount: public(uint256)
-debt: public(uint256)
+debt: uint256
 rate: public(uint256)
 rate_mul: public(uint256)
 rate_time: uint256
@@ -204,6 +204,12 @@ def _debt_w() -> uint256:
 @view
 def get_debt() -> uint256:
     return self._debt()
+
+
+@external
+@view
+def outdated_debt() -> uint256:
+    return self.debt
 
 
 @external

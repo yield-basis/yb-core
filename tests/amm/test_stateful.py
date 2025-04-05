@@ -34,7 +34,7 @@ class StatefulTrader(RuleBasedStateMachine):
                 if c_amount > 0 or debt > 0:
                     self.state_good = True
         except Exception:
-            debt = self.amm.debt() + debt
+            debt = self.amm.get_debt() + debt
             c_value = (self.amm.collateral_amount() + c_amount) * 10**(18 - self.collateral_decimals) * p // 10**18
             if c_value**2 - 4 * c_value * LEV_RATIO // 10**18 * debt < 0:
                 return
