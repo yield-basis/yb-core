@@ -31,6 +31,7 @@ interface LevAMM:
     def COLLATERAL() -> address: view
     def STABLECOIN() -> address: view
     def DEPOSITOR() -> address: view
+    def check_nonreentrant(): nonpayable
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -512,15 +513,16 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
     @notice This method has to be used once this contract has received allocation of stablecoins
     @param limit Limit to allocate for this pool from this allocator. Max uint256 = do not change
     """
-    self._check_admin()
-
     allocator: address = self.admin
     allocation: uint256 = limit
     allocated: uint256 = self.stablecoin_allocated
     if limit == max_value(uint256):
         allocation = self.stablecoin_allocation
     else:
+        self._check_admin()
         self.stablecoin_allocation = limit
+
+    extcall self.amm.check_nonreentrant()
 
     if allocation > allocated:
         # Assume that allocator has everything

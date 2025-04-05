@@ -441,3 +441,9 @@ def collect_fees() -> uint256:
     else:
         log CollectFees(amount=0, new_supply=debt)
         return 0
+
+
+@external
+@nonreentrant
+def check_nonreentrant():
+    pass
