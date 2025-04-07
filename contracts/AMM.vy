@@ -61,6 +61,8 @@ rate_time: uint256
 minted: public(uint256)
 redeemed: public(uint256)
 
+is_killed: public(bool)
+
 
 event TokenExchange:
     buyer: indexed(address)
@@ -267,6 +269,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     @return Amount of coins given in/out
     """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
+    assert not self.is_killed
 
     collateral: uint256 = self.collateral_amount  # == y_initial
     assert collateral > 0, "Empty AMM"
@@ -315,6 +318,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 @external
 def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     assert msg.sender == DEPOSITOR, "Access violation"
+    assert not self.is_killed
 
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
@@ -423,6 +427,8 @@ def collect_fees() -> uint256:
     """
     @notice Collect the fees charged as interest.
     """
+    assert not self.is_killed
+
     debt: uint256 = self._debt_w()
     self.debt = debt
     minted: uint256 = self.minted
@@ -441,6 +447,12 @@ def collect_fees() -> uint256:
     else:
         log CollectFees(amount=0, new_supply=debt)
         return 0
+
+
+@external
+def set_killed(is_killed: bool):
+    assert msg.sender == DEPOSITOR, "Access"
+    self.is_killed = is_killed
 
 
 @external
