@@ -52,7 +52,9 @@ event SetFlash:
 
 event SetAdmin:
     admin: address
+    emergency_admin: address
     old_admin: address
+    old_emergency_admin: address
 
 event SetMinAdminFee:
     admin_fee: uint256
@@ -82,6 +84,7 @@ flash: public(address)
 STABLECOIN: public(immutable(IERC20))
 fee_receiver: public(address)
 admin: public(address)
+emergency_admin: public(address)
 min_admin_fee: public(uint256)
 
 markets: public(Market[MAX_MARKETS])
@@ -101,7 +104,8 @@ def __init__(
     agg: address,
     flash: address,
     fee_receiver: address,
-    admin: address
+    admin: address,
+    emergency_admin: address
 ):
     STABLECOIN = stablecoin
     self.amm_impl = amm_impl
@@ -113,6 +117,7 @@ def __init__(
     self.flash = flash
     self.fee_receiver = fee_receiver
     self.admin = admin
+    self.emergency_admin = emergency_admin
     self.min_admin_fee = 10**17
 
     log SetImplementations(amm=amm_impl, lt=lt_impl, virtual_pool=virtual_pool_impl, price_oracle=price_oracle_impl,
@@ -253,10 +258,11 @@ def set_flash(flash: address):
 
 
 @external
-def set_admin(new_admin: address):
+def set_admin(new_admin: address, new_emergency_admin: address):
     assert msg.sender == self.admin, "Access"
-    log SetAdmin(admin=new_admin, old_admin=self.admin)
+    log SetAdmin(admin=new_admin, emergency_admin=new_emergency_admin, old_admin=self.admin, old_emergency_admin=self.emergency_admin)
     self.admin = new_admin
+    self.emergency_admin = new_emergency_admin
 
 
 @external

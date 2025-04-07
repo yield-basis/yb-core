@@ -127,7 +127,8 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, 
         mock_agg.address,
         flash.address,
         admin,  # Fee receiver
-        admin)  # Admin
+        admin,  # Admin
+        admin)  # Emergency admin
     with boa.env.prank(admin):
         factory.set_mint_factory(admin)
         stablecoin._mint_for_testing(factory.address, 10**30)

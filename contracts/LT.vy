@@ -63,6 +63,7 @@ interface PriceOracle:
 
 interface Factory:
     def admin() -> address: view
+    def emergency_admin() -> address: view
     def fee_receiver() -> address: view
     def min_admin_fee() -> uint256: view
 
@@ -670,7 +671,11 @@ def set_staker(staker: address):
 
 @external
 def set_killed(is_killed: bool):
-    self._check_admin()  # XXX need emergency admins etc
+    admin: address = self.admin
+    if admin.is_contract:
+        assert msg.sender in [admin, staticcall Factory(admin).admin(), staticcall Factory(admin).emergency_admin()], "Access"
+    else:
+        assert msg.sender == admin, "Access"
     extcall self.amm.set_killed(is_killed)
 
 
