@@ -1,4 +1,7 @@
 import boa
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from hypothesis import HealthCheck
 
 
 def test_informational(yb_lt):
@@ -158,3 +161,31 @@ def test_kill(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, yb_alloca
 
     with boa.env.prank(user):
         yb_lt.withdraw(shares, 0)
+
+
+@given(frac=st.floats(min_value=0.0, max_value=1.0))
+@settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_preview_emergency_withdraw(cryptopool, yb_lt, collateral_token, stablecoin, yb_allocated, seed_cryptopool,
+                                    admin, accounts, frac):
+    user = accounts[0]
+    collateral_token._mint_for_testing(user, 10**18)
+    stablecoin._mint_for_testing(user, 100_000 * 10**18)
+
+    with boa.env.prank(user):
+        yb_lt.deposit(10**17, 10**17 * 100_000, 0)
+
+    max_shares = yb_lt.balanceOf(user)
+    shares = int(frac * max_shares)
+
+    if shares > 0 and (shares == max_shares or shares < max_shares - 10**6):
+        d_collateral, d_stables = yb_lt.preview_emergency_withdraw(shares)
+
+        c_0 = collateral_token.balanceOf(user)
+        s_0 = stablecoin.balanceOf(user)
+        with boa.env.prank(user):
+            yb_lt.emergency_withdraw(shares)
+        c_1 = collateral_token.balanceOf(user)
+        s_1 = stablecoin.balanceOf(user)
+
+        assert c_1 - c_0 == d_collateral
+        assert s_1 - s_0 == d_stables
