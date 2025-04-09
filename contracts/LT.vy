@@ -498,7 +498,11 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
 
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
+
     total_collateral: uint256 = staticcall COLLATERAL.totalSupply()
+    if lp_collateral > 0 and lp_collateral < total_collateral:
+        lp_collateral -= 1
+
     cryptopool_stables: int256 = convert(staticcall COLLATERAL.balances(0) * lp_collateral // total_collateral, int256)
     cryptopool_crypto: uint256 = staticcall COLLATERAL.balances(1) * lp_collateral // total_collateral
 
