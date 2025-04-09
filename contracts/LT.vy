@@ -546,6 +546,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     elif stables_to_return < 0:
         assert extcall STABLECOIN.transferFrom(msg.sender, self, convert(-stables_to_return, uint256), default_return_value=True)
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
+    assert extcall DEPOSITED_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
 
     return (withdrawn_cswap[1], stables_to_return)
 
