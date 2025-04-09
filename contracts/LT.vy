@@ -6,6 +6,7 @@
 @license Copyright (c) 2025
 """
 from ethereum.ercs import IERC20
+from snekmate.utils import math
 
 implements: IERC20
 
@@ -496,7 +497,7 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
         frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
 
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
-    debt: int256 = convert((staticcall amm.get_debt()) * frac // 10**18, int256)
+    debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
     total_collateral: uint256 = staticcall COLLATERAL.totalSupply()
     cryptopool_stables: int256 = convert(staticcall COLLATERAL.balances(0) * lp_collateral // total_collateral, int256)
     cryptopool_crypto: uint256 = staticcall COLLATERAL.balances(1) * lp_collateral // total_collateral
