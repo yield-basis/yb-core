@@ -152,3 +152,9 @@ def test_kill(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, yb_alloca
         stablecoin.approve(yb_lt.address, 2**256-1)
         yb_lt.emergency_withdraw(shares // 2)
         shares -= shares // 2
+
+    with boa.env.prank(admin):
+        yb_lt.set_killed(False)
+
+    with boa.env.prank(user):
+        yb_lt.withdraw(shares, 0)
