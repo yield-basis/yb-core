@@ -536,6 +536,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
         frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
 
     withdrawn_levamm: Pair = extcall amm._withdraw(frac)
+    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
     withdrawn_cswap: uint256[2] = extcall COLLATERAL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
     stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
 

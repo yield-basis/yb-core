@@ -116,3 +116,39 @@ def test_collect_fees(cryptopool, yb_lt, collateral_token, stablecoin, yb_alloca
 
         assert cryptopool.balances(0) == stables_before
         assert stablecoin.balanceOf(cryptopool.address) > stables_before
+
+
+def test_kill(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, yb_allocated, seed_cryptopool, admin, accounts):
+    user = accounts[0]
+    swapper = accounts[1]
+
+    collateral_token._mint_for_testing(user, 10**18)
+    collateral_token._mint_for_testing(swapper, 10**18)
+    stablecoin._mint_for_testing(swapper, 10**5 * 10**18)
+
+    with boa.env.prank(user):
+        yb_lt.deposit(10**17, 10**17 * 100_000, 0)
+
+    shares = yb_lt.balanceOf(user)
+
+    with boa.env.prank(swapper):
+        yb_amm.exchange(0, 1, 10**15, 0)
+
+    with boa.env.prank(admin):
+        yb_lt.set_killed(True)
+
+    with boa.env.prank(user):
+        with boa.reverts():
+            yb_lt.deposit(10**17, 10**17 * 100_000, 0)
+        with boa.reverts():
+            yb_lt.withdraw(shares // 2, 0)
+
+    with boa.env.prank(swapper):
+        with boa.reverts():
+            yb_amm.exchange(0, 1, 10**15, 0)
+
+    with boa.env.prank(user):
+        stablecoin._mint_for_testing(user, 100_000 * 10**18)
+        stablecoin.approve(yb_lt.address, 2**256-1)
+        yb_lt.emergency_withdraw(shares // 2)
+        shares -= shares // 2
