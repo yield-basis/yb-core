@@ -493,7 +493,7 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
         supply = lv.supply_tokens
 
     frac: uint256 = 10**18 * shares // supply
-    if lv.admin != 0 and lv.total != 0:
+    if lv.admin > 0 and lv.total != 0:
         frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
 
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
@@ -520,11 +520,14 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
     @return (unsigned collateral, signed stables). If stables < 0 - we need to bring them
     """
+    assert receiver != self.staker, "Withdraw to staker"
+
     supply: uint256 = 0
     lv: LiquidityValuesOut = empty(LiquidityValuesOut)
     amm: LevAMM = self.amm
+    killed: bool = staticcall amm.is_killed()
 
-    if staticcall amm.is_killed():
+    if killed:
         supply = self.totalSupply
     else:
         lv = self._calculate_values(self._price_oracle_w())
@@ -537,7 +540,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
 
     frac: uint256 = 10**18 * shares // supply
-    if lv.admin != 0 and lv.total != 0:
+    frac_clean: int256 = convert(frac, int256)
+    if lv.admin > 0 and lv.total != 0:
         frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
 
     withdrawn_levamm: Pair = extcall amm._withdraw(frac)
@@ -552,6 +556,12 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
     assert extcall DEPOSITED_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
 
+    self._burn(msg.sender, shares)
+
+    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
+    if self.liquidity.admin < 0 or killed:
+        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
+
     return (withdrawn_cswap[1], stables_to_return)
 
 
@@ -562,9 +572,7 @@ def pricePerShare() -> uint256:
     Non-manipulatable "fair price per share" oracle
     """
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
-    admin_balance: uint256 = convert(max(v.admin, 0), uint256)
-    adjusted_f: uint256 = 10**18 * v.total // (v.total + admin_balance)
-    return v.total * adjusted_f // v.supply_tokens
+    return v.total * 10**18 // v.supply_tokens
 
 
 @external

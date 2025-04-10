@@ -91,6 +91,23 @@ class StatefulTrader(RuleBasedStateMachine):
                 with boa.reverts():
                     self.yb_lt.withdraw(shares, 0)
 
+    @rule(frac=withdraw_fraction, uid=user_id)
+    def emergency_withdraw(self, frac, uid):
+        user = self.accounts[uid]
+        user_shares = self.yb_lt.balanceOf(user)
+        shares = int(frac * user_shares)
+        with boa.env.prank(user):
+            if shares <= user_shares and shares > 0:
+                _, d_stables = self.yb_lt.preview_emergency_withdraw(shares)
+                if d_stables < 0:
+                    self.stablecoin._mint_for_testing(user, -d_stables)
+                try:
+                    self.yb_lt.emergency_withdraw(shares)
+                except Exception:
+                    # Failures could be if pool is too imbalanced to return the amount of debt requested
+                    # or number of shares being too close to 0 thus returning zero debt
+                    raise  # XXX
+
     @rule(amount=amount, is_stablecoin=is_stablecoin)
     def trade_in_cryptopool(self, amount, is_stablecoin):
         if is_stablecoin:
@@ -176,3 +193,18 @@ def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, c
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)
+
+
+def test_emergency_fail_1(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
+                          yb_allocated, seed_cryptopool, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulTrader, k, v)
+
+    state = StatefulTrader()
+    state.uponly()
+    state.deposit(amount=10**10, mul=0.0, uid=1)
+    state.deposit(amount=3_509_882_596_680_098_447, mul=0.0, uid=0)
+    state.uponly()
+    state.emergency_withdraw(frac=1.0, uid=0)
+    state.uponly()
+    state.teardown()
