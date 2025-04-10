@@ -106,7 +106,7 @@ class StatefulTrader(RuleBasedStateMachine):
                 except Exception:
                     # Failures could be if pool is too imbalanced to return the amount of debt requested
                     # or number of shares being too close to 0 thus returning zero debt
-                    raise  # XXX
+                    pass
 
     @rule(amount=amount, is_stablecoin=is_stablecoin)
     def trade_in_cryptopool(self, amount, is_stablecoin):
@@ -183,13 +183,13 @@ class StatefulTrader(RuleBasedStateMachine):
     @invariant()
     def uponly(self):
         pps = self.yb_lt.pricePerShare()
-        assert pps - self.pps >= -1e-11 * self.pps
+        assert pps - self.pps >= -1e-16 * self.pps
         self.pps = pps
 
 
 def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
                       yb_allocated, seed_cryptopool, accounts, admin):
-    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=20000, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)
