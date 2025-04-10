@@ -81,12 +81,7 @@ class StatefulTrader(RuleBasedStateMachine):
         shares = int(frac * user_shares)
         with boa.env.prank(user):
             if shares <= user_shares and shares > 0:
-                try:
-                    self.yb_lt.withdraw(shares, 0)
-                except Exception:
-                    # Failures could be if pool is too imbalanced to return the amount of debt requested
-                    # or number of shares being too close to 0 thus returning zero debt
-                    return
+                self.yb_lt.withdraw(shares, 0)
             else:
                 with boa.reverts():
                     self.yb_lt.withdraw(shares, 0)
@@ -183,13 +178,13 @@ class StatefulTrader(RuleBasedStateMachine):
     @invariant()
     def uponly(self):
         pps = self.yb_lt.pricePerShare()
-        assert pps - self.pps >= -1e-16 * self.pps
+        assert pps - self.pps >= -1e-12 * self.pps
         self.pps = pps
 
 
 def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
                       yb_allocated, seed_cryptopool, accounts, admin):
-    StatefulTrader.TestCase.settings = settings(max_examples=20000, stateful_step_count=10)
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)

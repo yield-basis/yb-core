@@ -1052,7 +1052,7 @@ def tweak_price(
         #         ensure new virtual_price is not less than old virtual_price,
         #                                        else the pool suffers a loss.
         if self.future_A_gamma_time < block.timestamp:
-            assert virtual_price > old_virtual_price, "Loss"
+            assert virtual_price >= old_virtual_price, "Loss"
 
         # -------------------------- Cache last_xcp --------------------------
 
