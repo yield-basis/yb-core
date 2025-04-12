@@ -1,3 +1,11 @@
+# @version 0.4.1
+"""
+@title YBToken
+@author Yield Basis
+@license MIT
+@notice YB Token
+"""
+
 from snekmate.auth import ownable
 from snekmate.tokens import erc20
 
