@@ -8,7 +8,8 @@ initializes: erc20[ownable := ownable]
 
 exports: (
     erc20.IERC20,
-    erc20.IERC20Detailed
+    erc20.IERC20Detailed,
+    ownable.renounce_ownership
 )
 
 
@@ -16,4 +17,5 @@ exports: (
 def __init__():
     ownable.__init__()
     erc20.__init__("Yield Basis", "YB", 18, "Just say no", "to EIP712")
-    ownable._transfer_ownership(empty(address))
+    # Ownership is now with msg.sender
+    # Sender should revoke it once the setup is complete
