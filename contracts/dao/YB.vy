@@ -6,6 +6,12 @@ initializes: ownable
 initializes: erc20[ownable := ownable]
 
 
+exports: (
+    erc20.IERC20,
+    erc20.IERC20Detailed
+)
+
+
 @deploy
 def __init__():
     ownable.__init__()
