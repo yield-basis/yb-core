@@ -1,0 +1,12 @@
+from snekmate.auth import ownable
+from snekmate.tokens import erc20
+
+
+initializes: ownable
+initializes: erc20[ownable := ownable]
+
+
+@deploy
+def __init__():
+    ownable.__init__()
+    erc20.__init__("Yield Basis", "YB", 18, "Just say no", "to EIP712")
