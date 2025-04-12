@@ -10,3 +10,4 @@ initializes: erc20[ownable := ownable]
 def __init__():
     ownable.__init__()
     erc20.__init__("Yield Basis", "YB", 18, "Just say no", "to EIP712")
+    ownable._transfer_ownership(empty(address))
