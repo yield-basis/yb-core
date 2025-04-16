@@ -35,7 +35,19 @@ from snekmate.tokens import erc721
 initializes: ownable
 initializes: erc721[ownable := ownable]
 
-exports: (erc721.IERC721)
+exports: (
+    erc721.balanceOf,
+    erc721.ownerOf,
+    erc721.approve,
+    erc721.setApprovalForAll,
+    erc721.getApproved,
+    erc721.isApprovedForAll,
+    erc721.name,
+    erc721.symbol,
+    erc721.totalSupply,
+    erc721.tokenByIndex,
+    erc721.tokenOfOwnerByIndex
+)
 
 
 ### ve-specific
@@ -267,6 +279,7 @@ def create_lock(_value: uint256, _unlock_time: uint256):
     assert unlock_time <= block.timestamp + UMAXTIME, "Voting lock can be 4 years max"
 
     self._deposit_for(msg.sender, _value, unlock_time, _locked, LockActions.CREATE_LOCK)
+    erc721._mint(msg.sender, convert(msg.sender, uint256))
 
 
 @external
@@ -330,6 +343,8 @@ def withdraw(_for: address = msg.sender):
     self._checkpoint(msg.sender, old_locked, _locked)
 
     assert extcall TOKEN.transfer(_for, value)
+
+    erc721._burn(convert(msg.sender, uint256))
 
     log Withdraw(_from=msg.sender, _for=_for, value=value, ts=block.timestamp)
     log Supply(prevSupply=supply_before, supply=new_supply)
@@ -427,7 +442,7 @@ def total_supply_at(timepoint: uint256) -> uint256:
 
 @external
 @view
-def totalSupply() -> uint256:
+def totalVotes() -> uint256:
     """
     @notice Returns current total supply of votes
     """
@@ -446,3 +461,31 @@ def getPastTotalSupply(timepoint: uint256) -> uint256:
     Unlike the original method, this one ALSO works with the future
     """
     return self.total_supply_at(timepoint)
+
+
+@internal
+@view
+def _ve_transfer_allowed(owner: address, to: address) -> bool:
+    owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
+    to_time: uint256 = self.locked[to].end // WEEK * WEEK
+    now: uint256 = block.timestamp // WEEK * WEEK
+    return owner_time == now and to_time == now
+
+
+@external
+@payable
+def transferFrom(owner: address, to: address, token_id: uint256):
+    assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
+    assert self._ve_transfer_allowed(owner, to), "Need max veLock"
+    erc721._transfer(owner, to, token_id)
+
+
+@external
+@payable
+def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes[1_024] = b""):
+    assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
+    assert self._ve_transfer_allowed(owner, to), "Need max veLock"
+    erc721._safe_transfer(owner, to, token_id, data)
+
+
+# TODO delegation
