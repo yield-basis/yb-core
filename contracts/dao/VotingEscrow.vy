@@ -380,34 +380,9 @@ def getPastVotes(account: address, timepoint: uint256) -> uint256:
         return 0
 
 
-@external
+@internal
 @view
-def totalSupply() -> uint256:
-    """
-    @notice Returns current total supply of votes
-    """
-    _epoch: uint256 = self.epoch
-    if _epoch == 0:
-        return 0
-    else:
-        last_point: Point = self.point_history[_epoch]
-        last_point.bias -= last_point.slope * convert(block.timestamp - last_point.ts, int256)
-        if last_point.bias < 0:
-            last_point.bias = 0
-        return convert(last_point.bias, uint256)
-
-
-@external
-@view
-def getPastTotalSupply(timepoint: uint256) -> uint256:
-    """
-    @dev Returns the total supply of votes available at a specific moment in the past.
-
-    @notice This value is the sum of all available votes, which is not necessarily the sum of all delegated votes.
-    Votes that have not been delegated are still part of total supply, even though they would not participate in a
-    vote.
-    Unlike the original method, this one ALSO works with the future
-    """
+def total_supply_at(timepoint: uint256) -> uint256:
     _epoch: uint256 = self.epoch
     if _epoch == 0:
         return 0
@@ -448,3 +423,26 @@ def getPastTotalSupply(timepoint: uint256) -> uint256:
             point.bias -= point.slope * convert(timepoint - point.ts, int256)
 
         return convert(point.bias, uint256)
+
+
+@external
+@view
+def totalSupply() -> uint256:
+    """
+    @notice Returns current total supply of votes
+    """
+    return self.total_supply_at(block.timestamp)
+
+
+@external
+@view
+def getPastTotalSupply(timepoint: uint256) -> uint256:
+    """
+    @dev Returns the total supply of votes available at a specific moment in the past.
+
+    @notice This value is the sum of all available votes, which is not necessarily the sum of all delegated votes.
+    Votes that have not been delegated are still part of total supply, even though they would not participate in a
+    vote.
+    Unlike the original method, this one ALSO works with the future
+    """
+    return self.total_supply_at(timepoint)
