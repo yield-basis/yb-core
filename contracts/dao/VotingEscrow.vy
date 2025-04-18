@@ -68,6 +68,9 @@ flag LockActions:
     INCREASE_AMOUNT
     INCREASE_TIME
 
+interface TransferClearanceChecker:
+    def ve_transfer_allowed() -> bool: view
+
 
 event Deposit:
     _from: indexed(address)
@@ -87,6 +90,10 @@ event Supply:
     prevSupply: uint256
     supply: uint256
 
+event NewAdmin:
+    old_admin: address
+    admin: address
+
 
 WEEK: constant(uint256) = 7 * 86400  # all future times are rounded by week
 MAXTIME: constant(int256) = 4 * 365 * 86400  # 4 years
@@ -102,7 +109,11 @@ point_history: public(Point[10**18])  # epoch -> unsigned point
 user_point_history: public(HashMap[address, Point[10**18]])  # user -> Point[user_epoch]
 user_point_epoch: public(HashMap[address, uint256])
 slope_changes: public(HashMap[uint256, int256])  # time -> signed slope change
+
+transfer_clearance_checker: public(TransferClearanceChecker)
 ###
+
+admin: public(address)
 
 
 @deploy
@@ -113,6 +124,14 @@ def __init__(token: IERC20, name: String[25], symbol: String[5], base_uri: Strin
     TOKEN = token
 
     self.point_history[0].ts = block.timestamp
+    self.admin = msg.sender
+
+
+@external
+def set_admin(admin: address):
+    assert msg.sender == admin, "Access"
+    log NewAdmin(old_admin=self.admin, admin=admin)
+    self.admin = admin
 
 
 @internal
@@ -466,10 +485,20 @@ def getPastTotalSupply(timepoint: uint256) -> uint256:
 @internal
 @view
 def _ve_transfer_allowed(owner: address, to: address) -> bool:
+    checker: TransferClearanceChecker = self.transfer_clearance_checker
+    if checker.address != empty(address):
+        assert staticcall checker.ve_transfer_allowed()
+
     owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
     to_time: uint256 = self.locked[to].end // WEEK * WEEK
     now: uint256 = block.timestamp // WEEK * WEEK
     return owner_time == now and to_time == now
+
+
+@external
+def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearanceChecker):
+    assert msg.sender == self.admin, "Access"
+    self.transfer_clearance_checker = transfer_clearance_checker
 
 
 @external
