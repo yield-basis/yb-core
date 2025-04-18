@@ -269,8 +269,8 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
     # new_staked_value is guaranteed to be <= new_total_value
-    new_total_value: int256 = prev_value + dv_use
-    new_staked_value: int256 = v_st + dv_s
+    new_total_value: int256 = max(prev_value + dv_use, 0)
+    new_staked_value: int256 = max(v_st + dv_s, 0)
 
     # Solution of:
     # staked - token_reduction       new_staked_value
