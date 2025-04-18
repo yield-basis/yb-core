@@ -3,6 +3,7 @@
 # In such case, value oracle for an initial deposit should always go up
 
 import boa
+import math
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
@@ -74,6 +75,9 @@ class StatefulTrader(RuleBasedStateMachine):
 
                     raise
 
+    def is_cryptopool_imbalanced(self):
+        return abs(math.log(self.cryptopool.balances(1) * self.p / self.cryptopool.balances(0))) > 2
+
     @rule(frac=withdraw_fraction, uid=user_id)
     def withdraw(self, frac, uid):
         user = self.accounts[uid]
@@ -81,7 +85,16 @@ class StatefulTrader(RuleBasedStateMachine):
         shares = int(frac * user_shares)
         with boa.env.prank(user):
             if shares <= user_shares and shares > 0:
-                self.yb_lt.withdraw(shares, 0)
+                try:
+                    self.yb_lt.withdraw(shares, 0)
+                except Exception:
+                    if user_shares < 10000:
+                        return
+                    elif self.is_cryptopool_imbalanced():
+                        # Very imbalanced pool might have not enough tokens to withdraw
+                        return
+                    else:
+                        raise
             else:
                 with boa.reverts():
                     self.yb_lt.withdraw(shares, 0)
@@ -143,8 +156,12 @@ class StatefulTrader(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 try:
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
-                except Exception:
+                except Exception as e:
                     if amount < 10**10:
+                        return
+                    if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+                        # Trade leads to the state which we may not come back from
+                        # so AMM blocks it (correctly)
                         return
                     raise
                 self.yb_amm.exchange(1, 0, lp, 0)
