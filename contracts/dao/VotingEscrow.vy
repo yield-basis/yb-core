@@ -495,6 +495,39 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
     return owner_time == now and to_time == now
 
 
+@internal
+def _merge_positions(owner: address, to: address):
+    """
+    @dev Merge veLocked positions of `owner` with `to`, giving it to `to`.
+    """
+    locked: LockedBalance = self.locked[owner]
+    self.locked[owner] = empty(LockedBalance)
+    new_locked: LockedBalance = self.locked[to]
+    new_locked.amount += locked.amount
+    self.locked[to].amount = new_locked.amount
+
+    user_epoch: uint256 = self.user_point_epoch[owner]
+    pt: Point = self.user_point_history[owner][user_epoch]
+    user_epoch += 1
+    self.user_point_epoch[owner] = user_epoch
+    self.user_point_history[owner][user_epoch] = Point(bias=0, slope=0, ts=block.timestamp)
+
+    user_epoch = self.user_point_epoch[to]
+    to_pt: Point = self.user_point_history[to][user_epoch]
+    user_epoch += 1
+    self.user_point_epoch[to] = user_epoch
+    slope: int256 = new_locked.amount // MAXTIME
+    self.user_point_history[to][user_epoch] = Point(
+        bias=slope * convert(new_locked.end - block.timestamp, int256),
+        slope=slope,
+        ts=block.timestamp
+    )
+
+    # Total should not change because we transfer between users
+
+    self._checkpoint(empty(address), empty(LockedBalance), empty(LockedBalance))
+
+
 @external
 def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearanceChecker):
     assert msg.sender == self.admin, "Access"
@@ -507,6 +540,8 @@ def transferFrom(owner: address, to: address, token_id: uint256):
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
     erc721._transfer(owner, to, token_id)
+    self._merge_positions(owner, to)
+    erc721._burn(token_id)
 
 
 @external
@@ -515,6 +550,9 @@ def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
     erc721._safe_transfer(owner, to, token_id, data)
+    self._merge_positions(owner, to)
+    erc721._burn(token_id)
 
 
 # TODO delegation
+# TODO autorelock to max
