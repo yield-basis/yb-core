@@ -653,6 +653,7 @@ def withdraw_admin_fees():
 
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
+    self.totalSupply = v.supply_tokens
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
     # fee_receiver is just a normal user
     new_total: uint256 = v.total + convert(v.admin, uint256)
