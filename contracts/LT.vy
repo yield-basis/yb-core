@@ -661,6 +661,8 @@ def withdraw_admin_fees():
     assert msg.sender == staticcall Factory(admin).admin(), "Access"
 
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
+    assert fee_receiver != empty(address), "No fee_receiver"
+
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     self.totalSupply = v.supply_tokens
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
@@ -682,6 +684,7 @@ def withdraw_admin_fees():
 @nonreentrant
 def set_staker(staker: address):
     assert self.staker == empty(address), "Staker already set"
+    assert staker != empty(address)
     self._check_admin()
 
     staker_balance: uint256 = self.balanceOf[staker]

@@ -110,6 +110,7 @@ def __init__(
     assert admin != empty(address)
     assert stablecoin.address != empty(address)
     assert agg != empty(address)
+    assert price_oracle_impl != empty(address)
 
     STABLECOIN = stablecoin
     self.amm_impl = amm_impl
@@ -224,6 +225,7 @@ def fill_staker_vpool(i: uint256):
 def set_mint_factory(mint_factory: address):
     assert msg.sender == self.admin, "Access"
     assert self.mint_factory == empty(address), "Only set once"
+    assert mint_factory != empty(address)
     self.mint_factory = mint_factory
     # crvUSD factory can take back as much as it wants. Very important function - this is why it can be called only once
     extcall STABLECOIN.approve(mint_factory, max_value(uint256))
@@ -255,6 +257,7 @@ def set_allocator(allocator: address, amount: uint256):
 @external
 def set_agg(agg: address):
     assert msg.sender == self.admin, "Access"
+    assert agg != empty(address)
     self.agg = agg
     log SetAgg(agg=agg)
 

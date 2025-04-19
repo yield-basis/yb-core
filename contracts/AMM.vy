@@ -53,6 +53,8 @@ COLLATERAL_PRECISION: immutable(uint256)
 MAX_FEE: constant(uint256) = 10**17
 fee: public(uint256)
 
+MAX_RATE: constant(uint256) = 10**18 // (365 * 86400)  # Not more than 100% APR
+
 collateral_amount: public(uint256)
 debt: uint256
 rate: public(uint256)
@@ -182,6 +184,7 @@ def set_rate(rate: uint256) -> uint256:
     @return rate_mul multiplier (e.g. 1.0 + integral(rate, dt))
     """
     assert msg.sender == DEPOSITOR, "Access"
+    assert rate <= MAX_RATE, "Rate too high"
     rate_mul: uint256 = self._rate_mul()
     self.debt = self.debt * rate_mul // self.rate_mul
     self.rate_mul = rate_mul
