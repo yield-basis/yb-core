@@ -50,12 +50,6 @@ event SetAgg:
 event SetFlash:
     flash: address
 
-event SetVirtualPoolImpl:
-    pool: address
-
-event SetStakerImpl:
-    staker: address
-
 event SetAdmin:
     admin: address
     emergency_admin: address
@@ -113,6 +107,10 @@ def __init__(
     admin: address,
     emergency_admin: address
 ):
+    assert admin != empty(address)
+    assert stablecoin.address != empty(address)
+    assert agg != empty(address)
+
     STABLECOIN = stablecoin
     self.amm_impl = amm_impl
     self.lt_impl = lt_impl
@@ -292,14 +290,11 @@ def set_min_admin_fee(new_min_admin_fee: uint256):
 
 
 @external
-def set_virtual_pool_impl(impl: address):
+def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address):
     assert msg.sender == self.admin, "Access"
-    self.virtual_pool_impl = impl
-    log SetVirtualPoolImpl(pool=impl)
-
-
-@external
-def set_staker_impl(impl: address):
-    assert msg.sender == self.admin, "Access"
-    self.staker_impl = impl
-    log SetStakerImpl(staker=impl)
+    self.amm_impl = amm
+    self.lt_impl = lt
+    self.virtual_pool_impl = virtual_pool
+    self.price_oracle_impl = price_oracle
+    self.staker_impl = staker
+    log SetImplementations(amm=amm, lt=lt, virtual_pool=virtual_pool, price_oracle=price_oracle, staker=staker)
