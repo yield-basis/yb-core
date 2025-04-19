@@ -50,6 +50,7 @@ PRICE_ORACLE_CONTRACT: public(immutable(PriceOracle))
 
 COLLATERAL_PRECISION: immutable(uint256)
 
+MAX_FEE: constant(uint256) = 10**17
 fee: public(uint256)
 
 collateral_amount: public(uint256)
@@ -90,6 +91,9 @@ event SetRate:
 event CollectFees:
     amount: uint256
     new_supply: uint256
+
+event SetFee:
+    fee: uint256
 
 
 @deploy
@@ -459,3 +463,11 @@ def set_killed(is_killed: bool):
 @nonreentrant
 def check_nonreentrant():
     pass
+
+
+@external
+def set_fee(fee: uint256):
+    assert msg.sender == DEPOSITOR, "Access"
+    assert fee <= MAX_FEE
+    self.fee = fee
+    log SetFee(fee=fee)

@@ -37,6 +37,7 @@ interface LevAMM:
     def set_killed(is_killed: bool): nonpayable
     def check_nonreentrant(): nonpayable
     def is_killed() -> bool: view
+    def set_fee(fee: uint256): nonpayable
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
@@ -600,6 +601,13 @@ def set_admin(new_admin: address):
 def set_rate(rate: uint256):
     self._check_admin()
     extcall self.amm.set_rate(rate)
+
+
+@external
+@nonreentrant
+def set_amm_fee(fee: uint256):
+    self._check_admin()
+    extcall self.amm.set_fee(fee)
 
 
 @external
