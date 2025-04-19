@@ -20,6 +20,9 @@ interface CurveCryptoPool:
 interface LPOracle:
     def price_w() -> uint256: nonpayable
 
+interface Agg:
+    def price() -> uint256: view
+
 
 struct Market:
     asset_token: IERC20
@@ -125,8 +128,17 @@ def __init__(
     self.emergency_admin = emergency_admin
     self.min_admin_fee = 10**17
 
+    self._validate_agg()
+
     log SetImplementations(amm=amm_impl, lt=lt_impl, virtual_pool=virtual_pool_impl, price_oracle=price_oracle_impl,
                            staker=staker_impl)
+
+
+@internal
+@view
+def _validate_agg():
+    p: uint256 = staticcall Agg(self.agg).price()
+    assert p > 9 * 10**17 and p < 11 * 10**17, "Bad aggregator"
 
 
 @external
@@ -259,6 +271,7 @@ def set_agg(agg: address):
     assert msg.sender == self.admin, "Access"
     assert agg != empty(address)
     self.agg = agg
+    self._validate_agg()
     log SetAgg(agg=agg)
 
 
