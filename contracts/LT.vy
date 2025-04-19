@@ -736,14 +736,26 @@ def _mint(_to: address, _value: uint256):
 def _transfer(_from: address, _to: address, _value: uint256):
     assert _to not in [self, empty(address)]
 
+    killed: bool = staticcall self.amm.is_killed()
+
     staker: address = self.staker
     if staker != empty(address) and staker in [_from, _to]:
         assert _from != _to
-        liquidity: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
-        self.liquidity.admin = liquidity.admin
-        self.liquidity.total = liquidity.total
-        self.totalSupply = liquidity.supply_tokens
-        self.balanceOf[staker] = liquidity.staked_tokens
+        liquidity: LiquidityValuesOut = empty(LiquidityValuesOut)
+
+        if killed:
+            liquidity.ideal_staked = self.liquidity.ideal_staked
+            liquidity.staked = self.liquidity.staked
+            liquidity.total = self.liquidity.total
+            liquidity.supply_tokens = self.totalSupply
+            liquidity.staked_tokens = self.balanceOf[staker]
+        else:
+            liquidity = self._calculate_values(self._price_oracle_w())
+            self.liquidity.admin = liquidity.admin
+            self.liquidity.total = liquidity.total
+            self.totalSupply = liquidity.supply_tokens
+            self.balanceOf[staker] = liquidity.staked_tokens
+
         if _from == staker:
             # Reduce the staked part
             # change by 0 if no supply_tokens or stake_tokens found
@@ -758,6 +770,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
             else:
                 # To exclude division by zero and numerical noise errors
                 liquidity.ideal_staked += d_staked_value
+
         self.liquidity.staked = liquidity.staked
         self.liquidity.ideal_staked = liquidity.ideal_staked
 
