@@ -11,7 +11,7 @@ from ethereum.ercs import IERC20 as ERC20
 interface Flash:
     def flashLoan(receiver: address, token: address, amount: uint256, data: Bytes[10**5]) -> bool: nonpayable
     def supportedTokens(token: address) -> bool: view
-    def ceiling() -> uint256: view
+    def maxFlashLoan(token: address) -> uint256: view
 
 interface Pool:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
@@ -105,7 +105,11 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     return self._calculate(i, in_amount, False)[0]
 
 
+@external
 def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256, fee: uint256, data: Bytes[10**5]):
+    assert initiator == self
+    assert token == STABLECOIN.address
+
     # executor
     i: uint256 = 0
     in_amount: uint256 = 0
@@ -142,6 +146,7 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
     assert extcall STABLECOIN.transfer(msg.sender, repay_flash_amount, default_return_value=True)
 
 @external
+@nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
     in_coin: ERC20 = [STABLECOIN, CRYPTO][i]
@@ -151,7 +156,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
     data: Bytes[10**5] = empty(Bytes[10**5])
     data = abi_encode(i, in_amount)
-    extcall FLASH.flashLoan(self, STABLECOIN.address, staticcall FLASH.ceiling(), data)
+    extcall FLASH.flashLoan(self, STABLECOIN.address, staticcall FLASH.maxFlashLoan(STABLECOIN.address), data)
 
     out_amount: uint256 = staticcall out_coin.balanceOf(self)
     assert out_amount >= min_out, "Slippage"
