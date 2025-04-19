@@ -269,6 +269,8 @@ def set_flash(flash: address):
 @external
 def set_admin(new_admin: address, new_emergency_admin: address):
     assert msg.sender == self.admin, "Access"
+    assert new_admin != empty(address)
+    assert new_emergency_admin != empty(address)
     log SetAdmin(admin=new_admin, emergency_admin=new_emergency_admin, old_admin=self.admin, old_emergency_admin=self.emergency_admin)
     self.admin = new_admin
     self.emergency_admin = new_emergency_admin
