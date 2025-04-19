@@ -43,7 +43,7 @@ LEVERAGE: public(immutable(uint256))
 LEV_RATIO: immutable(uint256)
 MIN_SAFE_DEBT: immutable(uint256)
 MAX_SAFE_DEBT: immutable(uint256)
-DEPOSITOR: public(immutable(address))
+LT_CONTRACT: public(immutable(address))
 COLLATERAL: public(immutable(IERC20))
 STABLECOIN: public(immutable(IERC20))
 PRICE_ORACLE_CONTRACT: public(immutable(PriceOracle))
@@ -99,10 +99,10 @@ event SetFee:
 
 
 @deploy
-def __init__(depositor: address,
+def __init__(lt_contract: address,
              stablecoin: IERC20, collateral: IERC20, leverage: uint256,
              fee: uint256, price_oracle_contract: PriceOracle):
-    DEPOSITOR = depositor
+    LT_CONTRACT = lt_contract
     STABLECOIN = stablecoin
     COLLATERAL = collateral
     LEVERAGE = leverage
@@ -124,8 +124,8 @@ def __init__(depositor: address,
     self.rate_mul = 10**18
     self.rate_time = block.timestamp
 
-    extcall stablecoin.approve(DEPOSITOR, max_value(uint256), default_return_value=True)
-    extcall collateral.approve(DEPOSITOR, max_value(uint256), default_return_value=True)
+    extcall stablecoin.approve(LT_CONTRACT, max_value(uint256), default_return_value=True)
+    extcall collateral.approve(LT_CONTRACT, max_value(uint256), default_return_value=True)
 
 
 # Math
@@ -183,7 +183,7 @@ def set_rate(rate: uint256) -> uint256:
     @param rate New rate in units of int(fraction * 1e18) per second
     @return rate_mul multiplier (e.g. 1.0 + integral(rate, dt))
     """
-    assert msg.sender == DEPOSITOR, "Access"
+    assert msg.sender == LT_CONTRACT, "Access"
     assert rate <= MAX_RATE, "Rate too high"
     rate_mul: uint256 = self._rate_mul()
     self.debt = self.debt * rate_mul // self.rate_mul
@@ -324,7 +324,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
 @external
 def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
-    assert msg.sender == DEPOSITOR, "Access violation"
+    assert msg.sender == LT_CONTRACT, "Access violation"
     assert not self.is_killed
 
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
@@ -349,7 +349,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
 
 @external
 def _withdraw(frac: uint256) -> Pair:
-    assert msg.sender == DEPOSITOR, "Access violation"
+    assert msg.sender == LT_CONTRACT, "Access violation"
 
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
@@ -448,7 +448,7 @@ def collect_fees() -> uint256:
         if stables_in_amm < to_be_redeemed:
             self.minted -= (to_be_redeemed - stables_in_amm)
             to_be_redeemed = stables_in_amm
-        assert extcall STABLECOIN.transfer(DEPOSITOR, to_be_redeemed, default_return_value=True)
+        assert extcall STABLECOIN.transfer(LT_CONTRACT, to_be_redeemed, default_return_value=True)
         log CollectFees(amount=to_be_redeemed, new_supply=debt)
         return to_be_redeemed
     else:
@@ -458,7 +458,7 @@ def collect_fees() -> uint256:
 
 @external
 def set_killed(is_killed: bool):
-    assert msg.sender == DEPOSITOR, "Access"
+    assert msg.sender == LT_CONTRACT, "Access"
     self.is_killed = is_killed
 
 
@@ -470,7 +470,7 @@ def check_nonreentrant():
 
 @external
 def set_fee(fee: uint256):
-    assert msg.sender == DEPOSITOR, "Access"
+    assert msg.sender == LT_CONTRACT, "Access"
     assert fee <= MAX_FEE
     self.fee = fee
     log SetFee(fee=fee)
