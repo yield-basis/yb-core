@@ -132,7 +132,7 @@ event SetAdmin:
     admin: address
 
 
-COLLATERAL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
+CRYPTOPOOL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
 STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
 ASSET_TOKEN: public(immutable(IERC20))  # For example, TBTC
 
@@ -159,34 +159,34 @@ stablecoin_allocated: public(uint256)
 
 
 @deploy
-def __init__(asset_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
+def __init__(asset_token: IERC20, stablecoin: IERC20, cryptopool: CurveCryptoPool,
              admin: address):
     """
     @notice Initializer (can be performed by an EOA deployer or a factory)
     @param asset_token Token which gets deposited. Can be collateral or can be not
     @param stablecoin Stablecoin which gets "granted" to this contract to use for loans. Has to be 18 decimals
-    @param collateral Collateral token
+    @param cryptopool Cryptopool LP collateral token
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
     """
     # Example:
     # deposit_token = WBTC
     # stablecoin = crvUSD
-    # collateral = WBTC LP
+    # cryptopool = WBTC LP
 
     STABLECOIN = stablecoin
-    COLLATERAL = collateral
+    CRYPTOPOOL = cryptopool
     ASSET_TOKEN = asset_token
     self.admin = admin
-    assert extcall asset_token.approve(collateral.address, max_value(uint256), default_return_value=True)
-    assert extcall stablecoin.approve(collateral.address, max_value(uint256), default_return_value=True)
-    assert staticcall collateral.coins(0) == stablecoin.address
-    assert staticcall collateral.coins(1) == asset_token.address
+    assert extcall asset_token.approve(cryptopool.address, max_value(uint256), default_return_value=True)
+    assert extcall stablecoin.approve(cryptopool.address, max_value(uint256), default_return_value=True)
+    assert staticcall cryptopool.coins(0) == stablecoin.address
+    assert staticcall cryptopool.coins(1) == asset_token.address
 
     # Twocrypto has no N_COINS public, so we check that coins(2) reverts
     success: bool = False
     res: Bytes[32] = empty(Bytes[32])
     success, res = raw_call(
-        collateral.address,
+        cryptopool.address,
         abi_encode(CRYPTOPOOL_N_COINS, method_id=method_id("coins(uint256)")),
         max_outsize=32,
         is_static_call=True,
@@ -213,12 +213,12 @@ def _check_admin():
 @internal
 @view
 def _price_oracle() -> uint256:
-    return staticcall COLLATERAL.price_oracle() * staticcall self.agg.price() // 10**18
+    return staticcall CRYPTOPOOL.price_oracle() * staticcall self.agg.price() // 10**18
 
 
 @internal
 def _price_oracle_w() -> uint256:
-    return staticcall COLLATERAL.price_oracle() * extcall self.agg.price_w() // 10**18
+    return staticcall CRYPTOPOOL.price_oracle() * extcall self.agg.price_w() // 10**18
 
 
 @internal
@@ -327,7 +327,7 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     @param assets Amount of crypto to deposit
     @param debt Amount of stables to borrow for MMing (approx same value as crypto)
     """
-    lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([debt, assets], True)
+    lp_tokens: uint256 = staticcall CRYPTOPOOL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
     p_o: uint256 = self._price_oracle()
     if supply > 0:
@@ -358,7 +358,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     frac: uint256 = 10**18 * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
     withdrawn_lp: uint256 = state.collateral * frac // 10**18
     withdrawn_debt: uint256 = state.debt * frac // 10**18
-    return staticcall COLLATERAL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
+    return staticcall CRYPTOPOOL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
 
 
 @external
@@ -377,7 +377,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
-    lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
+    lp_tokens: uint256 = extcall CRYPTOPOOL.add_liquidity([debt, assets], 0, amm.address)
     p_o: uint256 = self._price_oracle_w()
 
     supply: uint256 = self.totalSupply
@@ -458,8 +458,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
     withdrawn: Pair = extcall amm._withdraw(10**18 * liquidity_values.total // (liquidity_values.total + admin_balance) * shares // supply)
-    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral, default_return_value=True)
-    crypto_received: uint256 = extcall COLLATERAL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
+    assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn.collateral, default_return_value=True)
+    crypto_received: uint256 = extcall CRYPTOPOOL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
 
     self._burn(msg.sender, shares)  # Changes self.totalSupply
     self.liquidity.total = liquidity_values.total * (supply - shares) // supply
@@ -500,12 +500,12 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
 
-    total_collateral: uint256 = staticcall COLLATERAL.totalSupply()
+    total_collateral: uint256 = staticcall CRYPTOPOOL.totalSupply()
     if lp_collateral > 0 and lp_collateral < total_collateral:
         lp_collateral -= 1
 
-    cryptopool_stables: int256 = convert(staticcall COLLATERAL.balances(0) * lp_collateral // total_collateral, int256)
-    cryptopool_crypto: uint256 = staticcall COLLATERAL.balances(1) * lp_collateral // total_collateral
+    cryptopool_stables: int256 = convert(staticcall CRYPTOPOOL.balances(0) * lp_collateral // total_collateral, int256)
+    cryptopool_crypto: uint256 = staticcall CRYPTOPOOL.balances(1) * lp_collateral // total_collateral
 
     return (cryptopool_crypto, cryptopool_stables - debt)
 
@@ -519,7 +519,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
             bonding curves ensures that attackers can only lose value, not gain
     @param shares Shares to withdraw
     @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
-    @return (unsigned collateral, signed stables). If stables < 0 - we need to bring them
+    @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
     """
     assert receiver != self.staker, "Withdraw to staker"
 
@@ -546,8 +546,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
         frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
 
     withdrawn_levamm: Pair = extcall amm._withdraw(frac)
-    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
-    withdrawn_cswap: uint256[2] = extcall COLLATERAL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
+    assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
+    withdrawn_cswap: uint256[2] = extcall CRYPTOPOOL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
     stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
 
     if stables_to_return > 0:
@@ -582,7 +582,7 @@ def set_amm(amm: LevAMM):
     self._check_admin()
     assert self.amm == empty(LevAMM), "Already set"
     assert staticcall amm.STABLECOIN() == STABLECOIN.address
-    assert staticcall amm.COLLATERAL() == COLLATERAL.address
+    assert staticcall amm.COLLATERAL() == CRYPTOPOOL.address
     assert staticcall amm.DEPOSITOR() == self
     self.amm = amm
     self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
@@ -649,8 +649,8 @@ def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     extcall self.amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
-    min_amount: uint256 = (10**18 - discount) * amount // staticcall COLLATERAL.lp_price()
-    extcall COLLATERAL.donate([amount, 0], min_amount)
+    min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
+    extcall CRYPTOPOOL.donate([amount, 0], min_amount)
 
 
 @external
