@@ -201,7 +201,12 @@ def add_market(
 @external
 def fill_staker_vpool(i: uint256):
     assert msg.sender == self.admin, "Access"
+    assert i < self.market_count, "Nonexistent market"
+
     market: Market = self.markets[i]
+    assert market.lt != empty(address)
+    assert market.amm != empty(address)
+
     if market.virtual_pool == empty(address) and self.virtual_pool_impl != empty(address) and self.flash != empty(address):
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
