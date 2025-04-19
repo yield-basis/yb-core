@@ -134,7 +134,7 @@ event SetAdmin:
 
 COLLATERAL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
 STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
-DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
+ASSET_TOKEN: public(immutable(IERC20))  # For example, TBTC
 
 CRYPTOPOOL_N_COINS: constant(uint256) = 2
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
@@ -159,11 +159,11 @@ stablecoin_allocated: public(uint256)
 
 
 @deploy
-def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
+def __init__(asset_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
              admin: address):
     """
     @notice Initializer (can be performed by an EOA deployer or a factory)
-    @param deposited_token Token which gets deposited. Can be collateral or can be not
+    @param asset_token Token which gets deposited. Can be collateral or can be not
     @param stablecoin Stablecoin which gets "granted" to this contract to use for loans. Has to be 18 decimals
     @param collateral Collateral token
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
@@ -175,12 +175,12 @@ def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCrypt
 
     STABLECOIN = stablecoin
     COLLATERAL = collateral
-    DEPOSITED_TOKEN = deposited_token
+    ASSET_TOKEN = asset_token
     self.admin = admin
-    assert extcall deposited_token.approve(collateral.address, max_value(uint256), default_return_value=True)
+    assert extcall asset_token.approve(collateral.address, max_value(uint256), default_return_value=True)
     assert extcall stablecoin.approve(collateral.address, max_value(uint256), default_return_value=True)
     assert staticcall collateral.coins(0) == stablecoin.address
-    assert staticcall collateral.coins(1) == deposited_token.address
+    assert staticcall collateral.coins(1) == asset_token.address
 
     # Twocrypto has no N_COINS public, so we check that coins(2) reverts
     success: bool = False
@@ -376,7 +376,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
 
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
-    assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
+    assert extcall ASSET_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
     lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
     p_o: uint256 = self._price_oracle_w()
 
@@ -468,7 +468,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
         self.liquidity.admin = liquidity_values.admin * convert(supply - shares, int256) // convert(supply, int256)
     assert crypto_received >= min_assets, "Slippage"
     assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt, default_return_value=True)
-    assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
+    assert extcall ASSET_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
 
     log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
     return crypto_received
@@ -555,7 +555,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     elif stables_to_return < 0:
         assert extcall STABLECOIN.transferFrom(msg.sender, self, convert(-stables_to_return, uint256), default_return_value=True)
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
-    assert extcall DEPOSITED_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
+    assert extcall ASSET_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
 
     self._burn(msg.sender, shares)
 
@@ -712,13 +712,13 @@ def set_killed(is_killed: bool):
 @external
 @view
 def symbol() -> String[32]:
-    return concat('yb-', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+    return concat('yb-', staticcall IERC20Slice(ASSET_TOKEN.address).symbol())
 
 
 @external
 @view
 def name() -> String[58]:
-    return concat('Yield Basis liquidity for ', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+    return concat('Yield Basis liquidity for ', staticcall IERC20Slice(ASSET_TOKEN.address).symbol())
 
 
 @internal

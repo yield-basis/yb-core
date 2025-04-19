@@ -22,7 +22,7 @@ interface LPOracle:
 
 
 struct Market:
-    collateral_token: IERC20
+    asset_token: IERC20
     cryptopool: CurveCryptoPool
     amm: address
     lt: address
@@ -61,7 +61,7 @@ event SetMinAdminFee:
 
 event NewMarket:
     idx: indexed(uint256)
-    collateral_token: indexed(address)
+    asset_token: indexed(address)
     cryptopool: indexed(address)
     amm: address
     lt: address
@@ -142,12 +142,12 @@ def add_market(
 
     market: Market = empty(Market)
 
-    market.collateral_token = IERC20(staticcall pool.coins(1))
+    market.asset_token = IERC20(staticcall pool.coins(1))
     market.cryptopool = pool
     market.price_oracle = create_from_blueprint(self.price_oracle_impl, pool.address, self.agg)
     market.lt = create_from_blueprint(
         self.lt_impl,
-        market.collateral_token.address,
+        market.asset_token.address,
         STABLECOIN,
         pool.address,
         self
@@ -185,7 +185,7 @@ def add_market(
 
     log NewMarket(
         idx=i,
-        collateral_token=market.collateral_token.address,
+        asset_token=market.asset_token.address,
         cryptopool=market.cryptopool.address,
         amm=market.amm,
         lt=market.lt,

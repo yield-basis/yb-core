@@ -41,7 +41,7 @@ struct AMMState:
 FLASH: public(immutable(Flash))
 AMM: public(immutable(YbAMM))
 POOL: public(immutable(Pool))
-CRYPTO: public(immutable(ERC20))
+ASSET_TOKEN: public(immutable(ERC20))
 STABLECOIN: public(immutable(ERC20))
 
 
@@ -52,9 +52,9 @@ def __init__(amm: YbAMM, flash: Flash):
     POOL = staticcall amm.COLLATERAL()
     STABLECOIN = staticcall amm.STABLECOIN()
     assert staticcall POOL.coins(0) == STABLECOIN
-    CRYPTO = staticcall POOL.coins(1)
+    ASSET_TOKEN = staticcall POOL.coins(1)
     assert extcall STABLECOIN.approve(POOL.address, max_value(uint256), default_return_value=True)
-    assert extcall CRYPTO.approve(POOL.address, max_value(uint256), default_return_value=True)
+    assert extcall ASSET_TOKEN.approve(POOL.address, max_value(uint256), default_return_value=True)
     assert extcall STABLECOIN.approve(AMM.address, max_value(uint256), default_return_value=True)
     assert extcall POOL.approve(AMM.address, max_value(uint256), default_return_value=True)
 
@@ -62,7 +62,7 @@ def __init__(amm: YbAMM, flash: Flash):
 @external
 @view
 def coins(i: uint256) -> ERC20:
-    return [STABLECOIN, CRYPTO][i]
+    return [STABLECOIN, ASSET_TOKEN][i]
 
 
 @internal
@@ -115,8 +115,8 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
     in_amount: uint256 = 0
     i, in_amount = abi_decode(data, (uint256, uint256))
     flash_amount: uint256 = self._calculate(i, in_amount, True)[1]
-    in_coin: ERC20 = [STABLECOIN, CRYPTO][i]
-    out_coin: ERC20 = [STABLECOIN, CRYPTO][1-i]
+    in_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][i]
+    out_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][1-i]
     repay_flash_amount: uint256 = total_flash_amount
 
     if i == 0:
@@ -149,8 +149,8 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
 @nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
-    in_coin: ERC20 = [STABLECOIN, CRYPTO][i]
-    out_coin: ERC20 = [STABLECOIN, CRYPTO][j]
+    in_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][i]
+    out_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][j]
 
     assert extcall in_coin.transferFrom(msg.sender, self, in_amount, default_return_value=True)
 
