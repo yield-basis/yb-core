@@ -50,6 +50,12 @@ event SetAgg:
 event SetFlash:
     flash: address
 
+event SetVirtualPoolImpl:
+    pool: address
+
+event SetStakerImpl:
+    staker: address
+
 event SetAdmin:
     admin: address
     emergency_admin: address
@@ -278,3 +284,17 @@ def set_min_admin_fee(new_min_admin_fee: uint256):
     assert new_min_admin_fee <= 10**18, "Admin fee too high"
     self.min_admin_fee = new_min_admin_fee
     log SetMinAdminFee(admin_fee=new_min_admin_fee)
+
+
+@external
+def set_virtual_pool_impl(impl: address):
+    assert msg.sender == self.admin, "Access"
+    self.virtual_pool_impl = impl
+    log SetVirtualPoolImpl(pool=impl)
+
+
+@external
+def set_staker_impl(impl: address):
+    assert msg.sender == self.admin, "Access"
+    self.staker_impl = impl
+    log SetStakerImpl(staker=impl)
