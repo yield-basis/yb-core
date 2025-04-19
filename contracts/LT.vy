@@ -33,7 +33,7 @@ interface LevAMM:
     def max_debt() -> uint256: view
     def COLLATERAL() -> address: view
     def STABLECOIN() -> address: view
-    def DEPOSITOR() -> address: view
+    def LT_CONTRACT() -> address: view
     def set_killed(is_killed: bool): nonpayable
     def check_nonreentrant(): nonpayable
     def is_killed() -> bool: view
@@ -583,7 +583,7 @@ def set_amm(amm: LevAMM):
     assert self.amm == empty(LevAMM), "Already set"
     assert staticcall amm.STABLECOIN() == STABLECOIN.address
     assert staticcall amm.COLLATERAL() == CRYPTOPOOL.address
-    assert staticcall amm.DEPOSITOR() == self
+    assert staticcall amm.LT_CONTRACT() == self
     self.amm = amm
     self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
 
