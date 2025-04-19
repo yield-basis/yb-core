@@ -292,9 +292,14 @@ def set_min_admin_fee(new_min_admin_fee: uint256):
 @external
 def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address):
     assert msg.sender == self.admin, "Access"
-    self.amm_impl = amm
-    self.lt_impl = lt
-    self.virtual_pool_impl = virtual_pool
-    self.price_oracle_impl = price_oracle
-    self.staker_impl = staker
+    if amm != empty(address):
+        self.amm_impl = amm
+    if lt != empty(address):
+        self.lt_impl = lt
+    if virtual_pool != empty(address):
+        self.virtual_pool_impl = virtual_pool
+    if price_oracle != empty(address):
+        self.price_oracle_impl = price_oracle
+    if staker != empty(address):
+        self.staker_impl = staker
     log SetImplementations(amm=amm, lt=lt, virtual_pool=virtual_pool, price_oracle=price_oracle, staker=staker)
