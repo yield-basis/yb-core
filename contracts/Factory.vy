@@ -71,7 +71,7 @@ event NewMarket:
 
 
 MAX_MARKETS: public(constant(uint256)) = 50000
-LEVERAGE: constant(uint256) = 2 * 10**18
+LEVERAGE: public(constant(uint256)) = 2 * 10**18
 
 amm_impl: public(address)
 lt_impl: public(address)
