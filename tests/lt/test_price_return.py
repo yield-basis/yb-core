@@ -64,7 +64,7 @@ class StatefulTrader(RuleBasedStateMachine):
 
                     p_o_pool = self.cryptopool_oracle.price()
                     amm_collateral_value = self.yb_amm.collateral_amount() * p_o_pool // 10**18
-                    amm_debt_value = self.yb_amm.debt()
+                    amm_debt_value = self.yb_amm.get_debt()
                     lp_tokens = self.cryptopool.calc_token_amount([debt, amount], True)
                     amm_debt_value += debt
                     amm_collateral_value += lp_tokens * p_o_pool // 10**18
@@ -140,7 +140,7 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     out = self.yb_amm.exchange(0, 1, amount, 0)
                 except Exception as e:
-                    if amount > self.yb_amm.debt():
+                    if amount > self.yb_amm.get_debt():
                         return
                     if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
                         # Trade leads to the state which we may not come back from
