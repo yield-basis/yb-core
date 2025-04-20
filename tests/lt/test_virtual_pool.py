@@ -1,0 +1,47 @@
+import boa
+import pytest
+
+
+@pytest.fixture(scope="session")
+def virtual_pool(factory, flash, stablecoin, collateral_token, admin, accounts):
+    stablecoin._mint_for_testing(flash.address, 10**12 * 10**18)
+    vp_impl = boa.load_partial('contracts/VirtualPool.vy')
+    pool = vp_impl.at(factory.markets(0).virtual_pool)
+    for a in accounts + [admin]:
+        with boa.env.prank(a):
+            stablecoin.approve(pool.address, 2**256 - 1)
+            collateral_token.approve(pool.address, 2**256 - 1)
+    return pool
+
+
+@pytest.mark.parametrize("swap", [
+    (0, 10**18),
+    (0, 1000 * 10**18),
+    (0, 10_000 * 10**18),
+    (1, 10**14),
+    (1, 10**16),
+    (1, 10**17)
+])
+def test_virtual_pool(factory, cryptopool, yb_lt, collateral_token, stablecoin, yb_allocated,
+                      seed_cryptopool, virtual_pool, accounts, admin, swap):
+    i, in_amount = swap
+    j = 1 - i
+    user = accounts[0]
+
+    with boa.env.prank(admin):
+        collateral_token._mint_for_testing(admin, 5 * 10**17)
+        yb_lt.deposit(5 * 10**17, 5 * 10**17 * 100_000, 0)
+
+    with boa.env.prank(user):
+        if i == 0:
+            stablecoin._mint_for_testing(user, in_amount)
+        else:
+            collateral_token._mint_for_testing(user, in_amount)
+
+        expected_out = virtual_pool.get_dy(i, j, in_amount)
+
+        with boa.reverts():
+            virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 + 1e-7)))
+        virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 - 1e-7)))
+
+        # XXX check both coins, 0 cryptopool, 0 cryptopool and collateral in flash lender

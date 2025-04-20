@@ -46,6 +46,7 @@ AMM: public(immutable(YbAMM))
 POOL: public(immutable(Pool))
 ASSET_TOKEN: public(immutable(ERC20))
 STABLECOIN: public(immutable(ERC20))
+ROUNDING_DISCOUNT: public(constant(uint256)) = 10**18 // 10**8
 
 
 @deploy
@@ -105,7 +106,10 @@ def _calculate(i: uint256, in_amount: uint256, only_flash: bool) -> (uint256, ui
 @view
 def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
-    return self._calculate(i, in_amount, False)[0]
+    _in_amount: uint256 = in_amount
+    if i == 0:
+        _in_amount = in_amount * (10**18 - ROUNDING_DISCOUNT) // 10**18
+    return self._calculate(i, _in_amount, False)[0]
 
 
 @external
@@ -129,11 +133,8 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
         # 3. Withdraw symmetrically from pool LP
         # 4. Repay the flash loan
         # 5. Send the crypto
-        lp_amount: uint256 = extcall AMM.exchange(0, 1, in_amount + flash_amount, 0)
+        lp_amount: uint256 = extcall AMM.exchange(0, 1, (in_amount * (10**18 - ROUNDING_DISCOUNT) // 10**18 + flash_amount), 0)
         extcall POOL.remove_liquidity(lp_amount, [0, 0])
-        # XXX here it may appear that we have slightly less coins than needed due to rounding errors
-        # We need to make sure that the solution rounds flash_amount DOWN, not up
-        # Or, we can subtract a little bit. But it might turn out that we ARE rounding down already
         repay_flash_amount = staticcall STABLECOIN.balanceOf(self)
 
     else:
