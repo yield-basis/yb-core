@@ -71,6 +71,7 @@ event NewMarket:
     price_oracle: address
     virtual_pool: address
     staker: address
+    agg: address
 
 
 MAX_MARKETS: public(constant(uint256)) = 50000
@@ -153,10 +154,11 @@ def add_market(
     assert staticcall pool.coins(0) == STABLECOIN.address, "Wrong stablecoin"
 
     market: Market = empty(Market)
+    agg: address = self.agg
 
     market.asset_token = IERC20(staticcall pool.coins(1))
     market.cryptopool = pool
-    market.price_oracle = create_from_blueprint(self.price_oracle_impl, pool.address, self.agg)
+    market.price_oracle = create_from_blueprint(self.price_oracle_impl, pool.address, agg)
     market.lt = create_from_blueprint(
         self.lt_impl,
         market.asset_token.address,
@@ -203,7 +205,8 @@ def add_market(
         lt=market.lt,
         price_oracle=market.price_oracle,
         virtual_pool=market.virtual_pool,
-        staker=market.staker
+        staker=market.staker,
+        agg=agg
     )
 
     return market
