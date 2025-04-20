@@ -116,6 +116,12 @@ event AllocateStablecoins:
     stablecoin_allocation: uint256
     stablecoin_allocated: uint256
 
+event DistributeBorrowerFees:
+    sender: indexed(address)
+    amount: uint256
+    min_amount: uint256
+    discount: uint256
+
 
 # ERC4626 events
 
@@ -658,6 +664,7 @@ def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
     min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
     extcall CRYPTOPOOL.donate([amount, 0], min_amount)
+    log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
 
 
 @external
