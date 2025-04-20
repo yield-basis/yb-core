@@ -183,8 +183,7 @@ def add_market(
     if self.virtual_pool_impl != empty(address) and self.flash != empty(address):
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
-            market.amm,
-            self.flash
+            market.amm
         )
     if self.staker_impl != empty(address):
         market.staker = create_from_blueprint(
@@ -224,8 +223,7 @@ def fill_staker_vpool(i: uint256):
     if market.virtual_pool == empty(address) and self.virtual_pool_impl != empty(address) and self.flash != empty(address):
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
-            market.amm,
-            self.flash
+            market.amm
         )
 
     if market.staker == empty(address) and self.staker_impl != empty(address):

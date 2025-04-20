@@ -13,6 +13,9 @@ interface Flash:
     def supportedTokens(token: address) -> bool: view
     def maxFlashLoan(token: address) -> uint256: view
 
+interface Factory:
+    def flash() -> Flash: view
+
 interface Pool:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
     def coins(i: uint256) -> ERC20: view
@@ -38,7 +41,7 @@ struct AMMState:
     x0: uint256
 
 
-FLASH: public(immutable(Flash))
+FACTORY: public(immutable(Factory))
 AMM: public(immutable(YbAMM))
 POOL: public(immutable(Pool))
 ASSET_TOKEN: public(immutable(ERC20))
@@ -46,9 +49,9 @@ STABLECOIN: public(immutable(ERC20))
 
 
 @deploy
-def __init__(amm: YbAMM, flash: Flash):
+def __init__(amm: YbAMM):
     AMM = amm
-    FLASH = flash
+    FACTORY = Factory(msg.sender)
     POOL = staticcall amm.COLLATERAL()
     STABLECOIN = staticcall amm.STABLECOIN()
     assert staticcall POOL.coins(0) == STABLECOIN
@@ -149,6 +152,8 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
 @nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
+    flash: Flash = staticcall FACTORY.flash()
+
     in_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][i]
     out_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][j]
 
@@ -156,7 +161,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
     data: Bytes[10**5] = empty(Bytes[10**5])
     data = abi_encode(i, in_amount)
-    extcall FLASH.flashLoan(self, STABLECOIN.address, staticcall FLASH.maxFlashLoan(STABLECOIN.address), data)
+    extcall flash.flashLoan(self, STABLECOIN.address, staticcall flash.maxFlashLoan(STABLECOIN.address), data)
 
     out_amount: uint256 = staticcall out_coin.balanceOf(self)
     assert out_amount >= min_out, "Slippage"
