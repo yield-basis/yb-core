@@ -18,7 +18,7 @@ interface CurveCryptoPool:
     def coins(i: uint256) -> address: view
 
 interface LPOracle:
-    def price_w() -> uint256: nonpayable
+    def AGG() -> address: view
 
 interface Agg:
     def price() -> uint256: view
@@ -62,7 +62,7 @@ event SetAdmin:
 event SetMinAdminFee:
     admin_fee: uint256
 
-event NewMarket:
+event MarketParameters:
     idx: indexed(uint256)
     asset_token: indexed(address)
     cryptopool: indexed(address)
@@ -197,7 +197,7 @@ def add_market(
         self.market_count = i + 1
     self.markets[i] = market
 
-    log NewMarket(
+    log MarketParameters(
         idx=i,
         asset_token=market.asset_token.address,
         cryptopool=market.cryptopool.address,
@@ -227,12 +227,26 @@ def fill_staker_vpool(i: uint256):
             market.amm,
             self.flash
         )
+
     if market.staker == empty(address) and self.staker_impl != empty(address):
         market.staker = create_from_blueprint(
             self.staker_impl,
             market.lt)
+        extcall LT(market.lt).set_staker(market.staker)
+
     self.markets[i] = market
-    extcall LT(market.lt).set_staker(market.staker)
+
+    log MarketParameters(
+        idx=i,
+        asset_token=market.asset_token.address,
+        cryptopool=market.cryptopool.address,
+        amm=market.amm,
+        lt=market.lt,
+        price_oracle=market.price_oracle,
+        virtual_pool=market.virtual_pool,
+        staker=market.staker,
+        agg=(staticcall LPOracle(market.price_oracle).AGG())
+    )
 
 
 @external
