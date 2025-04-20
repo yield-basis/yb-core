@@ -3100,10 +3100,8 @@ version = "0.2.6"
 description = "A Vyper interpreter"
 optional = false
 python-versions = "*"
-files = [
-    {file = "titanoboa-0.2.6-py3-none-any.whl", hash = "sha256:63bee3b97428697fa2f269c2d2ecbc763b372dc774e3f6229c90f32827bd1967"},
-    {file = "titanoboa-0.2.6.tar.gz", hash = "sha256:6bbf0063bfc5d7ffab5044da53e23564fcb4cf5cfe39b1e31a2c01df8ccb96e0"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 eth-abi = "*"
@@ -3124,6 +3122,12 @@ vyper = ">=0.4.1"
 [package.extras]
 colab = ["ipykernel (>=6.29.4)"]
 forking-recommended = ["requests-cache (>=1.2.1)", "ujson (>=5.10.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/vyperlang/titanoboa.git"
+reference = "2a9600c7706696a85734a9c904a162fda34c0d70"
+resolved_reference = "2a9600c7706696a85734a9c904a162fda34c0d70"
 
 [[package]]
 name = "tomlkit"
@@ -3472,4 +3476,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<4"
-content-hash = "a59185a2886500373d5cf75c722e6249be99009bf8fd5894d5feef897342840c"
+content-hash = "3d578a80ffb1bb4f880eaab5d17d0abd4f2802aaea1d05c13426eec317b1e815"
