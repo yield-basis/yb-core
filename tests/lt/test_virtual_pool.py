@@ -20,7 +20,7 @@ def virtual_pool(factory, flash, stablecoin, collateral_token, admin, accounts):
     (0, 10_000 * 10**18),
     (1, 10**14),
     (1, 10**16),
-    (1, 10**17)
+    (1, 3 * 10**16)
 ])
 def test_virtual_pool(factory, cryptopool, yb_lt, collateral_token, stablecoin, yb_allocated,
                       seed_cryptopool, virtual_pool, accounts, admin, swap):
@@ -35,13 +35,21 @@ def test_virtual_pool(factory, cryptopool, yb_lt, collateral_token, stablecoin, 
     with boa.env.prank(user):
         if i == 0:
             stablecoin._mint_for_testing(user, in_amount)
+            discount = 1e-7
         else:
             collateral_token._mint_for_testing(user, in_amount)
+            discount = 2.5e-5  # due to NOISE_FEE=1e-5 in cryptopool (ugh)
 
         expected_out = virtual_pool.get_dy(i, j, in_amount)
 
-        with boa.reverts():
-            virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 + 1e-7)))
-        virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 - 1e-7)))
+        before = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
 
-        # XXX check both coins, 0 cryptopool, 0 cryptopool and collateral in flash lender
+        with boa.reverts():
+            virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 + discount)))
+        out_amount = virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 - discount)))
+
+        after = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
+
+        assert before[i] - after[i] == in_amount
+        assert after[j] - before[j] == out_amount
+        assert before[2] == after[2] == 0

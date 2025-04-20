@@ -168,3 +168,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     assert out_amount >= min_out, "Slippage"
     assert extcall out_coin.transfer(_for, out_amount, default_return_value=True)
     return out_amount
+
+
+# XXX include methods to determine max_in / max_out
+# XXX include possibility to change VirtualPool in factory
