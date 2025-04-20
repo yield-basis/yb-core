@@ -111,6 +111,11 @@ event WithdrawAdminFees:
     receiver: address
     amount: uint256
 
+event AllocateStablecoins:
+    allocator: indexed(address)
+    stablecoin_allocation: uint256
+    stablecoin_allocated: uint256
+
 
 # ERC4626 events
 
@@ -639,6 +644,8 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
         allocated -= to_transfer
         assert extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer, default_return_value=True)
         self.stablecoin_allocated = allocated
+
+    log AllocateStablecoins(allocator=allocator, stablecoin_allocation=allocation, stablecoin_allocated=allocated)
 
 
 @external
