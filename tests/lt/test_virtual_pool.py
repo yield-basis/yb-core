@@ -14,42 +14,42 @@ def virtual_pool(factory, flash, stablecoin, collateral_token, admin, accounts):
     return pool
 
 
-@pytest.mark.parametrize("swap", [
-    (0, 10**18),
-    (0, 1000 * 10**18),
-    (0, 10_000 * 10**18),
-    (1, 10**14),
-    (1, 10**16),
-    (1, 3 * 10**16)
-])
 def test_virtual_pool(factory, cryptopool, yb_lt, collateral_token, stablecoin, yb_allocated,
-                      seed_cryptopool, virtual_pool, accounts, admin, swap):
-    i, in_amount = swap
-    j = 1 - i
-    user = accounts[0]
+                      seed_cryptopool, virtual_pool, accounts, admin):
+    for i, in_amount in [
+        (0, 10**18),
+        (0, 1000 * 10**18),
+        (0, 10_000 * 10**18),
+        (1, 10**14),
+        (1, 10**16),
+        (1, 3 * 10**16)
+    ]:
+        with boa.env.anchor():
+            j = 1 - i
+            user = accounts[0]
 
-    with boa.env.prank(admin):
-        collateral_token._mint_for_testing(admin, 5 * 10**17)
-        yb_lt.deposit(5 * 10**17, 5 * 10**17 * 100_000, 0)
+            with boa.env.prank(admin):
+                collateral_token._mint_for_testing(admin, 5 * 10**17)
+                yb_lt.deposit(5 * 10**17, 5 * 10**17 * 100_000, 0)
 
-    with boa.env.prank(user):
-        if i == 0:
-            stablecoin._mint_for_testing(user, in_amount)
-            discount = 1e-7
-        else:
-            collateral_token._mint_for_testing(user, in_amount)
-            discount = 2.5e-5  # due to NOISE_FEE=1e-5 in cryptopool (ugh)
+            with boa.env.prank(user):
+                if i == 0:
+                    stablecoin._mint_for_testing(user, in_amount)
+                    discount = 1e-7
+                else:
+                    collateral_token._mint_for_testing(user, in_amount)
+                    discount = 2.5e-5  # due to NOISE_FEE=1e-5 in cryptopool (ugh)
 
-        expected_out = virtual_pool.get_dy(i, j, in_amount)
+                expected_out = virtual_pool.get_dy(i, j, in_amount)
 
-        before = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
+                before = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
 
-        with boa.reverts():
-            virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 + discount)))
-        out_amount = virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 - discount)))
+                with boa.reverts():
+                    virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 + discount)))
+                out_amount = virtual_pool.exchange(i, j, in_amount, int(expected_out * (1 - discount)))
 
-        after = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
+                after = [stablecoin.balanceOf(user), collateral_token.balanceOf(user), cryptopool.balanceOf(user)]
 
-        assert before[i] - after[i] == in_amount
-        assert after[j] - before[j] == out_amount
-        assert before[2] == after[2] == 0
+                assert before[i] - after[i] == in_amount
+                assert after[j] - before[j] == out_amount
+                assert before[2] == after[2] == 0
