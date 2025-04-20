@@ -6,6 +6,7 @@
 @license Copyright (c) 2025
 """
 from ethereum.ercs import IERC20
+from ethereum.ercs import IERC20Detailed
 
 
 interface LT:
@@ -16,6 +17,7 @@ interface LT:
 
 interface CurveCryptoPool:
     def coins(i: uint256) -> address: view
+    def decimals() -> uint8: view
 
 interface LPOracle:
     def AGG() -> address: view
@@ -116,6 +118,8 @@ def __init__(
     assert agg != empty(address)
     assert price_oracle_impl != empty(address)
 
+    assert staticcall IERC20Detailed(stablecoin.address).decimals() == 18
+
     STABLECOIN = stablecoin
     self.amm_impl = amm_impl
     self.lt_impl = lt_impl
@@ -152,6 +156,7 @@ def add_market(
 ) -> Market:
     assert msg.sender == self.admin, "Access"
     assert staticcall pool.coins(0) == STABLECOIN.address, "Wrong stablecoin"
+    assert staticcall pool.decimals() == 18
 
     market: Market = empty(Market)
     agg: address = self.agg
