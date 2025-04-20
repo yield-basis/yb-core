@@ -114,12 +114,12 @@ def __init__(lt_contract: address,
     assert leverage > 10**18
 
     denominator: uint256 = 2 * leverage - 10**18
-    LEV_RATIO = leverage**2 // denominator * 10**18 // denominator
+    LEV_RATIO = leverage**2 * 10**18 // denominator**2
 
     # 1 / (4 * L**2)
-    MIN_SAFE_DEBT = 10**36 // leverage * 10**18 // leverage // 4
+    MIN_SAFE_DEBT = 10**54 // (4 * leverage**2)
     # (2 * L - 1)**2 / (4 * L**2) - 1 / (8 * L**2)
-    MAX_SAFE_DEBT = denominator**2 // leverage * 10**18 // leverage // 4 - 10**36 // leverage * 10**18 // leverage // 8
+    MAX_SAFE_DEBT = denominator**2 * 10**18 // (4 * leverage**2) - 10**54 // (8 * leverage**2)
 
     self.rate_mul = 10**18
     self.rate_time = block.timestamp
