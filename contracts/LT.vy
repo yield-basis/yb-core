@@ -678,6 +678,7 @@ def withdraw_admin_fees():
     assert fee_receiver != empty(address), "No fee_receiver"
 
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
+    assert v.admin >= 0, "Loss made admin fee negative"
     self.totalSupply = v.supply_tokens
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
     # fee_receiver is just a normal user
