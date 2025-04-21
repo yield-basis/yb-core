@@ -25,6 +25,9 @@ interface LPOracle:
 interface Agg:
     def price() -> uint256: view
 
+interface VirtualPool:
+    def IMPL() -> address: view
+
 
 struct Market:
     asset_token: IERC20
@@ -225,7 +228,13 @@ def fill_staker_vpool(i: uint256):
     assert market.lt != empty(address)
     assert market.amm != empty(address)
 
-    if market.virtual_pool == empty(address) and self.virtual_pool_impl != empty(address) and self.flash != empty(address):
+    new_virtual_pool: bool = False
+    if market.virtual_pool == empty(address):
+        new_virtual_pool = self.virtual_pool_impl != empty(address) and self.flash != empty(address)
+    else:
+        new_virtual_pool = (staticcall VirtualPool(market.virtual_pool).IMPL()) != self.virtual_pool_impl
+
+    if new_virtual_pool:
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
             market.amm

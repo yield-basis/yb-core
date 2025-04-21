@@ -15,6 +15,7 @@ interface Flash:
 
 interface Factory:
     def flash() -> Flash: view
+    def virtual_pool_impl() -> address: view
 
 interface Pool:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
@@ -47,12 +48,14 @@ POOL: public(immutable(Pool))
 ASSET_TOKEN: public(immutable(ERC20))
 STABLECOIN: public(immutable(ERC20))
 ROUNDING_DISCOUNT: public(constant(uint256)) = 10**18 // 10**8
+IMPL: public(immutable(address))
 
 
 @deploy
 def __init__(amm: YbAMM):
     AMM = amm
     FACTORY = Factory(msg.sender)
+    IMPL = staticcall FACTORY.virtual_pool_impl()
     POOL = staticcall amm.COLLATERAL()
     STABLECOIN = staticcall amm.STABLECOIN()
     assert staticcall POOL.coins(0) == STABLECOIN
