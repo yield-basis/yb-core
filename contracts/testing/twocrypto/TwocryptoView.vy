@@ -11,22 +11,73 @@ from ethereum.ercs import IERC20
 
 
 interface Curve:
-    def MATH() -> Math: view
+    # def MATH() -> Math: view
+    # def A() -> uint256: view
+    # def gamma() -> uint256: view
+    # def price_scale() -> uint256: view
+    # def price_oracle() -> uint256: view
+    # def get_virtual_price() -> uint256: view
+    # def balances(i: uint256) -> uint256: view
+    # def D() -> uint256: view
+    # def fee_calc(xp: uint256[N_COINS]) -> uint256: view
+    # def calc_token_fee(
+    #     amounts: uint256[N_COINS], xp: uint256[N_COINS]
+    # ) -> uint256: view
+    # def future_A_gamma_time() -> uint256: view
+    # def totalSupply() -> uint256: view
+    # def precisions() -> uint256[N_COINS]: view
+    # def packed_fee_params() -> uint256: view
+    def calc_withdraw_fixed_out(lp_token_amount: uint256, i: uint256, amount_i: uint256) -> uint256: view
+    def calc_withdraw_one_coin(lp_token_amount: uint256, i: uint256) -> uint256: view
+    def fee_receiver() -> address: view
+    def admin() -> address: view
+    def calc_token_amount(amounts: uint256[2], deposit: bool) -> uint256: view
+    def get_dy(i: uint256, j: uint256, dx: uint256) -> uint256: view
+    def get_dx(i: uint256, j: uint256, dy: uint256) -> uint256: view
+    def lp_price() -> uint256: view
+    def get_virtual_price() -> uint256: view
+    def price_oracle() -> uint256: view
+    def price_scale() -> uint256: view
+    def fee() -> uint256: view
+    def calc_token_fee(amounts: uint256[2], xp: uint256[2]) -> uint256: view
     def A() -> uint256: view
     def gamma() -> uint256: view
-    def price_scale() -> uint256: view
-    def price_oracle() -> uint256: view
-    def get_virtual_price() -> uint256: view
-    def balances(i: uint256) -> uint256: view
-    def D() -> uint256: view
-    def fee_calc(xp: uint256[N_COINS]) -> uint256: view
-    def calc_token_fee(
-        amounts: uint256[N_COINS], xp: uint256[N_COINS]
-    ) -> uint256: view
+    def mid_fee() -> uint256: view
+    def out_fee() -> uint256: view
+    def fee_gamma() -> uint256: view
+    def allowed_extra_profit() -> uint256: view
+    def adjustment_step() -> uint256: view
+    def ma_time() -> uint256: view
+    def precisions() -> uint256[2]: view
+    def fee_calc(xp: uint256[2]) -> uint256: view
+    def MATH() -> Math: view
+    def coins(arg0: uint256) -> address: view
+    def last_prices() -> uint256: view
+    def last_timestamp() -> uint256: view
+    def initial_A_gamma() -> uint256: view
+    def initial_A_gamma_time() -> uint256: view
+    def future_A_gamma() -> uint256: view
     def future_A_gamma_time() -> uint256: view
-    def totalSupply() -> uint256: view
-    def precisions() -> uint256[N_COINS]: view
+    def unabsorbed_xcp() -> uint256: view
+    def dead_xcp() -> uint256: view
+    def donation_duration() -> uint256: view
+    def max_donation_ratio() -> uint256: view
+    def last_donation_absorb_timestamp() -> uint256: view
+    def balances(arg0: uint256) -> uint256: view
+    def D() -> uint256: view
+    def xcp_profit() -> uint256: view
+    def xcp_profit_a() -> uint256: view
+    def virtual_price() -> uint256: view
+    def packed_rebalancing_params() -> uint256: view
     def packed_fee_params() -> uint256: view
+    def ADMIN_FEE() -> uint256: view
+    def name() -> String[64]: view
+    def symbol() -> String[32]: view
+    def decimals() -> uint8: view
+    def version() -> String[8]: view
+    def balanceOf(arg0: address) -> uint256: view
+    def allowance(arg0: address, arg1: address) -> uint256: view
+    def totalSupply() -> uint256: view
 
 
 interface Math:
@@ -99,6 +150,179 @@ def calc_withdraw_one_coin(
 ) -> uint256:
 
     return self._calc_withdraw_one_coin(token_amount, i, swap)[0]
+
+
+@internal
+@pure
+def _xcp(D: uint256, price_scale: uint256) -> uint256:
+    return D * PRECISION // N_COINS // isqrt(PRECISION * price_scale)
+
+@internal
+@view
+def _xp(
+    balances: uint256[N_COINS],
+    price_scale: uint256,
+    pool: Curve
+) -> uint256[N_COINS]:
+    PRECISIONS: uint256[N_COINS] = staticcall pool.precisions()
+    return [
+        balances[0] * PRECISIONS[0],
+        unsafe_div(balances[1] * PRECISIONS[1] * price_scale, PRECISION)
+    ]
+
+
+@internal
+@view
+def _is_ramping(pool: Curve) -> bool:
+    return staticcall pool.future_A_gamma_time() > block.timestamp
+
+
+@internal
+@pure
+def _D_from_xcp(xcp: uint256, price_scale: uint256) -> uint256:
+    return xcp * N_COINS * isqrt(price_scale * PRECISION) // PRECISION
+
+
+@view
+@external
+def calc_add_liquidity(
+    amounts: uint256[N_COINS],
+    pool: Curve
+) -> uint256:
+    math: Math = staticcall pool.MATH()
+    assert amounts[0] + amounts[1] > 0, "no coins to add"
+
+    # --------------------- Get prices, balances -----------------------------
+
+    old_balances: uint256[N_COINS] = [
+        staticcall pool.balances(0),
+        staticcall pool.balances(1)
+    ]
+
+    balances: uint256[N_COINS] = [
+        staticcall pool.balances(0) + amounts[0],
+        staticcall pool.balances(1) + amounts[1]
+    ]
+
+    price_scale: uint256 = staticcall pool.price_scale()
+    xp: uint256[N_COINS] = self._xp(balances, price_scale, pool)
+    old_xp: uint256[N_COINS] = self._xp(old_balances, price_scale, pool)
+
+    # amountsp (amounts * p) contains the scaled `amounts_received` of each coin.
+    amountsp: uint256[N_COINS] = empty(uint256[N_COINS])
+    for i: uint256 in range(N_COINS):
+        if amounts[i] > 0:
+            amountsp[i] = xp[i] - old_xp[i]
+    # -------------------- Calculate LP tokens to mint -----------------------
+
+    A_gamma: uint256[2] = [
+        staticcall pool.A(),
+        staticcall pool.gamma()
+    ]
+
+    old_D: uint256 = 0
+    if self._is_ramping(pool):
+        # Recalculate D if A and/or gamma are ramping because the shape of
+        # the bonding curve is changing.
+        old_D = staticcall math.newton_D(A_gamma[0], A_gamma[1], old_xp, 0)
+    else:
+        old_D = staticcall pool.D()
+
+    D: uint256 = staticcall math.newton_D(A_gamma[0], A_gamma[1], xp, 0)
+
+    donation_D: uint256 = self._D_from_xcp(staticcall pool.dead_xcp(), price_scale)
+    adjusted_D: uint256 = D - donation_D
+    adjusted_old_D: uint256 = old_D - donation_D
+
+
+    token_supply: uint256 = staticcall pool.totalSupply()
+    d_token: uint256 = 0
+    if old_D > 0:
+        d_token = token_supply * adjusted_D // adjusted_old_D - token_supply
+    else:
+        d_token = self._xcp(adjusted_D, price_scale)  # <----- Making initial virtual price equal to 1.
+
+    assert d_token > 0, "nothing minted"
+
+    d_token_fee: uint256 = 0
+    if adjusted_old_D > 0:
+
+        d_token_fee = (
+            staticcall pool.calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
+        )
+
+        d_token -= d_token_fee
+
+    return d_token
+
+
+@external
+@view
+def calc_remove_liquidity(lp_tokens: uint256, pool: Curve) -> uint256[N_COINS]:
+    total_supply: uint256 = staticcall pool.totalSupply()
+
+    withdraw_amounts: uint256[N_COINS] = empty(uint256[N_COINS])
+    D: uint256 = staticcall pool.D()
+    adjusted_D: uint256 = D - self._D_from_xcp(staticcall pool.dead_xcp(), staticcall pool.price_scale())
+
+    if lp_tokens == total_supply:  # <----------------------------------- Case 2.
+
+        for i: uint256 in range(N_COINS):
+
+            withdraw_amounts[i] = staticcall pool.balances(i)
+
+    else:  # <-------------------------------------------------------- Case 1.
+        for i: uint256 in range(N_COINS):
+            # TODO improve comments here
+            # Withdraws slightly less -> favors LPs already
+            withdraw_amounts[i] = staticcall pool.balances(i) * adjusted_D // D * lp_tokens // total_supply
+
+    return withdraw_amounts
+
+@external
+@view
+def calc_donate(amounts: uint256[N_COINS], pool: Curve) -> uint256:
+    math: Math = staticcall pool.MATH()
+    assert amounts[0] + amounts[1] > 0, "no coins to donate"
+
+    balances: uint256[N_COINS] = [
+        staticcall pool.balances(0),
+        staticcall pool.balances(1)
+    ]
+    assert balances[0] + balances[1] > 0, "empty pool"
+
+    price_scale: uint256 = staticcall pool.price_scale()
+    A_gamma: uint256[2] = [
+        staticcall pool.A(),
+        staticcall pool.gamma()
+    ]
+
+    old_D: uint256 = 0
+    if self._is_ramping(pool):
+        # Recalculate D if A and/or gamma are ramping because the shape of
+        # the bonding curve is changing.
+        old_xp: uint256[N_COINS] = self._xp(balances, price_scale, pool)
+        old_D = staticcall math.newton_D(A_gamma[0], A_gamma[1], old_xp, 0)
+    else:
+        old_D = staticcall pool.D()
+
+    # TODO is this necessary?
+    assert old_D > 0, "empty pool"
+
+    for i: uint256 in range(N_COINS):
+        if amounts[i] > 0:
+            # This call changed self.balances
+            balances[i] += amounts[i]
+
+    xp: uint256[N_COINS] = self._xp(balances, price_scale, pool)
+
+    # We recompute D to reflect the new balances. The donation is effectively
+    # already available as liquidity for exchanges. However it will inflate
+    # the virtual price only after the donation is absorbed.
+    D: uint256 = staticcall math.newton_D(A_gamma[0], A_gamma[1], xp, 0)
+
+    assert D > old_D, "donation caused loss"
+    return D
 
 
 @view

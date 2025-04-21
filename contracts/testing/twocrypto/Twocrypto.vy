@@ -1106,7 +1106,7 @@ def tweak_price(
         # to increase.
         # This is does not imply that the virtual price will have increased at the
         # end of this function: it can still decrease if the pool rebalances.
-        if not (virtual_price > old_virtual_price):
+        if not (virtual_price >= old_virtual_price):
             # If A and gamma are being ramped, we allow the virtual price to decrease,
             # as changing the shape of the bonding curve causes losses in the pool.
             assert self._is_ramping(), "virtual price decreased"
