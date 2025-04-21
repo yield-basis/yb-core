@@ -1,0 +1,75 @@
+# @version 0.4.1
+"""
+OpenZeppelin's IVotes interface:
+https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/governance/utils/IVotes.sol
+"""
+
+# @dev Emitted when an account changes their delegate.
+event DelegateChanged:
+    delegator: indexed(address)
+    fromDelegate: indexed(address)
+    toDelegate: indexed(address)
+
+# @dev Emitted when a token transfer or delegate change results in changes to a delegate's number of voting units.
+event DelegateVotesChanged:
+    delegate: indexed(address)
+    previousVotes: uint256
+    newVotes: uint256
+
+
+@external
+@view
+def getVotes(account: address) -> uint256:
+    """
+    @dev Returns the current amount of votes that `account` has.
+    """
+    ...
+
+
+@external
+@view
+def getPastVotes(account: address, timepoint: uint256) -> uint256:
+    """
+    @dev Returns the amount of votes that `account` had at a specific moment in the past. If the `clock()` is
+    configured to use block numbers, this will return the value at the end of the corresponding block.
+    """
+    ...
+
+
+@external
+@view
+def getPastTotalSupply(timepoint: uint256) -> uint256:
+    """
+    @dev Returns the total supply of votes available at a specific moment in the past. If the `clock()` is
+    configured to use block numbers, this will return the value at the end of the corresponding block.
+
+    @notice This value is the sum of all available votes, which is not necessarily the sum of all delegated votes.
+    Votes that have not been delegated are still part of total supply, even though they would not participate in a
+    vote.
+    """
+    ...
+
+
+@external
+@view
+def delegates(account: address) -> address:
+    """
+    @dev Returns the delegate that `account` has chosen.
+    """
+    ...
+
+
+@external
+def delegate(delegatee: address):
+    """
+    @dev Delegates votes from the sender to `delegatee`.
+    """
+    ...
+
+
+@external
+def delegateBySig(delegatee: address, nonce: uint256, expiry: uint256, v: uint8, r: bytes32, s: bytes32):
+    """
+    @dev Delegates votes from signer to `delegatee`.
+    """
+    ...

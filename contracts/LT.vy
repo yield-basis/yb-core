@@ -6,6 +6,7 @@
 @license Copyright (c) 2025
 """
 from ethereum.ercs import IERC20
+from snekmate.utils import math
 
 implements: IERC20
 
@@ -23,6 +24,8 @@ interface LevAMM:
     def fee() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
+    def get_debt() -> uint256: view
+    def collateral_amount() -> uint256: view
     def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
@@ -30,12 +33,15 @@ interface LevAMM:
     def max_debt() -> uint256: view
     def COLLATERAL() -> address: view
     def STABLECOIN() -> address: view
-    def DEPOSITOR() -> address: view
+    def LT_CONTRACT() -> address: view
+    def set_killed(is_killed: bool): nonpayable
     def check_nonreentrant(): nonpayable
+    def is_killed() -> bool: view
+    def set_fee(fee: uint256): nonpayable
 
 interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
-    def remove_liquidity(amount: uint256, min_amounts: uint256[2], receiver: address) -> uint256[2]: nonpayable
+    def remove_liquidity(amount: uint256, min_amounts: uint256[2]) -> uint256[2]: nonpayable
     def lp_price() -> uint256: view
     def get_virtual_price() -> uint256: view
     def price_oracle() -> uint256: view
@@ -59,6 +65,7 @@ interface PriceOracle:
 
 interface Factory:
     def admin() -> address: view
+    def emergency_admin() -> address: view
     def fee_receiver() -> address: view
     def min_admin_fee() -> uint256: view
 
@@ -104,6 +111,17 @@ event WithdrawAdminFees:
     receiver: address
     amount: uint256
 
+event AllocateStablecoins:
+    allocator: indexed(address)
+    stablecoin_allocation: uint256
+    stablecoin_allocated: uint256
+
+event DistributeBorrowerFees:
+    sender: indexed(address)
+    amount: uint256
+    min_amount: uint256
+    discount: uint256
+
 
 # ERC4626 events
 
@@ -125,10 +143,9 @@ event SetAdmin:
     admin: address
 
 
-COLLATERAL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
+CRYPTOPOOL: public(immutable(CurveCryptoPool))  # Liquidity like LP(TBTC/crvUSD)
 STABLECOIN: public(immutable(IERC20))  # For example, crvUSD
-DEPOSITED_TOKEN: public(immutable(IERC20))  # For example, TBTC
-DEPOSITED_TOKEN_PRECISION: immutable(uint256)
+ASSET_TOKEN: public(immutable(IERC20))  # For example, TBTC
 
 CRYPTOPOOL_N_COINS: constant(uint256) = 2
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
@@ -153,35 +170,34 @@ stablecoin_allocated: public(uint256)
 
 
 @deploy
-def __init__(deposited_token: IERC20, stablecoin: IERC20, collateral: CurveCryptoPool,
+def __init__(asset_token: IERC20, stablecoin: IERC20, cryptopool: CurveCryptoPool,
              admin: address):
     """
     @notice Initializer (can be performed by an EOA deployer or a factory)
-    @param deposited_token Token which gets deposited. Can be collateral or can be not
+    @param asset_token Token which gets deposited. Can be collateral or can be not
     @param stablecoin Stablecoin which gets "granted" to this contract to use for loans. Has to be 18 decimals
-    @param collateral Collateral token
+    @param cryptopool Cryptopool LP collateral token
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
     """
     # Example:
     # deposit_token = WBTC
     # stablecoin = crvUSD
-    # collateral = WBTC LP
+    # cryptopool = WBTC LP
 
     STABLECOIN = stablecoin
-    COLLATERAL = collateral
-    DEPOSITED_TOKEN = deposited_token
-    DEPOSITED_TOKEN_PRECISION = 10**(18 - staticcall IERC20Detailed(deposited_token.address).decimals())
+    CRYPTOPOOL = cryptopool
+    ASSET_TOKEN = asset_token
     self.admin = admin
-    assert extcall deposited_token.approve(collateral.address, max_value(uint256), default_return_value=True)
-    assert extcall stablecoin.approve(collateral.address, max_value(uint256), default_return_value=True)
-    assert staticcall collateral.coins(0) == stablecoin.address
-    assert staticcall collateral.coins(1) == deposited_token.address
+    assert extcall asset_token.approve(cryptopool.address, max_value(uint256), default_return_value=True)
+    assert extcall stablecoin.approve(cryptopool.address, max_value(uint256), default_return_value=True)
+    assert staticcall cryptopool.coins(0) == stablecoin.address
+    assert staticcall cryptopool.coins(1) == asset_token.address
 
     # Twocrypto has no N_COINS public, so we check that coins(2) reverts
     success: bool = False
     res: Bytes[32] = empty(Bytes[32])
     success, res = raw_call(
-        collateral.address,
+        cryptopool.address,
         abi_encode(CRYPTOPOOL_N_COINS, method_id=method_id("coins(uint256)")),
         max_outsize=32,
         is_static_call=True,
@@ -208,12 +224,12 @@ def _check_admin():
 @internal
 @view
 def _price_oracle() -> uint256:
-    return staticcall COLLATERAL.price_oracle() * staticcall self.agg.price() // 10**18
+    return staticcall CRYPTOPOOL.price_oracle() * staticcall self.agg.price() // 10**18
 
 
 @internal
 def _price_oracle_w() -> uint256:
-    return staticcall COLLATERAL.price_oracle() * extcall self.agg.price_w() // 10**18
+    return staticcall CRYPTOPOOL.price_oracle() * extcall self.agg.price_w() // 10**18
 
 
 @internal
@@ -265,8 +281,8 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
 
     # new_staked_value is guaranteed to be <= new_total_value
-    new_total_value: int256 = prev_value + dv_use
-    new_staked_value: int256 = v_st + dv_s
+    new_total_value: int256 = max(prev_value + dv_use, 0)
+    new_staked_value: int256 = max(v_st + dv_s, 0)
 
     # Solution of:
     # staked - token_reduction       new_staked_value
@@ -322,7 +338,7 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     @param assets Amount of crypto to deposit
     @param debt Amount of stables to borrow for MMing (approx same value as crypto)
     """
-    lp_tokens: uint256 = staticcall COLLATERAL.calc_token_amount([debt, assets], True)
+    lp_tokens: uint256 = staticcall CRYPTOPOOL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
     p_o: uint256 = self._price_oracle()
     if supply > 0:
@@ -353,7 +369,7 @@ def preview_withdraw(tokens: uint256) -> uint256:
     frac: uint256 = 10**18 * v.total // (v.total + admin_balance) * tokens // v.supply_tokens
     withdrawn_lp: uint256 = state.collateral * frac // 10**18
     withdrawn_debt: uint256 = state.debt * frac // 10**18
-    return staticcall COLLATERAL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
+    return staticcall CRYPTOPOOL.calc_withdraw_fixed_out(withdrawn_lp, 0, withdrawn_debt)
 
 
 @external
@@ -371,8 +387,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
 
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
-    assert extcall DEPOSITED_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
-    lp_tokens: uint256 = extcall COLLATERAL.add_liquidity([debt, assets], 0, amm.address)
+    assert extcall ASSET_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
+    lp_tokens: uint256 = extcall CRYPTOPOOL.add_liquidity([debt, assets], 0, amm.address)
     p_o: uint256 = self._price_oracle_w()
 
     supply: uint256 = self.totalSupply
@@ -428,12 +444,14 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     @notice Method to withdraw assets (e.g. like BTC) by spending shares (e.g. like yield-bearing BTC)
     @param shares Shares to withdraw
     @param min_assets Minimal amount of assets to receive (important to calculate to exclude sandwich attacks)
-    @param receiver Receiver of the shares who is optional. If not specified - receiver is the sender
+    @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
     """
     assert shares > 0, "Withdrawing nothing"
 
     staker: address = self.staker
     assert receiver != staker, "Withdraw to staker"
+
+    assert not (staticcall self.amm.is_killed()), "We're dead. Use emergency_withdraw"
 
     amm: LevAMM = self.amm
     liquidity_values: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
@@ -451,8 +469,8 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
     withdrawn: Pair = extcall amm._withdraw(10**18 * liquidity_values.total // (liquidity_values.total + admin_balance) * shares // supply)
-    assert extcall COLLATERAL.transferFrom(amm.address, self, withdrawn.collateral, default_return_value=True)
-    crypto_received: uint256 = extcall COLLATERAL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
+    assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn.collateral, default_return_value=True)
+    crypto_received: uint256 = extcall CRYPTOPOOL.remove_liquidity_fixed_out(withdrawn.collateral, 0, withdrawn.debt, 0)
 
     self._burn(msg.sender, shares)  # Changes self.totalSupply
     self.liquidity.total = liquidity_values.total * (supply - shares) // supply
@@ -461,10 +479,102 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
         self.liquidity.admin = liquidity_values.admin * convert(supply - shares, int256) // convert(supply, int256)
     assert crypto_received >= min_assets, "Slippage"
     assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt, default_return_value=True)
-    assert extcall DEPOSITED_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
+    assert extcall ASSET_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
 
     log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
     return crypto_received
+
+
+@external
+@view
+def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
+    """
+    @notice Method to simulate repay of the debt from the wallet and withdraw what is in the AMM. Does not use heavy math but
+            does not necessarily work as single asset withdrawal
+    @param shares Shares to withdraw
+    @return (unsigned collateral, signed stables). If stables < 0 - we need to bring them
+    """
+    supply: uint256 = 0
+    lv: LiquidityValuesOut = empty(LiquidityValuesOut)
+    amm: LevAMM = self.amm
+
+    if staticcall amm.is_killed():
+        supply = self.totalSupply
+    else:
+        lv = self._calculate_values(self._price_oracle())
+        supply = lv.supply_tokens
+
+    frac: uint256 = 10**18 * shares // supply
+    if lv.admin > 0 and lv.total != 0:
+        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+
+    lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
+    debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
+
+    total_collateral: uint256 = staticcall CRYPTOPOOL.totalSupply()
+    if lp_collateral > 0 and lp_collateral < total_collateral:
+        lp_collateral -= 1
+
+    cryptopool_stables: int256 = convert(staticcall CRYPTOPOOL.balances(0) * lp_collateral // total_collateral, int256)
+    cryptopool_crypto: uint256 = staticcall CRYPTOPOOL.balances(1) * lp_collateral // total_collateral
+
+    return (cryptopool_crypto, cryptopool_stables - debt)
+
+
+@external
+@nonreentrant
+def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint256, int256):
+    """
+    @notice Method to repay the debt from the wallet and withdraw what is in the AMM. Does not use heavy math but
+            does not necessarily work as single asset withdrawal. Minimal output is not specified: convexity of
+            bonding curves ensures that attackers can only lose value, not gain
+    @param shares Shares to withdraw
+    @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
+    @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
+    """
+    assert receiver != self.staker, "Withdraw to staker"
+
+    supply: uint256 = 0
+    lv: LiquidityValuesOut = empty(LiquidityValuesOut)
+    amm: LevAMM = self.amm
+    killed: bool = staticcall amm.is_killed()
+
+    if killed:
+        supply = self.totalSupply
+    else:
+        lv = self._calculate_values(self._price_oracle_w())
+        supply = lv.supply_tokens
+        self.liquidity.admin = lv.admin
+        self.liquidity.total = lv.total
+        self.liquidity.staked = lv.staked
+        self.totalSupply = supply
+
+    assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
+
+    frac: uint256 = 10**18 * shares // supply
+    frac_clean: int256 = convert(frac, int256)
+    if lv.admin > 0 and lv.total != 0:
+        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+
+    withdrawn_levamm: Pair = extcall amm._withdraw(frac)
+    assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
+    withdrawn_cswap: uint256[2] = extcall CRYPTOPOOL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
+    stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
+
+    if stables_to_return > 0:
+        assert extcall STABLECOIN.transfer(receiver, convert(stables_to_return, uint256), default_return_value=True)
+    elif stables_to_return < 0:
+        assert extcall STABLECOIN.transferFrom(msg.sender, self, convert(-stables_to_return, uint256), default_return_value=True)
+    assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
+    assert extcall ASSET_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
+
+    self._burn(msg.sender, shares)
+
+    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
+    if self.liquidity.admin < 0 or killed:
+        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
+
+    return (withdrawn_cswap[1], stables_to_return)
 
 
 @external
@@ -474,9 +584,7 @@ def pricePerShare() -> uint256:
     Non-manipulatable "fair price per share" oracle
     """
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
-    admin_balance: uint256 = convert(max(v.admin, 0), uint256)
-    adjusted_f: uint256 = 10**18 * v.total // (v.total + admin_balance)
-    return v.total * adjusted_f // v.supply_tokens
+    return v.total * 10**18 // v.supply_tokens
 
 
 @external
@@ -485,8 +593,8 @@ def set_amm(amm: LevAMM):
     self._check_admin()
     assert self.amm == empty(LevAMM), "Already set"
     assert staticcall amm.STABLECOIN() == STABLECOIN.address
-    assert staticcall amm.COLLATERAL() == COLLATERAL.address
-    assert staticcall amm.DEPOSITOR() == self
+    assert staticcall amm.COLLATERAL() == CRYPTOPOOL.address
+    assert staticcall amm.LT_CONTRACT() == self
     self.amm = amm
     self.agg = PriceOracle(staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).AGG())
 
@@ -504,6 +612,13 @@ def set_admin(new_admin: address):
 def set_rate(rate: uint256):
     self._check_admin()
     extcall self.amm.set_rate(rate)
+
+
+@external
+@nonreentrant
+def set_amm_fee(fee: uint256):
+    self._check_admin()
+    extcall self.amm.set_fee(fee)
 
 
 @external
@@ -530,10 +645,13 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
         self.stablecoin_allocated = allocation
 
     elif allocation < allocated:
+        assert allocation >= self._price_oracle_w() * (staticcall self.amm.collateral_amount()) // 10**18, "Not enough stables"
         to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
         allocated -= to_transfer
         assert extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer, default_return_value=True)
         self.stablecoin_allocated = allocated
+
+    log AllocateStablecoins(allocator=allocator, stablecoin_allocation=allocation, stablecoin_allocated=allocated)
 
 
 @external
@@ -544,8 +662,9 @@ def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     extcall self.amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
-    min_amount: uint256 = (10**18 - discount) * amount // staticcall COLLATERAL.lp_price()
-    extcall COLLATERAL.donate([amount, 0], min_amount)
+    min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
+    extcall CRYPTOPOOL.donate([amount, 0], min_amount)
+    log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
 
 
 @external
@@ -556,7 +675,11 @@ def withdraw_admin_fees():
     assert msg.sender == staticcall Factory(admin).admin(), "Access"
 
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
+    assert fee_receiver != empty(address), "No fee_receiver"
+
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
+    assert v.admin >= 0, "Loss made admin fee negative"
+    self.totalSupply = v.supply_tokens
     # Mint YB tokens to fee receiver and burn the untokenized admin buffer at the same time
     # fee_receiver is just a normal user
     new_total: uint256 = v.total + convert(v.admin, uint256)
@@ -576,6 +699,7 @@ def withdraw_admin_fees():
 @nonreentrant
 def set_staker(staker: address):
     assert self.staker == empty(address), "Staker already set"
+    assert staker != empty(address)
     self._check_admin()
 
     staker_balance: uint256 = self.balanceOf[staker]
@@ -588,18 +712,28 @@ def set_staker(staker: address):
     log SetStaker(staker=staker)
 
 
+@external
+def set_killed(is_killed: bool):
+    admin: address = self.admin
+    if admin.is_contract:
+        assert msg.sender in [admin, staticcall Factory(admin).admin(), staticcall Factory(admin).emergency_admin()], "Access"
+    else:
+        assert msg.sender == admin, "Access"
+    extcall self.amm.set_killed(is_killed)
+
+
 # ERC20 methods
 
 @external
 @view
 def symbol() -> String[32]:
-    return concat('yb-', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+    return concat('yb-', staticcall IERC20Slice(ASSET_TOKEN.address).symbol())
 
 
 @external
 @view
 def name() -> String[58]:
-    return concat('Yield Basis liquidity for ', staticcall IERC20Slice(DEPOSITED_TOKEN.address).symbol())
+    return concat('Yield Basis liquidity for ', staticcall IERC20Slice(ASSET_TOKEN.address).symbol())
 
 
 @internal
@@ -629,14 +763,26 @@ def _mint(_to: address, _value: uint256):
 def _transfer(_from: address, _to: address, _value: uint256):
     assert _to not in [self, empty(address)]
 
+    killed: bool = staticcall self.amm.is_killed()
+
     staker: address = self.staker
     if staker != empty(address) and staker in [_from, _to]:
         assert _from != _to
-        liquidity: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
-        self.liquidity.admin = liquidity.admin
-        self.liquidity.total = liquidity.total
-        self.totalSupply = liquidity.supply_tokens
-        self.balanceOf[staker] = liquidity.staked_tokens
+        liquidity: LiquidityValuesOut = empty(LiquidityValuesOut)
+
+        if killed:
+            liquidity.ideal_staked = self.liquidity.ideal_staked
+            liquidity.staked = self.liquidity.staked
+            liquidity.total = self.liquidity.total
+            liquidity.supply_tokens = self.totalSupply
+            liquidity.staked_tokens = self.balanceOf[staker]
+        else:
+            liquidity = self._calculate_values(self._price_oracle_w())
+            self.liquidity.admin = liquidity.admin
+            self.liquidity.total = liquidity.total
+            self.totalSupply = liquidity.supply_tokens
+            self.balanceOf[staker] = liquidity.staked_tokens
+
         if _from == staker:
             # Reduce the staked part
             # change by 0 if no supply_tokens or stake_tokens found
@@ -651,6 +797,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
             else:
                 # To exclude division by zero and numerical noise errors
                 liquidity.ideal_staked += d_staked_value
+
         self.liquidity.staked = liquidity.staked
         self.liquidity.ideal_staked = liquidity.ideal_staked
 

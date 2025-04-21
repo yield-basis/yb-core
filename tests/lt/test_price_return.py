@@ -3,6 +3,7 @@
 # In such case, value oracle for an initial deposit should always go up
 
 import boa
+import math
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
@@ -63,7 +64,7 @@ class StatefulTrader(RuleBasedStateMachine):
 
                     p_o_pool = self.cryptopool_oracle.price()
                     amm_collateral_value = self.yb_amm.collateral_amount() * p_o_pool // 10**18
-                    amm_debt_value = self.yb_amm.debt()
+                    amm_debt_value = self.yb_amm.get_debt()
                     lp_tokens = self.cryptopool.calc_token_amount([debt, amount], True)
                     amm_debt_value += debt
                     amm_collateral_value += lp_tokens * p_o_pool // 10**18
@@ -73,6 +74,9 @@ class StatefulTrader(RuleBasedStateMachine):
                         return
 
                     raise
+
+    def is_cryptopool_imbalanced(self):
+        return abs(math.log(self.cryptopool.balances(1) * self.p / self.cryptopool.balances(0))) > 2
 
     @rule(frac=withdraw_fraction, uid=user_id)
     def withdraw(self, frac, uid):
@@ -84,12 +88,33 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     self.yb_lt.withdraw(shares, 0)
                 except Exception:
-                    # Failures could be if pool is too imbalanced to return the amount of debt requested
-                    # or number of shares being too close to 0 thus returning zero debt
-                    return
+                    if user_shares < 10000:
+                        return
+                    elif self.is_cryptopool_imbalanced():
+                        # Very imbalanced pool might have not enough tokens to withdraw
+                        return
+                    else:
+                        raise
             else:
                 with boa.reverts():
                     self.yb_lt.withdraw(shares, 0)
+
+    @rule(frac=withdraw_fraction, uid=user_id)
+    def emergency_withdraw(self, frac, uid):
+        user = self.accounts[uid]
+        user_shares = self.yb_lt.balanceOf(user)
+        shares = int(frac * user_shares)
+        with boa.env.prank(user):
+            if shares <= user_shares and shares > 0:
+                _, d_stables = self.yb_lt.preview_emergency_withdraw(shares)
+                if d_stables < 0:
+                    self.stablecoin._mint_for_testing(user, -d_stables)
+                try:
+                    self.yb_lt.emergency_withdraw(shares)
+                except Exception:
+                    # Failures could be if pool is too imbalanced to return the amount of debt requested
+                    # or number of shares being too close to 0 thus returning zero debt
+                    pass
 
     @rule(amount=amount, is_stablecoin=is_stablecoin)
     def trade_in_cryptopool(self, amount, is_stablecoin):
@@ -115,7 +140,7 @@ class StatefulTrader(RuleBasedStateMachine):
                 try:
                     out = self.yb_amm.exchange(0, 1, amount, 0)
                 except Exception as e:
-                    if amount > self.yb_amm.debt():
+                    if amount > self.yb_amm.get_debt():
                         return
                     if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
                         # Trade leads to the state which we may not come back from
@@ -131,8 +156,12 @@ class StatefulTrader(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 try:
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
-                except Exception:
+                except Exception as e:
                     if amount < 10**10:
+                        return
+                    if 'Unsafe min' in str(e) or 'Unsafe max' in str(e):
+                        # Trade leads to the state which we may not come back from
+                        # so AMM blocks it (correctly)
                         return
                     raise
                 self.yb_amm.exchange(1, 0, lp, 0)
@@ -166,7 +195,7 @@ class StatefulTrader(RuleBasedStateMachine):
     @invariant()
     def uponly(self):
         pps = self.yb_lt.pricePerShare()
-        assert pps - self.pps >= -1e-11 * self.pps
+        assert pps - self.pps >= -1e-12 * self.pps
         self.pps = pps
 
 
@@ -176,3 +205,18 @@ def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, c
     for k, v in locals().items():
         setattr(StatefulTrader, k, v)
     run_state_machine_as_test(StatefulTrader)
+
+
+def test_emergency_fail_1(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
+                          yb_allocated, seed_cryptopool, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulTrader, k, v)
+
+    state = StatefulTrader()
+    state.uponly()
+    state.deposit(amount=10**10, mul=0.0, uid=1)
+    state.deposit(amount=3_509_882_596_680_098_447, mul=0.0, uid=0)
+    state.uponly()
+    state.emergency_withdraw(frac=1.0, uid=0)
+    state.uponly()
+    state.teardown()

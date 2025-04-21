@@ -11,7 +11,11 @@ from ethereum.ercs import IERC20 as ERC20
 interface Flash:
     def flashLoan(receiver: address, token: address, amount: uint256, data: Bytes[10**5]) -> bool: nonpayable
     def supportedTokens(token: address) -> bool: view
-    def ceiling() -> uint256: view
+    def maxFlashLoan(token: address) -> uint256: view
+
+interface Factory:
+    def flash() -> Flash: view
+    def virtual_pool_impl() -> address: view
 
 interface Pool:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
@@ -38,23 +42,26 @@ struct AMMState:
     x0: uint256
 
 
-FLASH: public(immutable(Flash))
+FACTORY: public(immutable(Factory))
 AMM: public(immutable(YbAMM))
 POOL: public(immutable(Pool))
-CRYPTO: public(immutable(ERC20))
+ASSET_TOKEN: public(immutable(ERC20))
 STABLECOIN: public(immutable(ERC20))
+ROUNDING_DISCOUNT: public(constant(uint256)) = 10**18 // 10**8
+IMPL: public(immutable(address))
 
 
 @deploy
-def __init__(amm: YbAMM, flash: Flash):
+def __init__(amm: YbAMM):
     AMM = amm
-    FLASH = flash
+    FACTORY = Factory(msg.sender)
+    IMPL = staticcall FACTORY.virtual_pool_impl()
     POOL = staticcall amm.COLLATERAL()
     STABLECOIN = staticcall amm.STABLECOIN()
     assert staticcall POOL.coins(0) == STABLECOIN
-    CRYPTO = staticcall POOL.coins(1)
+    ASSET_TOKEN = staticcall POOL.coins(1)
     assert extcall STABLECOIN.approve(POOL.address, max_value(uint256), default_return_value=True)
-    assert extcall CRYPTO.approve(POOL.address, max_value(uint256), default_return_value=True)
+    assert extcall ASSET_TOKEN.approve(POOL.address, max_value(uint256), default_return_value=True)
     assert extcall STABLECOIN.approve(AMM.address, max_value(uint256), default_return_value=True)
     assert extcall POOL.approve(AMM.address, max_value(uint256), default_return_value=True)
 
@@ -62,7 +69,7 @@ def __init__(amm: YbAMM, flash: Flash):
 @external
 @view
 def coins(i: uint256) -> ERC20:
-    return [STABLECOIN, CRYPTO][i]
+    return [STABLECOIN, ASSET_TOKEN][i]
 
 
 @internal
@@ -102,17 +109,24 @@ def _calculate(i: uint256, in_amount: uint256, only_flash: bool) -> (uint256, ui
 @view
 def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
-    return self._calculate(i, in_amount, False)[0]
+    _in_amount: uint256 = in_amount
+    if i == 0:
+        _in_amount = in_amount * (10**18 - ROUNDING_DISCOUNT) // 10**18
+    return self._calculate(i, _in_amount, False)[0]
 
 
+@external
 def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256, fee: uint256, data: Bytes[10**5]):
+    assert initiator == self
+    assert token == STABLECOIN.address
+
     # executor
     i: uint256 = 0
     in_amount: uint256 = 0
     i, in_amount = abi_decode(data, (uint256, uint256))
     flash_amount: uint256 = self._calculate(i, in_amount, True)[1]
-    in_coin: ERC20 = [STABLECOIN, CRYPTO][i]
-    out_coin: ERC20 = [STABLECOIN, CRYPTO][1-i]
+    in_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][i]
+    out_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][1-i]
     repay_flash_amount: uint256 = total_flash_amount
 
     if i == 0:
@@ -122,11 +136,8 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
         # 3. Withdraw symmetrically from pool LP
         # 4. Repay the flash loan
         # 5. Send the crypto
-        lp_amount: uint256 = extcall AMM.exchange(0, 1, in_amount + flash_amount, 0)
+        lp_amount: uint256 = extcall AMM.exchange(0, 1, (in_amount * (10**18 - ROUNDING_DISCOUNT) // 10**18 + flash_amount), 0)
         extcall POOL.remove_liquidity(lp_amount, [0, 0])
-        # XXX here it may appear that we have slightly less coins than needed due to rounding errors
-        # We need to make sure that the solution rounds flash_amount DOWN, not up
-        # Or, we can subtract a little bit. But it might turn out that we ARE rounding down already
         repay_flash_amount = staticcall STABLECOIN.balanceOf(self)
 
     else:
@@ -142,18 +153,25 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
     assert extcall STABLECOIN.transfer(msg.sender, repay_flash_amount, default_return_value=True)
 
 @external
+@nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
-    in_coin: ERC20 = [STABLECOIN, CRYPTO][i]
-    out_coin: ERC20 = [STABLECOIN, CRYPTO][j]
+    flash: Flash = staticcall FACTORY.flash()
+
+    in_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][i]
+    out_coin: ERC20 = [STABLECOIN, ASSET_TOKEN][j]
 
     assert extcall in_coin.transferFrom(msg.sender, self, in_amount, default_return_value=True)
 
     data: Bytes[10**5] = empty(Bytes[10**5])
     data = abi_encode(i, in_amount)
-    extcall FLASH.flashLoan(self, STABLECOIN.address, staticcall FLASH.ceiling(), data)
+    extcall flash.flashLoan(self, STABLECOIN.address, staticcall flash.maxFlashLoan(STABLECOIN.address), data)
 
     out_amount: uint256 = staticcall out_coin.balanceOf(self)
     assert out_amount >= min_out, "Slippage"
     assert extcall out_coin.transfer(_for, out_amount, default_return_value=True)
     return out_amount
+
+
+# XXX include methods to determine max_in / max_out
+# XXX include possibility to change VirtualPool in factory

@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "lverage-token"
+name = "yb-core"
 version = "0.1.0"
 description = ""
 authors = ["Michael Egorov <michael@curve.fi>"]
@@ -7,17 +7,18 @@ packages = []
 package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.10,<4"
+python = ">=3.11,<4"
 vyper = "0.4.1"
 poetry = "^1"
-titanoboa = "0.2.6"
+titanoboa = {git = "https://github.com/vyperlang/titanoboa.git", rev = "2a9600c7706696a85734a9c904a162fda34c0d70"}
+# titanoboa = "0.2.6"
 hypothesis = "^6"
-pdbpp = "^0.10.3"
+pdbpp = "^0.11.6"
 jedi = "^0.19.1"
 pytest-xdist = "^3.6"
 pytest-forked = "^1.6.0"
-ipython = "^8"
-matplotlib = "^3"  # Only for graphs, otherwise not needed
+ipython = "^9"
+# matplotlib = "^3"  # Only for graphs, otherwise not needed
 snekmate = "0.1.1"
 
 [build-system]

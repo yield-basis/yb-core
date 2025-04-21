@@ -6,6 +6,7 @@
 @license Copyright (c) 2025
 """
 from ethereum.ercs import IERC20
+from ethereum.ercs import IERC20Detailed
 
 
 interface LT:
@@ -16,13 +17,20 @@ interface LT:
 
 interface CurveCryptoPool:
     def coins(i: uint256) -> address: view
+    def decimals() -> uint8: view
 
 interface LPOracle:
-    def price_w() -> uint256: nonpayable
+    def AGG() -> address: view
+
+interface Agg:
+    def price() -> uint256: view
+
+interface VirtualPool:
+    def IMPL() -> address: view
 
 
 struct Market:
-    collateral_token: IERC20
+    asset_token: IERC20
     cryptopool: CurveCryptoPool
     amm: address
     lt: address
@@ -52,24 +60,27 @@ event SetFlash:
 
 event SetAdmin:
     admin: address
+    emergency_admin: address
     old_admin: address
+    old_emergency_admin: address
 
 event SetMinAdminFee:
     admin_fee: uint256
 
-event NewMarket:
+event MarketParameters:
     idx: indexed(uint256)
-    collateral_token: indexed(address)
+    asset_token: indexed(address)
     cryptopool: indexed(address)
     amm: address
     lt: address
     price_oracle: address
     virtual_pool: address
     staker: address
+    agg: address
 
 
 MAX_MARKETS: public(constant(uint256)) = 50000
-LEVERAGE: constant(uint256) = 2 * 10**18
+LEVERAGE: public(constant(uint256)) = 2 * 10**18
 
 amm_impl: public(address)
 lt_impl: public(address)
@@ -82,6 +93,7 @@ flash: public(address)
 STABLECOIN: public(immutable(IERC20))
 fee_receiver: public(address)
 admin: public(address)
+emergency_admin: public(address)
 min_admin_fee: public(uint256)
 
 markets: public(Market[MAX_MARKETS])
@@ -101,8 +113,16 @@ def __init__(
     agg: address,
     flash: address,
     fee_receiver: address,
-    admin: address
+    admin: address,
+    emergency_admin: address
 ):
+    assert admin != empty(address)
+    assert stablecoin.address != empty(address)
+    assert agg != empty(address)
+    assert price_oracle_impl != empty(address)
+
+    assert staticcall IERC20Detailed(stablecoin.address).decimals() == 18
+
     STABLECOIN = stablecoin
     self.amm_impl = amm_impl
     self.lt_impl = lt_impl
@@ -113,10 +133,20 @@ def __init__(
     self.flash = flash
     self.fee_receiver = fee_receiver
     self.admin = admin
+    self.emergency_admin = emergency_admin
     self.min_admin_fee = 10**17
+
+    self._validate_agg()
 
     log SetImplementations(amm=amm_impl, lt=lt_impl, virtual_pool=virtual_pool_impl, price_oracle=price_oracle_impl,
                            staker=staker_impl)
+
+
+@internal
+@view
+def _validate_agg():
+    p: uint256 = staticcall Agg(self.agg).price()
+    assert p > 9 * 10**17 and p < 11 * 10**17, "Bad aggregator"
 
 
 @external
@@ -129,15 +159,17 @@ def add_market(
 ) -> Market:
     assert msg.sender == self.admin, "Access"
     assert staticcall pool.coins(0) == STABLECOIN.address, "Wrong stablecoin"
+    assert staticcall pool.decimals() == 18
 
     market: Market = empty(Market)
+    agg: address = self.agg
 
-    market.collateral_token = IERC20(staticcall pool.coins(1))
+    market.asset_token = IERC20(staticcall pool.coins(1))
     market.cryptopool = pool
-    market.price_oracle = create_from_blueprint(self.price_oracle_impl, pool.address, self.agg)
+    market.price_oracle = create_from_blueprint(self.price_oracle_impl, pool.address, agg)
     market.lt = create_from_blueprint(
         self.lt_impl,
-        market.collateral_token.address,
+        market.asset_token.address,
         STABLECOIN,
         pool.address,
         self
@@ -159,8 +191,7 @@ def add_market(
     if self.virtual_pool_impl != empty(address) and self.flash != empty(address):
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
-            market.amm,
-            self.flash
+            market.amm
         )
     if self.staker_impl != empty(address):
         market.staker = create_from_blueprint(
@@ -173,15 +204,16 @@ def add_market(
         self.market_count = i + 1
     self.markets[i] = market
 
-    log NewMarket(
+    log MarketParameters(
         idx=i,
-        collateral_token=market.collateral_token.address,
+        asset_token=market.asset_token.address,
         cryptopool=market.cryptopool.address,
         amm=market.amm,
         lt=market.lt,
         price_oracle=market.price_oracle,
         virtual_pool=market.virtual_pool,
-        staker=market.staker
+        staker=market.staker,
+        agg=agg
     )
 
     return market
@@ -190,19 +222,43 @@ def add_market(
 @external
 def fill_staker_vpool(i: uint256):
     assert msg.sender == self.admin, "Access"
+    assert i < self.market_count, "Nonexistent market"
+
     market: Market = self.markets[i]
-    if market.virtual_pool == empty(address) and self.virtual_pool_impl != empty(address) and self.flash != empty(address):
+    assert market.lt != empty(address)
+    assert market.amm != empty(address)
+
+    new_virtual_pool: bool = False
+    if market.virtual_pool == empty(address):
+        new_virtual_pool = self.virtual_pool_impl != empty(address) and self.flash != empty(address)
+    else:
+        new_virtual_pool = (staticcall VirtualPool(market.virtual_pool).IMPL()) != self.virtual_pool_impl
+
+    if new_virtual_pool:
         market.virtual_pool = create_from_blueprint(
             self.virtual_pool_impl,
-            market.amm,
-            self.flash
+            market.amm
         )
+
     if market.staker == empty(address) and self.staker_impl != empty(address):
         market.staker = create_from_blueprint(
             self.staker_impl,
             market.lt)
+        extcall LT(market.lt).set_staker(market.staker)
+
     self.markets[i] = market
-    extcall LT(market.lt).set_staker(market.staker)
+
+    log MarketParameters(
+        idx=i,
+        asset_token=market.asset_token.address,
+        cryptopool=market.cryptopool.address,
+        amm=market.amm,
+        lt=market.lt,
+        price_oracle=market.price_oracle,
+        virtual_pool=market.virtual_pool,
+        staker=market.staker,
+        agg=(staticcall LPOracle(market.price_oracle).AGG())
+    )
 
 
 @external
@@ -210,6 +266,7 @@ def fill_staker_vpool(i: uint256):
 def set_mint_factory(mint_factory: address):
     assert msg.sender == self.admin, "Access"
     assert self.mint_factory == empty(address), "Only set once"
+    assert mint_factory != empty(address)
     self.mint_factory = mint_factory
     # crvUSD factory can take back as much as it wants. Very important function - this is why it can be called only once
     extcall STABLECOIN.approve(mint_factory, max_value(uint256))
@@ -241,7 +298,9 @@ def set_allocator(allocator: address, amount: uint256):
 @external
 def set_agg(agg: address):
     assert msg.sender == self.admin, "Access"
+    assert agg != empty(address)
     self.agg = agg
+    self._validate_agg()
     log SetAgg(agg=agg)
 
 
@@ -253,10 +312,13 @@ def set_flash(flash: address):
 
 
 @external
-def set_admin(new_admin: address):
+def set_admin(new_admin: address, new_emergency_admin: address):
     assert msg.sender == self.admin, "Access"
-    log SetAdmin(admin=new_admin, old_admin=self.admin)
+    assert new_admin != empty(address)
+    assert new_emergency_admin != empty(address)
+    log SetAdmin(admin=new_admin, emergency_admin=new_emergency_admin, old_admin=self.admin, old_emergency_admin=self.emergency_admin)
     self.admin = new_admin
+    self.emergency_admin = new_emergency_admin
 
 
 @external
@@ -272,3 +334,19 @@ def set_min_admin_fee(new_min_admin_fee: uint256):
     assert new_min_admin_fee <= 10**18, "Admin fee too high"
     self.min_admin_fee = new_min_admin_fee
     log SetMinAdminFee(admin_fee=new_min_admin_fee)
+
+
+@external
+def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address):
+    assert msg.sender == self.admin, "Access"
+    if amm != empty(address):
+        self.amm_impl = amm
+    if lt != empty(address):
+        self.lt_impl = lt
+    if virtual_pool != empty(address):
+        self.virtual_pool_impl = virtual_pool
+    if price_oracle != empty(address):
+        self.price_oracle_impl = price_oracle
+    if staker != empty(address):
+        self.staker_impl = staker
+    log SetImplementations(amm=amm, lt=lt, virtual_pool=virtual_pool, price_oracle=price_oracle, staker=staker)

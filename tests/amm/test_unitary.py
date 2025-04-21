@@ -4,7 +4,7 @@ from hypothesis import strategies as st
 
 
 @given(
-    rate=st.integers(min_value=0, max_value=10**18),
+    rate=st.integers(min_value=0, max_value=10**18 // (86400 * 365)),
     dt=st.integers(min_value=0, max_value=365*86400)
 )
 @settings(max_examples=100)
