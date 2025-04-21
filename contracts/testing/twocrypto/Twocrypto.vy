@@ -180,7 +180,7 @@ packed_rebalancing_params: public(uint256)  # <---------- Contains rebalancing
 # Fee params that determine dynamic fees:
 packed_fee_params: public(uint256)  # <---- Packs mid_fee, out_fee, fee_gamma.
 
-ADMIN_FEE: public(constant(uint256)) = 5 * 10**9  # <----- 50% of earned fees.
+ADMIN_FEE: public(constant(uint256)) = 0  # <----- 50% of earned fees.  XXX this needs a setter
 MIN_FEE: constant(uint256) = 5 * 10**5  # <-------------------------- 0.5 BPS.
 MAX_FEE: constant(uint256) = 10 * 10**9
 NOISE_FEE: constant(uint256) = 10**5  # <---------------------------- 0.1 BPS.
@@ -728,10 +728,6 @@ def remove_liquidity(
     @return uint256[N_COINS] Amount of pool tokens received by the `receiver`
     """
 
-    self._absorb_donation()
-
-
-
     # -------------------------------------------------------- Burn LP tokens.
 
     # We cache the total supply to avoid multiple SLOADs. It is important to do
@@ -781,6 +777,9 @@ def remove_liquidity(
     # We intentionally use the unadjusted `amount` here as the amount of lp
     # tokens burnt is `amount`, regardless of the rounding error.
     log RemoveLiquidity(provider=msg.sender, token_amounts=withdraw_amounts, token_supply=total_supply - amount)
+
+    # XXX Moved these to the end for exact values in testing, but is it good to do?
+    self._absorb_donation()
 
     return withdraw_amounts
 
@@ -845,9 +844,6 @@ def _remove_liquidity_fixed_out(
     receiver: address,
 ) -> uint256:
 
-    self._claim_admin_fees()
-    self._absorb_donation()
-
     A_gamma: uint256[2] = self._A_gamma()
 
     # Amount of coin[j] withdrawn.
@@ -889,6 +885,10 @@ def _remove_liquidity_fixed_out(
         approx_fee=approx_fee * token_amount // PRECISION,
         price_scale=price_scale
     )
+
+    # XXX Moved these to the end for exact values in testing, but is it good to do?
+    self._claim_admin_fees()
+    self._absorb_donation()
 
     return dy
 
@@ -946,8 +946,6 @@ def _exchange(
     assert i != j, "same coin"
     assert dx_received > 0, "zero dx"
 
-    self._absorb_donation()
-
     A_gamma: uint256[2] = self._A_gamma()
     balances: uint256[N_COINS] = self.balances
     dy: uint256 = 0
@@ -1001,6 +999,9 @@ def _exchange(
     D = staticcall MATH.newton_D(A_gamma[0], A_gamma[1], xp, y_out[1])
 
     price_scale = self.tweak_price(A_gamma, xp, D)
+
+    # XXX Moved these to the end for exact values in testing, but is it good to do?
+    self._absorb_donation()
 
     return [dy, fee, price_scale]
 
