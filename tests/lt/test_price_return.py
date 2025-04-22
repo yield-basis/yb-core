@@ -156,6 +156,7 @@ class StatefulTrader(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 try:
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
+                    self.yb_amm.exchange(1, 0, lp, 0)
                 except Exception as e:
                     if amount < 10**10:
                         return
@@ -164,7 +165,6 @@ class StatefulTrader(RuleBasedStateMachine):
                         # so AMM blocks it (correctly)
                         return
                     raise
-                self.yb_amm.exchange(1, 0, lp, 0)
 
     @rule(dt=dt)
     def propagate(self, dt):

@@ -57,6 +57,7 @@ interface CurveCryptoPool:
     def donate(amounts: uint256[2], min_amount: uint256): nonpayable
     def remove_liquidity_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256, min_amount_j: uint256) -> uint256: nonpayable
     def calc_withdraw_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256) -> uint256: view
+    def calc_remove_liquidity(amount: uint256) -> uint256[2]: view
 
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
@@ -511,14 +512,9 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
 
-    total_collateral: uint256 = staticcall CRYPTOPOOL.totalSupply()
-    if lp_collateral > 0 and lp_collateral < total_collateral:
-        lp_collateral -= 1
+    withdraw_amounts: uint256[2] = staticcall CRYPTOPOOL.calc_remove_liquidity(lp_collateral)
 
-    cryptopool_stables: int256 = convert(staticcall CRYPTOPOOL.balances(0) * lp_collateral // total_collateral, int256)
-    cryptopool_crypto: uint256 = staticcall CRYPTOPOOL.balances(1) * lp_collateral // total_collateral
-
-    return (cryptopool_crypto, cryptopool_stables - debt)
+    return (withdraw_amounts[1], convert(withdraw_amounts[0], int256) - debt)
 
 
 @external

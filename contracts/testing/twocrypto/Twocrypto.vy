@@ -778,7 +778,6 @@ def remove_liquidity(
     # tokens burnt is `amount`, regardless of the rounding error.
     log RemoveLiquidity(provider=msg.sender, token_amounts=withdraw_amounts, token_supply=total_supply - amount)
 
-    # XXX Moved these to the end for exact values in testing, but is it good to do?
     self._absorb_donation()
 
     return withdraw_amounts
@@ -866,6 +865,7 @@ def _remove_liquidity_fixed_out(
     assert dy >= min_amount_j, "slippage"
 
     # ---------------------------- State Updates -----------------------------
+    self._absorb_donation()
 
     self.burnFrom(msg.sender, token_amount)
 
@@ -886,9 +886,7 @@ def _remove_liquidity_fixed_out(
         price_scale=price_scale
     )
 
-    # XXX Moved these to the end for exact values in testing, but is it good to do?
     self._claim_admin_fees()
-    self._absorb_donation()
 
     return dy
 
@@ -994,14 +992,13 @@ def _exchange(
 
     # ------ Tweak price_scale with good initial guess for newton_D ----------
 
+    self._absorb_donation()
+
     # Technically a swap wouldn't require to recompute D, however since we're taking
     # fees, we need to update D to reflect the new balances.
     D = staticcall MATH.newton_D(A_gamma[0], A_gamma[1], xp, y_out[1])
 
     price_scale = self.tweak_price(A_gamma, xp, D)
-
-    # XXX Moved these to the end for exact values in testing, but is it good to do?
-    self._absorb_donation()
 
     return [dy, fee, price_scale]
 
@@ -1396,8 +1393,6 @@ def _D_from_xcp(xcp: uint256, price_scale: uint256) -> uint256:
     return xcp * N_COINS * isqrt(price_scale * PRECISION) // PRECISION
 
 
-
-
 @internal
 @pure
 def _xcp(D: uint256, price_scale: uint256) -> uint256:
@@ -1458,6 +1453,28 @@ def _calc_token_fee(amounts: uint256[N_COINS], xp: uint256[N_COINS]) -> uint256:
 
     return fee * Sdiff // S + NOISE_FEE
 
+
+@view
+@external
+def calc_remove_liquidity(amount: uint256) -> uint256[N_COINS]:
+    total_supply: uint256 = self.totalSupply
+    assert amount <= total_supply
+
+    withdraw_amounts: uint256[N_COINS] = empty(uint256[N_COINS])
+    D: uint256 = self.D
+    adjusted_D: uint256 = D - self._D_from_xcp(self.dead_xcp, self.cached_price_scale)
+
+    if amount == total_supply:  # <----------------------------------- Case 2.
+        for i: uint256 in range(N_COINS):
+            withdraw_amounts[i] = self.balances[i]
+
+    else:  # <-------------------------------------------------------- Case 1.
+        for i: uint256 in range(N_COINS):
+            withdraw_amounts[i] = self.balances[i] * adjusted_D // D * amount // total_supply
+
+    return withdraw_amounts
+
+
 @view
 @external
 def calc_withdraw_fixed_out(lp_token_amount: uint256, i: uint256, amount_i: uint256) -> uint256:
@@ -1476,6 +1493,7 @@ def calc_withdraw_fixed_out(lp_token_amount: uint256, i: uint256, amount_i: uint
         amount_i,
     )[0]
 
+
 @view
 @external
 def calc_withdraw_one_coin(lp_token_amount: uint256, i: uint256) -> uint256:
@@ -1493,6 +1511,7 @@ def calc_withdraw_one_coin(lp_token_amount: uint256, i: uint256) -> uint256:
         1 - i, # Here we flip i because we want to constrain the other coin to be zero.
         0, # We set the amount of coin[1 - i] to be withdrawn to 0.
     )[0]
+
 
 @internal
 @view

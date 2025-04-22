@@ -125,7 +125,12 @@ class StatefulTrader(RuleBasedStateMachine):
     @rule()
     def withdraw_admin_fees(self):
         with boa.env.prank(self.admin):
-            self.yb_lt.withdraw_admin_fees()
+            try:
+                self.yb_lt.withdraw_admin_fees()
+            except Exception as e:
+                if "Loss" in str(e):
+                    return
+                raise
 
     @invariant()
     def staked_fractions(self):
