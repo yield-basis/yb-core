@@ -37,6 +37,7 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
                 600,  # ma_exp_time: uint256
                 100_000 * 10**18  # initial_price: uint256
             ))
+        pool.set_admin_fee(0)
 
         for addr in accounts + [admin]:
             with boa.env.prank(addr):

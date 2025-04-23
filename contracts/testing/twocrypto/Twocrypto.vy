@@ -129,6 +129,9 @@ event SetDonationDuration:
 event SetMaxDonationRatio:
     ratio: uint256
 
+event SetAdminFee:
+    admin_fee: uint256
+
 
 # ----------------------- Storage/State Variables ----------------------------
 
@@ -180,7 +183,7 @@ packed_rebalancing_params: public(uint256)  # <---------- Contains rebalancing
 # Fee params that determine dynamic fees:
 packed_fee_params: public(uint256)  # <---- Packs mid_fee, out_fee, fee_gamma.
 
-ADMIN_FEE: public(constant(uint256)) = 0  # <----- 50% of earned fees.  XXX this needs a setter
+admin_fee: public(uint256)
 MIN_FEE: constant(uint256) = 5 * 10**5  # <-------------------------- 0.5 BPS.
 MAX_FEE: constant(uint256) = 10 * 10**9
 NOISE_FEE: constant(uint256) = 10**5  # <---------------------------- 0.1 BPS.
@@ -264,6 +267,8 @@ def __init__(
 
     self.donation_duration = 7 * 86400
     self.max_donation_ratio = PRECISION // 10  # (10%) of the total D.
+
+    self.admin_fee = 5 * 10**9
 
     log Transfer(sender=empty(address), receiver=self, value=0)  # <------- Fire empty transfer from
     #                                       0x0 to self for indexers to catch.
@@ -679,7 +684,7 @@ def add_liquidity(
         d_token -= d_token_fee
         token_supply += d_token
         self.mint(receiver, d_token)
-        self.admin_lp_virtual_balance += unsafe_div(ADMIN_FEE * d_token_fee, 10**10)
+        self.admin_lp_virtual_balance += unsafe_div(self.admin_fee * d_token_fee, 10**10)
 
         price_scale = self.tweak_price(A_gamma, xp, D)
 
@@ -728,13 +733,6 @@ def remove_liquidity(
     @return uint256[N_COINS] Amount of pool tokens received by the `receiver`
     """
 
-    # -------------------------------------------------------- Burn LP tokens.
-
-    # We cache the total supply to avoid multiple SLOADs. It is important to do
-    # this before the burnFrom call, as the burnFrom call will reduce the supply.
-    total_supply: uint256 = self.totalSupply
-    self.burnFrom(msg.sender, amount)
-
     # There are two cases for withdrawing tokens from the pool.
     #   Case 1. Withdrawal does not empty the pool.
     #           In this situation, D is adjusted proportional to the amount of
@@ -745,34 +743,25 @@ def remove_liquidity(
     #           is reset.
 
     withdraw_amounts: uint256[N_COINS] = empty(uint256[N_COINS])
-    D: uint256 = self.D
-    adjusted_D: uint256 = D - self._D_from_xcp(self.dead_xcp, self.cached_price_scale)
-
-    if amount == total_supply:  # <----------------------------------- Case 2.
-
-        for i: uint256 in range(N_COINS):
-
-            withdraw_amounts[i] = self.balances[i]
-
-    else:  # <-------------------------------------------------------- Case 1.
-        for i: uint256 in range(N_COINS):
-            # TODO improve comments here
-            # Withdraws slightly less -> favors LPs already
-            withdraw_amounts[i] = self.balances[i] * adjusted_D // D * amount // total_supply
-
-            assert withdraw_amounts[i] >= min_amounts[i], "slippage"
+    total_supply: uint256 = 0
+    D: uint256 = 0
+    adjusted_D: uint256 = 0
+    withdraw_amounts, total_supply, D, adjusted_D = self._calc_remove_liquidity(amount)
 
     # Reduce D proportionally to the amount of tokens leaving. Since withdrawals
     # are balanced, this is a simple subtraction. If amount == total_supply,
     # D will be 0.
-    self.D = D - unsafe_div((adjusted_D) * amount, total_supply)
+    self.D = D - unsafe_div(adjusted_D * amount, total_supply)
 
     # ---------------------------------- Transfers ---------------------------
 
     for i: uint256 in range(N_COINS):
         # _transfer_out updates self.balances here. Update to state occurs
         # before external calls:
+        assert withdraw_amounts[i] >= min_amounts[i], "slippage"
         self._transfer_out(i, withdraw_amounts[i], receiver)
+
+    self.burnFrom(msg.sender, amount)
 
     # We intentionally use the unadjusted `amount` here as the amount of lp
     # tokens burnt is `amount`, regardless of the rounding error.
@@ -1249,7 +1238,7 @@ def _claim_admin_fees():
     #         are left with half; so divide by 2.
 
     fees: uint256 = unsafe_div(
-        unsafe_sub(xcp_profit, xcp_profit_a) * ADMIN_FEE, 2 * 10**10
+        unsafe_sub(xcp_profit, xcp_profit_a) * self.admin_fee, 2 * 10**10
     )
 
     # ------------------------------ Claim admin fees by minting admin's share
@@ -1454,9 +1443,9 @@ def _calc_token_fee(amounts: uint256[N_COINS], xp: uint256[N_COINS]) -> uint256:
     return fee * Sdiff // S + NOISE_FEE
 
 
+@internal
 @view
-@external
-def calc_remove_liquidity(amount: uint256) -> uint256[N_COINS]:
+def _calc_remove_liquidity(amount: uint256) -> (uint256[N_COINS], uint256, uint256, uint256):
     total_supply: uint256 = self.totalSupply
     assert amount <= total_supply
 
@@ -1472,7 +1461,13 @@ def calc_remove_liquidity(amount: uint256) -> uint256[N_COINS]:
         for i: uint256 in range(N_COINS):
             withdraw_amounts[i] = self.balances[i] * adjusted_D // D * amount // total_supply
 
-    return withdraw_amounts
+    return withdraw_amounts, total_supply, D, adjusted_D
+
+
+@view
+@external
+def calc_remove_liquidity(amount: uint256) -> uint256[N_COINS]:
+    return self._calc_remove_liquidity(amount)[0]
 
 
 @view
@@ -1730,6 +1725,11 @@ def fee_receiver() -> address:
     @return address Fee receiver.
     """
     return staticcall factory.fee_receiver()
+
+
+@internal
+def _check_admin():
+    assert msg.sender == staticcall factory.admin(), "only owner"
 
 
 @external
@@ -1990,7 +1990,7 @@ def ramp_A_gamma(
     @param future_gamma The future gamma value.
     @param future_time The timestamp at which the ramping will end.
     """
-    assert msg.sender == staticcall factory.admin(), "only owner"
+    self._check_admin()
     assert not self._is_ramping(), "ramp undergoing"
     assert future_time > block.timestamp + MIN_RAMP_TIME - 1, "ramp time<min"
 
@@ -2035,7 +2035,7 @@ def stop_ramp_A_gamma():
     @notice Stop Ramping A and gamma parameters immediately.
     @dev Only accessible by factory admin.
     """
-    assert msg.sender == staticcall factory.admin(), "only owner"
+    self._check_admin()
 
     A_gamma: uint256[2] = self._A_gamma()
     current_A_gamma: uint256 = A_gamma[0] << 128
@@ -2070,7 +2070,7 @@ def apply_new_parameters(
     @param _new_adjustment_step The new adjustment step.
     @param _new_ma_time The new ma time. ma_time is time_in_seconds/ln(2).
     """
-    assert msg.sender == staticcall factory.admin(), "only owner"
+    self._check_admin()
 
     # ----------------------------- Set fee params ---------------------------
 
@@ -2130,16 +2130,27 @@ def apply_new_parameters(
         ma_time=new_ma_time
     )
 
+
 @external
 def set_donation_duration(duration: uint256):
-    assert msg.sender == staticcall factory.admin(), "only owner"
+    self._check_admin()
 
     self.donation_duration = duration
     log SetDonationDuration(duration=duration)
 
+
 @external
 def set_max_donation_ratio(ratio: uint256):
-    assert msg.sender == staticcall factory.admin(), "only owner"
+    self._check_admin()
 
     self.max_donation_ratio = ratio
     log SetMaxDonationRatio(ratio=ratio)
+
+
+@external
+def set_admin_fee(admin_fee: uint256):
+    self._check_admin()
+    assert admin_fee <= 10**10
+
+    self.admin_fee = admin_fee
+    log SetAdminFee(admin_fee=admin_fee)

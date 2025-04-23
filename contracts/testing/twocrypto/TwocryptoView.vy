@@ -78,6 +78,7 @@ interface Curve:
     def balanceOf(arg0: address) -> uint256: view
     def allowance(arg0: address, arg1: address) -> uint256: view
     def totalSupply() -> uint256: view
+    def calc_remove_liquidity(amount: uint256) -> uint256[N_COINS]: view
 
 
 interface Math:
@@ -259,25 +260,8 @@ def calc_add_liquidity(
 @external
 @view
 def calc_remove_liquidity(lp_tokens: uint256, pool: Curve) -> uint256[N_COINS]:
-    total_supply: uint256 = staticcall pool.totalSupply()
+    return staticcall pool.calc_remove_liquidity(lp_tokens)
 
-    withdraw_amounts: uint256[N_COINS] = empty(uint256[N_COINS])
-    D: uint256 = staticcall pool.D()
-    adjusted_D: uint256 = D - self._D_from_xcp(staticcall pool.dead_xcp(), staticcall pool.price_scale())
-
-    if lp_tokens == total_supply:  # <----------------------------------- Case 2.
-
-        for i: uint256 in range(N_COINS):
-
-            withdraw_amounts[i] = staticcall pool.balances(i)
-
-    else:  # <-------------------------------------------------------- Case 1.
-        for i: uint256 in range(N_COINS):
-            # TODO improve comments here
-            # Withdraws slightly less -> favors LPs already
-            withdraw_amounts[i] = staticcall pool.balances(i) * adjusted_D // D * lp_tokens // total_supply
-
-    return withdraw_amounts
 
 @external
 @view
