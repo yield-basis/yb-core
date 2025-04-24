@@ -641,7 +641,8 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
         self.stablecoin_allocated = allocation
 
     elif allocation < allocated:
-        assert allocation >= self._price_oracle_w() * (staticcall self.amm.collateral_amount()) // 10**18, "Not enough stables"
+        lp_price: uint256 = extcall (staticcall self.amm.PRICE_ORACLE_CONTRACT()).price_w()
+        assert allocation >= lp_price * (staticcall self.amm.collateral_amount()) // 10**18, "Not enough stables"
         to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
         allocated -= to_transfer
         assert extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer, default_return_value=True)
