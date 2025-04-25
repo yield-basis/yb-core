@@ -302,7 +302,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # If denominator is 0 -> token_reduction = 0 (not a revert)
     token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
 
-    max_token_reduction: int256 = value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION
+    max_token_reduction: int256 = abs(value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION)
 
     # let's leave at least 1 LP token for staked and for total
     if staked > 0:
@@ -310,7 +310,10 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     if supply > 0:
         token_reduction = min(token_reduction, supply - 1)
     # But most likely it's this condition to apply
-    token_reduction = min(token_reduction, max_token_reduction)
+    if token_reduction >= 0:
+        token_reduction = min(token_reduction, max_token_reduction)
+    else:
+        token_reduction = max(token_reduction, -max_token_reduction)
     # And don't allow negatives if denominator was too small
     if new_total_value - new_staked_value < 10**4:
         token_reduction = max(token_reduction, 0)
