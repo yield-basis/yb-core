@@ -299,9 +299,8 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # token_reduction = value_change / total_value * (1.0 - min_admin_fee) / sqrt(eps) * supply
     # So when eps < 1e-8 - we'll limit token_reduction
 
-    token_reduction: int256 = 0
-
-    token_reduction = (staked * new_total_value - new_staked_value * supply) // (new_total_value - new_staked_value)
+    # If denominator is 0 -> token_reduction = 0 (not a revert)
+    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
 
     max_token_reduction: int256 = value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION
 
