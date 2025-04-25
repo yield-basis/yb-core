@@ -97,6 +97,9 @@ event CollectFees:
 event SetFee:
     fee: uint256
 
+event SetKilled:
+    is_killed: bool
+
 
 @deploy
 def __init__(lt_contract: address,
@@ -460,6 +463,7 @@ def collect_fees() -> uint256:
 def set_killed(is_killed: bool):
     assert msg.sender == LT_CONTRACT, "Access"
     self.is_killed = is_killed
+    log SetKilled(is_killed=is_killed)
 
 
 @external
