@@ -54,7 +54,6 @@ event VoteForGauge:
 
 event NewGauge:
     addr: address
-    weight: uint256
 
 
 admin: public(address)  # Can and will be a smart contract
@@ -200,3 +199,20 @@ def checkpoint_gauge(addr: address):
     """
     self._get_weight(addr)
     self._get_sum()
+
+
+@external
+def add_gauge(addr: address):
+    """
+    @notice Add gauge `addr` of type `gauge_type` with weight `weight`
+    @param addr Gauge address
+    """
+    ownable._check_owner()
+
+    n: uint256 = self.n_gauges
+    self.n_gauges = n + 1
+    self.gauges[n] = addr
+
+    self.time_weight[addr] = (block.timestamp + WEEK) // WEEK * WEEK
+
+    log NewGauge(addr=addr)
