@@ -161,6 +161,27 @@ def _get_weight(gauge_addr: address) -> int256:
         return 0
 
 
+@external
+@view
+def get_gauge_weight(addr: address) -> uint256:
+    """
+    @notice Get current gauge weight
+    @param addr Gauge address
+    @return Gauge weight
+    """
+    return convert(self.points_weight[addr][self.time_weight[addr]].bias, uint256)
+
+
+@external
+@view
+def get_total_weight() -> uint256:
+    """
+    @notice Get current total (type-weighted) weight
+    @return Total weight
+    """
+    return convert(self.points_sum[self.time_sum].bias, uint256)
+
+
 @internal
 @view
 def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
@@ -216,3 +237,32 @@ def add_gauge(addr: address):
     self.time_weight[addr] = (block.timestamp + WEEK) // WEEK * WEEK
 
     log NewGauge(addr=addr)
+
+
+@external
+@view
+def gauge_relative_weight(addr: address, time: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
+            (e.g. 1.0 == 1e18). Inflation which will be received by it is
+            inflation_rate * relative_weight / 1e18
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    return self._gauge_relative_weight(addr, time)
+
+
+@external
+def gauge_relative_weight_write(addr: address, time: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get gauge weight normalized to 1e18 and also fill all the unfilled
+            values for type and gauge records
+    @dev Any address can call, however nothing is recorded if the values are filled already
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    self._get_weight(addr)
+    self._get_sum()  # Also calculates get_sum
+    return self._gauge_relative_weight(addr, time)
