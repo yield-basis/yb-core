@@ -52,6 +52,12 @@ def _emissions(t: uint256, rate_factor: uint256) -> uint256:
 
 
 @external
+@view
+def preview_emissions(t: uint256, rate_factor: uint256) -> uint256:
+    return self._emissions(t, rate_factor)
+
+
+@external
 def emissions(t: uint256, rate_factor: uint256) -> uint256:
     return self._emissions(t, rate_factor)
 
