@@ -19,6 +19,7 @@ exports: (
 
 # All future times are rounded by week
 WEEK: constant(uint256) = 7 * 86400
+IWEEK: constant(int256) = 7 * 86400
 
 # Cannot change weight votes more often than once in 10 days
 WEIGHT_VOTE_DELAY: constant(uint256) = 10 * 86400
@@ -83,10 +84,8 @@ changes_weight: HashMap[address, HashMap[uint256, uint256]]  # gauge_addr -> tim
 time_weight: public(HashMap[address, uint256])  # gauge_addr -> last scheduled time (next week)
 
 points_sum: public(HashMap[uint256, Point])  # time -> Point
-changes_sum: HashMap[uint256, uint256]  # time -> slope
-
-points_total: public(HashMap[uint256, uint256])  # time -> total weight
-time_total: public(uint256)  # last scheduled time
+changes_sum: HashMap[uint256, int256]  # time -> slope
+time_sum: public(uint256)  # last scheduled time
 
 
 @deploy
@@ -103,4 +102,33 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
 
     TOKEN = token
     VOTING_ESCROW = voting_escrow
-    self.time_total = block.timestamp // WEEK * WEEK
+    self.time_sum = block.timestamp // WEEK * WEEK
+
+
+@internal
+def _get_sum() -> int256:
+    """
+    @notice Fill historic total weights week-over-week for missed checkins
+            and return the total for the future week
+    @return Total weight
+    """
+    t: uint256 = self.time_sum
+
+    if t > 0:
+        pt: Point = self.points_sum[t]
+        for i: uint256 in range(500):
+            if t > block.timestamp:
+                break
+            t += WEEK
+            pt.bias -= pt.slope * IWEEK
+            pt.slope -= self.changes_sum[t]
+            if pt.bias <= 0:
+                pt.bias = 0
+                pt.slope = 0
+            self.points_sum[t] = pt
+            if t > block.timestamp:
+                self.time_sum = t
+        return pt.bias
+
+    else:
+        return 0
