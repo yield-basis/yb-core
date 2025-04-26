@@ -182,3 +182,21 @@ def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
 
     else:
         return 0
+
+
+@external
+def checkpoint():
+    """
+    @notice Checkpoint to fill data common for all gauges
+    """
+    self._get_sum()
+
+
+@external
+def checkpoint_gauge(addr: address):
+    """
+    @notice Checkpoint to fill data for both a specific gauge and common for all gauges
+    @param addr Gauge address
+    """
+    self._get_weight(addr)
+    self._get_sum()
