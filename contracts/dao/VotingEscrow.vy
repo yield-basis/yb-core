@@ -554,5 +554,28 @@ def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes
     erc721._burn(token_id)
 
 
+@external
+@view
+def get_last_user_slope(addr: address) -> int256:
+    """
+    @notice Get the most recently recorded rate of voting power decrease for `addr`
+    @param addr Address of the user wallet
+    @return Value of the slope
+    """
+    uepoch: uint256 = self.user_point_epoch[addr]
+    return self.user_point_history[addr][uepoch].slope
+
+
+@external
+@view
+def locked__end(_addr: address) -> uint256:
+    """
+    @notice Get timestamp when `_addr`'s lock finishes
+    @param _addr User wallet
+    @return Epoch time of the lock end
+    """
+    return self.locked[_addr].end
+
+
 # TODO delegation
 # TODO autorelock to max
