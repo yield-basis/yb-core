@@ -271,71 +271,77 @@ def gauge_relative_weight_write(addr: address, time: uint256 = block.timestamp) 
 
 
 @external
-def vote_for_gauge_weights(_gauge_addr: address, _user_weight: uint256):
+def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]):
     """
     @notice Allocate voting power for changing pool weights
-    @param _gauge_addr Gauge which `msg.sender` votes for
-    @param _user_weight Weight for a gauge in bps (units of 0.01%). Minimal is 0.01%. Ignored if 0
+    @param _gauge_addrs Gauges which `msg.sender` votes for
+    @param _user_weights Weights for a gauge in bps (units of 0.01%). Minimal is 0.01%. Ignored if 0
     """
+    n: uint256 = len(_gauge_addrs)
+    assert len(_user_weights) == n, "Mismatch in lengths"
     slope: int256 = staticcall VOTING_ESCROW.get_last_user_slope(msg.sender)
     lock_end: uint256 = staticcall VOTING_ESCROW.locked__end(msg.sender)
     next_time: uint256 = (block.timestamp + WEEK) // WEEK * WEEK
     assert lock_end > next_time, "Your token lock expires too soon"
-    assert _user_weight <= 10000, "You used all your voting power"
-    assert block.timestamp >= self.last_user_vote[msg.sender][_gauge_addr] + WEIGHT_VOTE_DELAY, "Cannot vote so often"
-    assert self.gauge_exists[_gauge_addr], "Gauge not added"
 
-    # Prepare slopes and biases in memory
-    old_slope: VotedSlope = self.vote_user_slopes[msg.sender][_gauge_addr]
-    old_dt: uint256 = 0
-    if old_slope.end > next_time:
-        old_dt = old_slope.end - next_time
-    old_bias: int256 = old_slope.slope * convert(old_dt, int256)
-    new_slope: VotedSlope = VotedSlope(
-        slope = slope * convert(_user_weight, int256) // 10000,
-        power = _user_weight,
-        end = lock_end
-    )
-    new_dt: uint256 = lock_end - next_time  # dev: raises when expired
-    new_bias: int256 = new_slope.slope * convert(new_dt, int256)
+    for i: uint256 in range(50):
+        if i >= n:
+            break
+        _user_weight: uint256 = _user_weights[i]
+        _gauge_addr: address = _gauge_addrs[i]
+        assert _user_weight <= 10000, "You used all your voting power"
+        assert self.gauge_exists[_gauge_addr], "Gauge not added"
+        assert block.timestamp >= self.last_user_vote[msg.sender][_gauge_addr] + WEIGHT_VOTE_DELAY, "Cannot vote so often"
 
-    # Check and update powers (weights) used
-    power_used: uint256 = self.vote_user_power[msg.sender]
-    power_used = power_used + new_slope.power - old_slope.power
-    assert power_used <= 10000, 'Used too much power'
-    self.vote_user_power[msg.sender] = power_used
+        # Prepare slopes and biases in memory
+        old_slope: VotedSlope = self.vote_user_slopes[msg.sender][_gauge_addr]
+        old_dt: uint256 = 0
+        if old_slope.end > next_time:
+            old_dt = old_slope.end - next_time
+        old_bias: int256 = old_slope.slope * convert(old_dt, int256)
+        new_slope: VotedSlope = VotedSlope(
+            slope = slope * convert(_user_weight, int256) // 10000,
+            power = _user_weight,
+            end = lock_end
+        )
+        new_dt: uint256 = lock_end - next_time  # dev: raises when expired
+        new_bias: int256 = new_slope.slope * convert(new_dt, int256)
 
-    ## Remove old and schedule new slope changes
-    # Remove slope changes for old slopes
-    # Schedule recording of initial slope for next_time
-    old_weight_bias: int256 = self._get_weight(_gauge_addr)
-    old_weight_slope: int256 = self.points_weight[_gauge_addr][next_time].slope
-    old_sum_bias: int256 = self._get_sum()
-    old_sum_slope: int256 = self.points_sum[next_time].slope
+        # Check and update powers (weights) used
+        power_used: uint256 = self.vote_user_power[msg.sender]
+        power_used = power_used + new_slope.power - old_slope.power
+        assert power_used <= 10000, 'Used too much power'
+        self.vote_user_power[msg.sender] = power_used
 
-    self.points_weight[_gauge_addr][next_time].bias = max(old_weight_bias + new_bias - old_bias, 0)
-    self.points_sum[next_time].bias = max(old_sum_bias + new_bias - old_bias, 0)
-    if old_slope.end > next_time:
-        self.points_weight[_gauge_addr][next_time].slope = max(old_weight_slope + new_slope.slope - old_slope.slope, 0)
-        self.points_sum[next_time].slope = max(old_sum_slope + new_slope.slope - old_slope.slope, 0)
-    else:
-        self.points_weight[_gauge_addr][next_time].slope += new_slope.slope
-        self.points_sum[next_time].slope += new_slope.slope
-    if old_slope.end > block.timestamp:
-        # Cancel old slope changes if they still didn't happen
-        self.changes_weight[_gauge_addr][old_slope.end] -= old_slope.slope
-        self.changes_sum[old_slope.end] -= old_slope.slope
-    # Add slope changes for new slopes
-    self.changes_weight[_gauge_addr][new_slope.end] += new_slope.slope
-    self.changes_sum[new_slope.end] += new_slope.slope
+        ## Remove old and schedule new slope changes
+        # Remove slope changes for old slopes
+        # Schedule recording of initial slope for next_time
+        old_weight_bias: int256 = self._get_weight(_gauge_addr)
+        old_weight_slope: int256 = self.points_weight[_gauge_addr][next_time].slope
+        old_sum_bias: int256 = self._get_sum()
+        old_sum_slope: int256 = self.points_sum[next_time].slope
 
-    self.vote_user_slopes[msg.sender][_gauge_addr] = new_slope
+        self.points_weight[_gauge_addr][next_time].bias = max(old_weight_bias + new_bias - old_bias, 0)
+        self.points_sum[next_time].bias = max(old_sum_bias + new_bias - old_bias, 0)
+        if old_slope.end > next_time:
+            self.points_weight[_gauge_addr][next_time].slope = max(old_weight_slope + new_slope.slope - old_slope.slope, 0)
+            self.points_sum[next_time].slope = max(old_sum_slope + new_slope.slope - old_slope.slope, 0)
+        else:
+            self.points_weight[_gauge_addr][next_time].slope += new_slope.slope
+            self.points_sum[next_time].slope += new_slope.slope
+        if old_slope.end > block.timestamp:
+            # Cancel old slope changes if they still didn't happen
+            self.changes_weight[_gauge_addr][old_slope.end] -= old_slope.slope
+            self.changes_sum[old_slope.end] -= old_slope.slope
+        # Add slope changes for new slopes
+        self.changes_weight[_gauge_addr][new_slope.end] += new_slope.slope
+        self.changes_sum[new_slope.end] += new_slope.slope
 
-    # Record last action time
-    self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
+        self.vote_user_slopes[msg.sender][_gauge_addr] = new_slope
 
-    log VoteForGauge(time=block.timestamp, user=msg.sender, gauge_addr=_gauge_addr, weight=_user_weight)
+        # Record last action time
+        self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
 
+        log VoteForGauge(time=block.timestamp, user=msg.sender, gauge_addr=_gauge_addr, weight=_user_weight)
 
-# XXX vote for multiple gauges
 # XXX embed minting / inflation params in controller, not gauges
