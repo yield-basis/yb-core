@@ -6,6 +6,16 @@
 @notice Controls liquidity gauges and the issuance of coins through the gauges
 """
 from ethereum.ercs import IERC20
+from snekmate.auth import ownable
+
+
+initializes: ownable
+
+
+exports: (
+    ownable.transfer_ownership
+)
+
 
 # All future times are rounded by week
 WEEK: constant(uint256) = 7 * 86400
@@ -44,9 +54,6 @@ event VoteForGauge:
 event NewGauge:
     addr: address
     weight: uint256
-
-event SetAdmin:
-    admin: address
 
 
 admin: public(address)  # Can and will be a smart contract
@@ -89,20 +96,11 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
     @param token `ERC20CRV` contract address
     @param voting_escrow `VotingEscrow` contract address
     """
+    ownable.__init__()
+
     assert token.address != empty(address)
     assert voting_escrow.address != empty(address)
 
-    self.admin = msg.sender
     TOKEN = token
     VOTING_ESCROW = voting_escrow
     self.time_total = block.timestamp // WEEK * WEEK
-
-
-@external
-def set_admin(admin: address):
-    """
-    @notice Change admin to `admin`
-    """
-    assert msg.sender == self.admin  # dev: admin only
-    self.admin = admin
-    log SetAdmin(admin=admin)

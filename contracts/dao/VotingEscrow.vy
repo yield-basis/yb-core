@@ -46,7 +46,8 @@ exports: (
     erc721.symbol,
     erc721.totalSupply,
     erc721.tokenByIndex,
-    erc721.tokenOfOwnerByIndex
+    erc721.tokenOfOwnerByIndex,
+    ownable.transfer_ownership
 )
 
 
@@ -90,10 +91,6 @@ event Supply:
     prevSupply: uint256
     supply: uint256
 
-event NewAdmin:
-    old_admin: address
-    admin: address
-
 
 WEEK: constant(uint256) = 7 * 86400  # all future times are rounded by week
 MAXTIME: constant(int256) = 4 * 365 * 86400  # 4 years
@@ -113,8 +110,6 @@ slope_changes: public(HashMap[uint256, int256])  # time -> signed slope change
 transfer_clearance_checker: public(TransferClearanceChecker)
 ###
 
-admin: public(address)
-
 
 @deploy
 def __init__(token: IERC20, name: String[25], symbol: String[5], base_uri: String[80]):
@@ -124,14 +119,6 @@ def __init__(token: IERC20, name: String[25], symbol: String[5], base_uri: Strin
     TOKEN = token
 
     self.point_history[0].ts = block.timestamp
-    self.admin = msg.sender
-
-
-@external
-def set_admin(admin: address):
-    assert msg.sender == admin, "Access"
-    log NewAdmin(old_admin=self.admin, admin=admin)
-    self.admin = admin
 
 
 @internal
@@ -530,7 +517,7 @@ def _merge_positions(owner: address, to: address):
 
 @external
 def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearanceChecker):
-    assert msg.sender == self.admin, "Access"
+    ownable._check_owner()
     self.transfer_clearance_checker = transfer_clearance_checker
 
 
