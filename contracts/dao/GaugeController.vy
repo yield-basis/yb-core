@@ -45,6 +45,9 @@ event NewGauge:
     addr: address
     weight: uint256
 
+event SetAdmin:
+    admin: address
+
 
 admin: public(address)  # Can and will be a smart contract
 
@@ -93,3 +96,13 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
     TOKEN = token
     VOTING_ESCROW = voting_escrow
     self.time_total = block.timestamp // WEEK * WEEK
+
+
+@external
+def set_admin(admin: address):
+    """
+    @notice Change admin to `admin`
+    """
+    assert msg.sender == self.admin  # dev: admin only
+    self.admin = admin
+    log SetAdmin(admin=admin)
