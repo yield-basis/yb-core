@@ -80,7 +80,7 @@ last_user_vote: public(HashMap[address, HashMap[address, uint256]])  # Last user
 # timestamps are rounded to whole weeks
 
 points_weight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
-changes_weight: HashMap[address, HashMap[uint256, uint256]]  # gauge_addr -> time -> slope
+changes_weight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
 time_weight: public(HashMap[address, uint256])  # gauge_addr -> last scheduled time (next week)
 
 points_sum: public(HashMap[uint256, Point])  # time -> Point
@@ -130,5 +130,33 @@ def _get_sum() -> int256:
                 self.time_sum = t
         return pt.bias
 
+    else:
+        return 0
+
+
+@internal
+def _get_weight(gauge_addr: address) -> int256:
+    """
+    @notice Fill historic gauge weights week-over-week for missed checkins
+            and return the total for the future week
+    @param gauge_addr Address of the gauge
+    @return Gauge weight
+    """
+    t: uint256 = self.time_weight[gauge_addr]
+    if t > 0:
+        pt: Point = self.points_weight[gauge_addr][t]
+        for i: uint256 in range(500):
+            if t > block.timestamp:
+                break
+            t += WEEK
+            pt.bias -= pt.slope * IWEEK
+            pt.slope -= self.changes_weight[gauge_addr][t]
+            if pt.bias <= 0:
+                pt.bias = 0
+                pt.slope = 0
+            self.points_weight[gauge_addr][t] = pt
+            if t > block.timestamp:
+                self.time_weight[gauge_addr] = t
+        return pt.bias
     else:
         return 0
