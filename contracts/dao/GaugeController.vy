@@ -160,3 +160,25 @@ def _get_weight(gauge_addr: address) -> int256:
         return pt.bias
     else:
         return 0
+
+
+@internal
+@view
+def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
+    """
+    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
+            (e.g. 1.0 == 1e18). Inflation which will be received by it is
+            inflation_rate * relative_weight / 1e18
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    t: uint256 = time // WEEK * WEEK
+    _total_weight: uint256 = convert(self.points_sum[t].bias, uint256)
+
+    if _total_weight > 0:
+        _gauge_weight: uint256 = convert(self.points_weight[addr][t].bias, uint256)
+        return 10**18 * _gauge_weight // _total_weight
+
+    else:
+        return 0
