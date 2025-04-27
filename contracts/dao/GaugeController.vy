@@ -79,6 +79,7 @@ last_user_vote: public(HashMap[address, HashMap[address, uint256]])  # Last user
 # time_* are for the last change timestamp
 # timestamps are rounded to whole weeks
 
+# Variables for raw weights of gauges
 points_weight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
 changes_weight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
 time_weight: public(HashMap[address, uint256])  # gauge_addr -> last scheduled time (next week)
@@ -86,6 +87,20 @@ time_weight: public(HashMap[address, uint256])  # gauge_addr -> last scheduled t
 points_sum: public(HashMap[uint256, Point])  # time -> Point
 changes_sum: HashMap[uint256, int256]  # time -> slope
 time_sum: public(uint256)  # last scheduled time
+
+# Variables for adjusted weights
+aepoch: public(uint256)
+aepoch_times: public(HashMap[uint256, uint256])  # aepoch -> timestamp
+gauge_aepoch: public(HashMap[address, uint256])
+gauge_adjustment: public(HashMap[address, uint256])
+
+points_aweight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
+changes_aweight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
+
+points_asum: public(HashMap[uint256, Point])  # time -> Point
+changes_asum: HashMap[uint256, int256]  # time -> slope
+
+integral_emissions_asum: public(HashMap[uint256, uint256])
 
 
 @deploy
