@@ -55,6 +55,9 @@ event VoteForGauge:
 event NewGauge:
     addr: address
 
+event SetKilled:
+    gauge: address
+
 
 admin: public(address)  # Can and will be a smart contract
 
@@ -67,7 +70,7 @@ n_gauges: public(uint256)
 
 # Needed for enumeration
 gauges: public(address[1000000000])
-gauge_alive: public(HashMap[address, bool])
+is_killed: public(HashMap[address, bool])
 
 vote_user_slopes: public(HashMap[address, HashMap[address, VotedSlope]])  # user -> gauge_addr -> VotedSlope
 vote_user_power: public(HashMap[address, uint256])  # Total vote power used by user
@@ -234,7 +237,7 @@ def checkpoint_gauge(adjustment: uint256):
     @notice Checkpoint to fill data for both a specific gauge and common for all gauges. Sender is gauge itself.
     @param adjustment Reduction of the gauge inflation (up to 1e18). Depends on the fraction of LP token staked, calculated in gauge
     """
-    assert self.gauge_alive[msg.sender], "Gauge not alive"
+    assert self.time_weight[msg.sender] > 0, "Gauge not alive"
     self._get_weight(msg.sender)
     self._get_sum()
 
@@ -250,8 +253,6 @@ def add_gauge(addr: address):
     n: uint256 = self.n_gauges
     self.n_gauges = n + 1
     self.gauges[n] = addr
-    self.gauge_alive[addr] = True
-
     self.time_weight[addr] = (block.timestamp + WEEK) // WEEK * WEEK
 
     log NewGauge(addr=addr)
@@ -305,8 +306,10 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
             break
         _user_weight: uint256 = _user_weights[i]
         _gauge_addr: address = _gauge_addrs[i]
-        assert _user_weight <= 10000, "You used all your voting power"
-        assert self.gauge_alive[_gauge_addr], "Gauge not added or dead"
+        assert _user_weight <= 10000, "Weight too large"
+        if _user_weight != 0:
+            assert not self.is_killed[_gauge_addr], "Killed"
+        assert self.time_weight[_gauge_addr] > 0, "Gauge not added"
         assert block.timestamp >= self.last_user_vote[msg.sender][_gauge_addr] + WEIGHT_VOTE_DELAY, "Cannot vote so often"
 
         # Prepare slopes and biases in memory
@@ -359,5 +362,11 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
 
         log VoteForGauge(time=block.timestamp, user=msg.sender, gauge_addr=_gauge_addr, weight=_user_weight)
+
+
+def set_killed(gauge: address, is_killed: bool):
+    ownable._check_owner()
+    self.is_killed[gauge] = is_killed
+    log SetKilled(gauge=gauge)
 
 # XXX embed minting / inflation params in controller, not gauges
