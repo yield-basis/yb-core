@@ -67,7 +67,7 @@ n_gauges: public(uint256)
 
 # Needed for enumeration
 gauges: public(address[1000000000])
-gauge_exists: public(HashMap[address, bool])
+gauge_alive: public(HashMap[address, bool])
 
 vote_user_slopes: public(HashMap[address, HashMap[address, VotedSlope]])  # user -> gauge_addr -> VotedSlope
 vote_user_power: public(HashMap[address, uint256])  # Total vote power used by user
@@ -229,12 +229,13 @@ def checkpoint():
 
 
 @external
-def checkpoint_gauge(addr: address):
+def checkpoint_gauge(adjustment: uint256):
     """
-    @notice Checkpoint to fill data for both a specific gauge and common for all gauges
-    @param addr Gauge address
+    @notice Checkpoint to fill data for both a specific gauge and common for all gauges. Sender is gauge itself.
+    @param adjustment Reduction of the gauge inflation (up to 1e18). Depends on the fraction of LP token staked, calculated in gauge
     """
-    self._get_weight(addr)
+    assert self.gauge_alive[msg.sender], "Gauge not alive"
+    self._get_weight(msg.sender)
     self._get_sum()
 
 
@@ -249,7 +250,7 @@ def add_gauge(addr: address):
     n: uint256 = self.n_gauges
     self.n_gauges = n + 1
     self.gauges[n] = addr
-    self.gauge_exists[addr] = True
+    self.gauge_alive[addr] = True
 
     self.time_weight[addr] = (block.timestamp + WEEK) // WEEK * WEEK
 
@@ -305,7 +306,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         _user_weight: uint256 = _user_weights[i]
         _gauge_addr: address = _gauge_addrs[i]
         assert _user_weight <= 10000, "You used all your voting power"
-        assert self.gauge_exists[_gauge_addr], "Gauge not added"
+        assert self.gauge_alive[_gauge_addr], "Gauge not added or dead"
         assert block.timestamp >= self.last_user_vote[msg.sender][_gauge_addr] + WEIGHT_VOTE_DELAY, "Cannot vote so often"
 
         # Prepare slopes and biases in memory
