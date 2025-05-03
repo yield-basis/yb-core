@@ -94,16 +94,19 @@ time_sum: public(uint256)  # last scheduled time
 # Variables for adjusted weights
 aepoch: public(uint256)
 aepoch_times: public(HashMap[uint256, uint256])  # aepoch -> timestamp
+time_to_aepoch: public(HashMap[uint256, uint256])
 gauge_aepoch: public(HashMap[address, uint256])
+
 gauge_adjustment: public(HashMap[address, uint256])
 
-points_aweight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
-changes_aweight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
+# points_aweight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
+# changes_aweight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
 
-points_asum: public(HashMap[uint256, Point])  # time -> Point
-changes_asum: HashMap[uint256, int256]  # time -> slope
+# points_asum: public(HashMap[uint256, Point])  # time -> Point
+# changes_asum: HashMap[uint256, int256]  # time -> slope
+# time_asum
 
-integral_emissions_asum: public(HashMap[uint256, uint256])
+# integral_emissions_asum: public(HashMap[uint256, uint256])
 
 
 @deploy
@@ -121,6 +124,7 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
     TOKEN = token
     VOTING_ESCROW = voting_escrow
     self.time_sum = block.timestamp // WEEK * WEEK
+    self.aepoch_times[0] = block.timestamp // WEEK * WEEK
 
 
 @internal
@@ -231,15 +235,69 @@ def checkpoint():
     self._get_sum()
 
 
-@external
-def checkpoint_gauge(adjustment: uint256):
-    """
-    @notice Checkpoint to fill data for both a specific gauge and common for all gauges. Sender is gauge itself.
-    @param adjustment Reduction of the gauge inflation (up to 1e18). Depends on the fraction of LP token staked, calculated in gauge
-    """
-    assert self.time_weight[msg.sender] > 0, "Gauge not alive"
-    self._get_weight(msg.sender)
+@internal
+def _checkpoint_gauge(gauge: address, adjustment: uint256):
+    assert self.time_weight[gauge] > 0, "Gauge not alive"
+    assert adjustment <= 10**18, "Adjustment > 1"
+    self._get_weight(gauge)
     self._get_sum()
+
+    aepoch: uint256 = self.aepoch
+    aepoch_time: uint256 = self.aepoch_times[aepoch]
+    current_week: uint256 = block.timestamp // WEEK * WEEK 
+    aepoch_week: uint256 = aepoch_time // WEEK * WEEK
+
+    # Fill missed adjustment epochs if any
+    # aepochs have all times of this call and every week change
+    for i: uint256 in range(500):
+        if aepoch_week == current_week:
+            aepoch += 1
+            aepoch_time = block.timestamp
+            self.aepoch = aepoch
+            self.aepoch_times[aepoch] = block.timestamp
+            break
+        aepoch_week += WEEK
+        aepoch += 1
+        self.aepoch_times[aepoch] = aepoch_week
+        self.time_to_aepoch[aepoch_week] = aepoch
+        
+    # We need to iterate over only those aepochs which are located at week boundaries for gauge
+    prev_adjustment: uint256 = self.gauge_adjustment[gauge]
+    iprev_adjustment: int256 = convert(prev_adjustment, int256)
+    prev_gauge_aepoch: uint256 = self.gauge_aepoch[gauge]
+    prev_gauge_time: uint256 = self.aepoch_times[prev_gauge_aepoch]
+    aepoch_week = prev_gauge_time // WEEK * WEEK
+
+    # XXX fill points_asum based on changes_asum
+    # XXX calc adjusted_total_fraction
+    # XXX fill changes in emission reserve, normalized_emission_reserve
+
+    if prev_gauge_aepoch > 0:
+        for i: uint256 in range(500):
+            # Read points_asum and process changes_asum here to get sum(adjusted_weights) for here
+            #
+            aw: uint256 = convert(self.points_weight[gauge][aepoch_week].bias, uint256) * adjustment
+            # ... logic to fill all deltas with adjusted weights
+            if aepoch_week == current_week:
+                break
+            aepoch_week += WEEK
+            prev_gauge_aepoch = self.time_to_aepoch[aepoch_week]
+
+            # XXX fill changes in per-gauge inflation
+
+    pt: Point = self.points_weight[gauge][aepoch_week]
+    cw: int256 = self.changes_weight[gauge][aepoch_week]
+    wpt: Point = Point(
+        bias = pt.bias * iprev_adjustment // 10**18,
+        slope = pt.slope * iprev_adjustment // 10**18)
+
+    # XXX change sum points due to the adjustment change
+
+    # change points_asum and changes_asum here
+    self.gauge_adjustment[gauge] = adjustment
+    self.gauge_aepoch[gauge] = aepoch
+
+    
 
 
 @external
