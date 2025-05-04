@@ -26,11 +26,11 @@ WEIGHT_VOTE_DELAY: constant(uint256) = 10 * 86400
 
 
 struct Point:
-    bias: int256
-    slope: int256
+    bias: uint256
+    slope: uint256
 
 struct VotedSlope:
-    slope: int256
+    slope: uint256
     power: uint256
     end: uint256
 
@@ -38,6 +38,9 @@ struct VotedSlope:
 interface VotingEscrow:
     def get_last_user_slope(addr: address) -> int256: view
     def locked__end(addr: address) -> uint256: view
+
+interface Gauge:
+    def get_adjustment() -> uint256: view
 
 
 event NewGaugeWeight:
@@ -80,33 +83,17 @@ last_user_vote: public(HashMap[address, HashMap[address, uint256]])  # Last user
 # Point is for bias+slope
 # changes_* are for changes in slope
 # time_* are for the last change timestamp
-# timestamps are rounded to whole weeks
+# timestamps for changes_ are rounded to whole weeks
 
 # Variables for raw weights of gauges
-points_weight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
-changes_weight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
-time_weight: public(HashMap[address, uint256])  # gauge_addr -> last scheduled time (next week)
+point_weight: public(HashMap[address, Point])  # gauge_addr -> Point
+changes_weight: HashMap[address, HashMap[uint256, uint256]]  # gauge_addr -> weektime -> slope
+time_weight: public(HashMap[address, uint256])  # gauge_addr -> last time
 
-points_sum: public(HashMap[uint256, Point])  # time -> Point
-changes_sum: HashMap[uint256, int256]  # time -> slope
-time_sum: public(uint256)  # last scheduled time
-
-# Variables for adjusted weights
-aepoch: public(uint256)
-aepoch_times: public(HashMap[uint256, uint256])  # aepoch -> timestamp
-time_to_aepoch: public(HashMap[uint256, uint256])
-gauge_aepoch: public(HashMap[address, uint256])
-
-gauge_adjustment: public(HashMap[address, uint256])
-
-# points_aweight: public(HashMap[address, HashMap[uint256, Point]])  # gauge_addr -> time -> Point
-# changes_aweight: HashMap[address, HashMap[uint256, int256]]  # gauge_addr -> time -> slope
-
-# points_asum: public(HashMap[uint256, Point])  # time -> Point
-# changes_asum: HashMap[uint256, int256]  # time -> slope
-# time_asum
-
-# integral_emissions_asum: public(HashMap[uint256, uint256])
+gauge_weight: public(HashMap[address, uint256])
+gauge_weight_sum: public(HashMap[address, uint256])
+adjusted_gauge_weight: public(HashMap[address, uint256])
+adjusted_gauge_weight_sum: public(HashMap[address, uint256])
 
 
 @deploy
@@ -123,181 +110,58 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
 
     TOKEN = token
     VOTING_ESCROW = voting_escrow
-    self.time_sum = block.timestamp // WEEK * WEEK
-    self.aepoch_times[0] = block.timestamp // WEEK * WEEK
 
 
 @internal
-def _get_sum() -> int256:
-    """
-    @notice Fill historic total weights week-over-week for missed checkins
-            and return the total for the future week
-    @return Total weight
-    """
-    t: uint256 = self.time_sum
-
-    if t > 0:
-        pt: Point = self.points_sum[t]
-        for i: uint256 in range(500):
-            if t > block.timestamp:
-                break
-            t += WEEK
-            pt.bias -= pt.slope * IWEEK
-            pt.slope -= self.changes_sum[t]
-            if pt.bias <= 0:
-                pt.bias = 0
-                pt.slope = 0
-            self.points_sum[t] = pt
-            if t > block.timestamp:
-                self.time_sum = t
-        return pt.bias
-
-    else:
-        return 0
-
-
-@internal
-def _get_weight(gauge_addr: address) -> int256:
+def _get_weight(gauge: address) -> uint256:
     """
     @notice Fill historic gauge weights week-over-week for missed checkins
             and return the total for the future week
-    @param gauge_addr Address of the gauge
+    @param gauge Address of the gauge
     @return Gauge weight
     """
-    t: uint256 = self.time_weight[gauge_addr]
+    t: uint256 = self.time_weight[gauge]
+    current_week: uint256 = block.timestamp // WEEK * WEEK
+    dt: uint256 = 0
     if t > 0:
-        pt: Point = self.points_weight[gauge_addr][t]
+        pt: Point = self.point_weight[gauge]
         for i: uint256 in range(500):
-            if t > block.timestamp:
-                break
-            t += WEEK
-            pt.bias -= pt.slope * IWEEK
-            pt.slope -= self.changes_weight[gauge_addr][t]
-            if pt.bias <= 0:
-                pt.bias = 0
+            if t >= current_week:
+                dt = block.timestamp - t
+                if dt == 0:
+                    break
+            else:
+                dt = (t + WEEK) // WEEK * WEEK - t
+            t += dt
+            pt.bias -= min(pt.slope * dt, pt.bias)
+            pt.slope -= min(self.changes_weight[gauge][t], pt.slope)  # Value from non-week-boundary is 0
+            if pt.bias == 0:
                 pt.slope = 0
-            self.points_weight[gauge_addr][t] = pt
-            if t > block.timestamp:
-                self.time_weight[gauge_addr] = t
+        self.time_weight[gauge] = block.timestamp  # XXX split off to view?
+        self.point_weight[gauge] = pt
         return pt.bias
     else:
         return 0
 
 
-@external
-@view
-def get_gauge_weight(addr: address) -> uint256:
-    """
-    @notice Get current gauge weight
-    @param addr Gauge address
-    @return Gauge weight
-    """
-    return convert(self.points_weight[addr][self.time_weight[addr]].bias, uint256)
-
-
-@external
-@view
-def get_total_weight() -> uint256:
-    """
-    @notice Get current total (type-weighted) weight
-    @return Total weight
-    """
-    return convert(self.points_sum[self.time_sum].bias, uint256)
-
-
 @internal
-@view
-def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
-    """
-    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
-            (e.g. 1.0 == 1e18). Inflation which will be received by it is
-            inflation_rate * relative_weight / 1e18
-    @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
-    @return Value of relative weight normalized to 1e18
-    """
-    t: uint256 = time // WEEK * WEEK
-    _total_weight: uint256 = convert(self.points_sum[t].bias, uint256)
-
-    if _total_weight > 0:
-        _gauge_weight: uint256 = convert(self.points_weight[addr][t].bias, uint256)
-        return 10**18 * _gauge_weight // _total_weight
-
-    else:
-        return 0
-
-
-@external
-def checkpoint():
-    """
-    @notice Checkpoint to fill data common for all gauges
-    """
-    self._get_sum()
-
-
-@internal
-def _checkpoint_gauge(gauge: address, adjustment: uint256):
+def _checkpoint_gauge(gauge: address):
     assert self.time_weight[gauge] > 0, "Gauge not alive"
-    assert adjustment <= 10**18, "Adjustment > 1"
-    self._get_weight(gauge)
-    self._get_sum()
 
-    aepoch: uint256 = self.aepoch
-    aepoch_time: uint256 = self.aepoch_times[aepoch]
-    current_week: uint256 = block.timestamp // WEEK * WEEK 
-    aepoch_week: uint256 = aepoch_time // WEEK * WEEK
+    adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
 
-    # Fill missed adjustment epochs if any
-    # aepochs have all times of this call and every week change
-    for i: uint256 in range(500):
-        if aepoch_week == current_week:
-            aepoch += 1
-            aepoch_time = block.timestamp
-            self.aepoch = aepoch
-            self.aepoch_times[aepoch] = block.timestamp
-            break
-        aepoch_week += WEEK
-        aepoch += 1
-        self.aepoch_times[aepoch] = aepoch_week
-        self.time_to_aepoch[aepoch_week] = aepoch
-        
-    # We need to iterate over only those aepochs which are located at week boundaries for gauge
-    prev_adjustment: uint256 = self.gauge_adjustment[gauge]
-    iprev_adjustment: int256 = convert(prev_adjustment, int256)
-    prev_gauge_aepoch: uint256 = self.gauge_aepoch[gauge]
-    prev_gauge_time: uint256 = self.aepoch_times[prev_gauge_aepoch]
-    aepoch_week = prev_gauge_time // WEEK * WEEK
+    w: uint256 = self.gauge_weight[gauge]
+    w_sum: uint256 = self.gauge_weight_sum[gauge]
+    aw: uint256 = self.adjusted_gauge_weight[gauge]
+    aw_sum: uint256 = self.adjusted_gauge_weight_sum[gauge]
 
-    # XXX fill points_asum based on changes_asum
-    # XXX calc adjusted_total_fraction
-    # XXX fill changes in emission reserve, normalized_emission_reserve
+    w_new: uint256 = self._get_weight(gauge)
+    aw_new: uint256 = aw_new * adjustment // 10**18
 
-    if prev_gauge_aepoch > 0:
-        for i: uint256 in range(500):
-            # Read points_asum and process changes_asum here to get sum(adjusted_weights) for here
-            #
-            aw: uint256 = convert(self.points_weight[gauge][aepoch_week].bias, uint256) * adjustment
-            # ... logic to fill all deltas with adjusted weights
-            if aepoch_week == current_week:
-                break
-            aepoch_week += WEEK
-            prev_gauge_aepoch = self.time_to_aepoch[aepoch_week]
-
-            # XXX fill changes in per-gauge inflation
-
-    pt: Point = self.points_weight[gauge][aepoch_week]
-    cw: int256 = self.changes_weight[gauge][aepoch_week]
-    wpt: Point = Point(
-        bias = pt.bias * iprev_adjustment // 10**18,
-        slope = pt.slope * iprev_adjustment // 10**18)
-
-    # XXX change sum points due to the adjustment change
-
-    # change points_asum and changes_asum here
-    self.gauge_adjustment[gauge] = adjustment
-    self.gauge_aepoch[gauge] = aepoch
-
-    
+    self.gauge_weight[gauge] = w_new
+    self.gauge_weight_sum[gauge] = w_sum + w_new - w
+    self.adjusted_gauge_weight[gauge] = aw_new
+    self.adjusted_gauge_weight_sum[gauge] = aw_sum + aw_new - aw
 
 
 @external
@@ -420,6 +284,57 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
 
         log VoteForGauge(time=block.timestamp, user=msg.sender, gauge_addr=_gauge_addr, weight=_user_weight)
+
+
+@external
+@view
+def get_gauge_weight(addr: address) -> uint256:
+    """
+    @notice Get current gauge weight
+    @param addr Gauge address
+    @return Gauge weight
+    """
+    return convert(self.points_weight[addr][self.time_weight[addr]].bias, uint256)
+
+
+@external
+@view
+def get_total_weight() -> uint256:
+    """
+    @notice Get current total (type-weighted) weight
+    @return Total weight
+    """
+    return convert(self.points_sum[self.time_sum].bias, uint256)
+
+
+@internal
+@view
+def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
+    """
+    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
+            (e.g. 1.0 == 1e18). Inflation which will be received by it is
+            inflation_rate * relative_weight / 1e18
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    t: uint256 = time // WEEK * WEEK
+    _total_weight: uint256 = convert(self.points_sum[t].bias, uint256)
+
+    if _total_weight > 0:
+        _gauge_weight: uint256 = convert(self.points_weight[addr][t].bias, uint256)
+        return 10**18 * _gauge_weight // _total_weight
+
+    else:
+        return 0
+
+
+@external
+def checkpoint():
+    """
+    @notice Checkpoint to fill data common for all gauges
+    """
+    self._get_sum()
 
 
 def set_killed(gauge: address, is_killed: bool):
