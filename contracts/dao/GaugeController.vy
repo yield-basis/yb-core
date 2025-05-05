@@ -91,9 +91,9 @@ changes_weight: HashMap[address, HashMap[uint256, uint256]]  # gauge_addr -> wee
 time_weight: public(HashMap[address, uint256])  # gauge_addr -> last time
 
 gauge_weight: public(HashMap[address, uint256])
-gauge_weight_sum: public(HashMap[address, uint256])
+gauge_weight_sum: public(uint256)
 adjusted_gauge_weight: public(HashMap[address, uint256])
-adjusted_gauge_weight_sum: public(HashMap[address, uint256])
+adjusted_gauge_weight_sum: public(uint256)
 
 
 @deploy
@@ -150,21 +150,21 @@ def _checkpoint_gauge(gauge: address) -> Point:
     adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
 
     w: uint256 = self.gauge_weight[gauge]
-    w_sum: uint256 = self.gauge_weight_sum[gauge]
+    w_sum: uint256 = self.gauge_weight_sum
     aw: uint256 = self.adjusted_gauge_weight[gauge]
-    aw_sum: uint256 = self.adjusted_gauge_weight_sum[gauge]
+    aw_sum: uint256 = self.adjusted_gauge_weight_sum
 
 
     pt: Point = self._get_weight(gauge)
     self.time_weight[gauge] = block.timestamp
     self.point_weight[gauge] = pt
     w_new: uint256 = pt.bias
-    aw_new: uint256 = aw_new * adjustment // 10**18
+    aw_new: uint256 = w_new * adjustment // 10**18
 
     self.gauge_weight[gauge] = w_new
-    self.gauge_weight_sum[gauge] = w_sum + w_new - w
+    self.gauge_weight_sum = w_sum + w_new - w
     self.adjusted_gauge_weight[gauge] = aw_new
-    self.adjusted_gauge_weight_sum[gauge] = aw_sum + aw_new - aw
+    self.adjusted_gauge_weight_sum = aw_sum + aw_new - aw
 
     return pt
 
@@ -263,76 +263,35 @@ def get_gauge_weight(addr: address) -> uint256:
     @param addr Gauge address
     @return Gauge weight
     """
-    return convert(self.points_weight[addr][self.time_weight[addr]].bias, uint256)
+    return self._get_weight(addr).bias
+
+
+@external
+def checkpoint(gauge: address):
+    """
+    @notice Checkpoint a gauge
+    """
+    self._checkpoint_gauge(gauge)
 
 
 @external
 @view
-def get_total_weight() -> uint256:
-    """
-    @notice Get current total (type-weighted) weight
-    @return Total weight
-    """
-    return convert(self.points_sum[self.time_sum].bias, uint256)
-
-
-@internal
-@view
-def _gauge_relative_weight(addr: address, time: uint256) -> uint256:
+def gauge_relative_weight(addr: address) -> uint256:
     """
     @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
             (e.g. 1.0 == 1e18). Inflation which will be received by it is
             inflation_rate * relative_weight / 1e18
     @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
     @return Value of relative weight normalized to 1e18
     """
-    t: uint256 = time // WEEK * WEEK
-    _total_weight: uint256 = convert(self.points_sum[t].bias, uint256)
-
-    if _total_weight > 0:
-        _gauge_weight: uint256 = convert(self.points_weight[addr][t].bias, uint256)
-        return 10**18 * _gauge_weight // _total_weight
-
-    else:
-        return 0
+    adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
 
 
-@external
-def checkpoint():
-    """
-    @notice Checkpoint to fill data common for all gauges
-    """
-    self._get_sum()
+    aw: uint256 = self.adjusted_gauge_weight[gauge]
+    pt: Point = self._get_weight(gauge)
+    aw_new: uint256 = pt.bias * adjustment // 10**18
 
-
-@external
-@view
-def gauge_relative_weight(addr: address, time: uint256 = block.timestamp) -> uint256:
-    """
-    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
-            (e.g. 1.0 == 1e18). Inflation which will be received by it is
-            inflation_rate * relative_weight / 1e18
-    @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
-    @return Value of relative weight normalized to 1e18
-    """
-    return self._gauge_relative_weight(addr, time)
-
-
-@external
-def gauge_relative_weight_write(addr: address, time: uint256 = block.timestamp) -> uint256:
-    """
-    @notice Get gauge weight normalized to 1e18 and also fill all the unfilled
-            values for type and gauge records
-    @dev Any address can call, however nothing is recorded if the values are filled already
-    @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
-    @return Value of relative weight normalized to 1e18
-    """
-    self._get_weight(addr)
-    self._get_sum()  # Also calculates get_sum
-    return self._gauge_relative_weight(addr, time)
+    return self.adjusted_gauge_weight_sum + aw_new - aw
 
 
 def set_killed(gauge: address, is_killed: bool):
