@@ -164,11 +164,11 @@ def _checkpoint_gauge(gauge: address) -> Point:
     aw_sum: uint256 = self.adjusted_gauge_weight_sum
 
     d_emissions: uint256 = 0
-    if t > block.timestamp:
+    if block.timestamp > t:  # Guaranteed to have no new emissions if same time
         d_emissions = extcall TOKEN.emit(self, aw_sum * 10**18 // w_sum)
 
     pt: Point = self._get_weight(gauge)
-    self.time_weight[gauge] = block.timestamp  # XXX not needed?
+    self.time_weight[gauge] = block.timestamp
     self.point_weight[gauge] = pt
     w_new: uint256 = pt.bias
     aw_new: uint256 = w_new * adjustment // 10**18
@@ -182,8 +182,9 @@ def _checkpoint_gauge(gauge: address) -> Point:
     if d_emissions > 0:
         self.specific_emissions = specific_emissions
 
-    self.weighted_emissions_per_gauge[gauge] += (specific_emissions - self.specific_emissions_per_gauge[gauge]) * aw // 10**18
-    self.specific_emissions_per_gauge[gauge] = specific_emissions
+    if block.timestamp > t:  # Guaranteed to have no new emissions if same time
+        self.weighted_emissions_per_gauge[gauge] += (specific_emissions - self.specific_emissions_per_gauge[gauge]) * aw // 10**18
+        self.specific_emissions_per_gauge[gauge] = specific_emissions
 
     return pt
 
