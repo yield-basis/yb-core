@@ -67,7 +67,7 @@ def emissions(t: uint256, rate_factor: uint256) -> uint256:
 
 
 @external
-def emit(owner: address, rate_factor: uint256):
+def emit(owner: address, rate_factor: uint256) -> uint256:
     """
     @dev Creates `amount` tokens and assigns them to `owner`.
     @notice Only authorised minters can access this function.
@@ -82,3 +82,5 @@ def emit(owner: address, rate_factor: uint256):
     self.last_minted = block.timestamp
 
     erc20._mint(owner, amount)
+
+    return amount

@@ -5,7 +5,6 @@
 @license MIT
 @notice Controls liquidity gauges and the issuance of coins through the gauges
 """
-from ethereum.ercs import IERC20
 from snekmate.auth import ownable
 
 
@@ -42,6 +41,11 @@ interface VotingEscrow:
 interface Gauge:
     def get_adjustment() -> uint256: view
 
+interface GovernanceToken:
+    def emit(owner: address, rate_factor: uint256) -> uint256: nonpayable
+    def reserve() -> uint256: view
+    def max_mint_rate() -> uint256: view
+
 
 event NewGaugeWeight:
     gauge_address: address
@@ -64,7 +68,7 @@ event SetKilled:
 
 admin: public(address)  # Can and will be a smart contract
 
-TOKEN: public(immutable(IERC20))
+TOKEN: public(immutable(GovernanceToken))
 VOTING_ESCROW: public(immutable(VotingEscrow))
 
 # Gauge parameters
@@ -97,7 +101,7 @@ adjusted_gauge_weight_sum: public(uint256)
 
 
 @deploy
-def __init__(token: IERC20, voting_escrow: VotingEscrow):
+def __init__(token: GovernanceToken, voting_escrow: VotingEscrow):
     """
     @notice Contract constructor
     @param token `ERC20CRV` contract address
@@ -148,12 +152,15 @@ def _checkpoint_gauge(gauge: address) -> Point:
     assert self.time_weight[gauge] > 0, "Gauge not alive"
 
     adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
+    t: uint256 = self.time_weight[gauge]
 
     w: uint256 = self.gauge_weight[gauge]
-    w_sum: uint256 = self.gauge_weight_sum
     aw: uint256 = self.adjusted_gauge_weight[gauge]
+    w_sum: uint256 = self.gauge_weight_sum
     aw_sum: uint256 = self.adjusted_gauge_weight_sum
 
+    if t > block.timestamp:
+        extcall TOKEN.emit(self, aw_sum * 10**18 // w_sum)
 
     pt: Point = self._get_weight(gauge)
     self.time_weight[gauge] = block.timestamp
