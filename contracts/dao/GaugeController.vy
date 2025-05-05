@@ -170,20 +170,20 @@ def _checkpoint_gauge(gauge: address) -> Point:
 
 
 @external
-def add_gauge(addr: address):
+def add_gauge(gauge: address):
     """
-    @notice Add gauge `addr` of type `gauge_type` with weight `weight`
-    @param addr Gauge address
+    @notice Add gauge `gauge` of type `gauge_type` with weight `weight`
+    @param gauge Gauge address
     """
     ownable._check_owner()
     assert self.time_weight[gauge] == 0, "Gauge already added"
 
     n: uint256 = self.n_gauges
     self.n_gauges = n + 1
-    self.gauges[n] = addr
-    self.time_weight[addr] = block.timestamp
+    self.gauges[n] = gauge
+    self.time_weight[gauge] = block.timestamp
 
-    log NewGauge(addr=addr)
+    log NewGauge(addr=gauge)
 
 
 @external
@@ -213,7 +213,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         # Prepare slopes and biases in memory
         old_slope: VotedSlope = self.vote_user_slopes[msg.sender][_gauge_addr]
         old_dt: uint256 = max(old_slope.end, block.timestamp) - block.timestamp
-        old_bias: int256 = old_slope.slope * old_dt
+        old_bias: uint256 = old_slope.slope * old_dt
         new_slope: VotedSlope = VotedSlope(
             slope = slope * _user_weight // 10000,
             power = _user_weight,
@@ -228,14 +228,14 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         assert power_used <= 10000, 'Used too much power'
         self.vote_user_power[msg.sender] = power_used
 
-        pt: Point = self._checkpoint_gauge(gauge)  # Contains old_weight_bias and old_weight_slope
+        pt: Point = self._checkpoint_gauge(_gauge_addr)  # Contains old_weight_bias and old_weight_slope
 
         ## Remove old and schedule new slope changes
         # Remove slope changes for old slopes
         # Schedule recording of initial slope for next_time
         self.point_weight[_gauge_addr].bias = max(pt.bias + new_bias, old_bias) - old_bias
         if old_slope.end > block.timestamp:
-            self.point_weight[_gauge_addr].slope = max(pt.slope + new_slope.slope) - old_slope.slope
+            self.point_weight[_gauge_addr].slope = max(pt.slope + new_slope.slope, old_slope.slope) - old_slope.slope
         else:
             self.point_weight[_gauge_addr].slope += new_slope.slope
         if old_slope.end > block.timestamp:
@@ -247,7 +247,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         self.vote_user_slopes[msg.sender][_gauge_addr] = new_slope
 
         # point_weight has changed, so we are doing another checkpoint to enact the vote
-        self._checkpoint_gauge(gauge)
+        self._checkpoint_gauge(_gauge_addr)
 
         # Record last action time
         self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
@@ -276,12 +276,12 @@ def checkpoint(gauge: address):
 
 @external
 @view
-def gauge_relative_weight(addr: address) -> uint256:
+def gauge_relative_weight(gauge: address) -> uint256:
     """
     @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
             (e.g. 1.0 == 1e18). Inflation which will be received by it is
             inflation_rate * relative_weight / 1e18
-    @param addr Gauge address
+    @param gauge Gauge address
     @return Value of relative weight normalized to 1e18
     """
     adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
