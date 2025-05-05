@@ -43,8 +43,7 @@ interface Gauge:
 
 interface GovernanceToken:
     def emit(owner: address, rate_factor: uint256) -> uint256: nonpayable
-    def reserve() -> uint256: view
-    def max_mint_rate() -> uint256: view
+    def transfer(_to: address, _amount: uint256) -> bool: nonpayable
 
 
 event NewGaugeWeight:
@@ -102,6 +101,7 @@ adjusted_gauge_weight_sum: public(uint256)
 specific_emissions: public(uint256)
 specific_emissions_per_gauge: public(HashMap[address, uint256])
 weighted_emissions_per_gauge: public(HashMap[address, uint256])
+sent_emissions_per_gauge: public(HashMap[address, uint256])
 
 
 @deploy
@@ -276,6 +276,17 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
 
 
 @external
+def emit() -> uint256:
+    self._checkpoint_gauge(msg.sender)
+    emissions: uint256 = self.weighted_emissions_per_gauge[msg.sender]
+    to_send: uint256 = emissions - self.sent_emissions_per_gauge[msg.sender]
+    self.sent_emissions_per_gauge[msg.sender] = emissions
+    if to_send > 0:
+        extcall TOKEN.transfer(msg.sender, to_send)
+    return to_send
+
+
+@external
 @view
 def get_gauge_weight(addr: address) -> uint256:
     """
@@ -318,5 +329,3 @@ def set_killed(gauge: address, is_killed: bool):
     ownable._check_owner()
     self.is_killed[gauge] = is_killed
     log SetKilled(gauge=gauge)
-
-# XXX embed minting / inflation params in controller, not gauges
