@@ -113,7 +113,8 @@ def __init__(token: IERC20, voting_escrow: VotingEscrow):
 
 
 @internal
-def _get_weight(gauge: address) -> uint256:
+@view
+def _get_weight(gauge: address) -> Point:
     """
     @notice Fill historic gauge weights week-over-week for missed checkins
             and return the total for the future week
@@ -137,15 +138,13 @@ def _get_weight(gauge: address) -> uint256:
             pt.slope -= min(self.changes_weight[gauge][t], pt.slope)  # Value from non-week-boundary is 0
             if pt.bias == 0:
                 pt.slope = 0
-        self.time_weight[gauge] = block.timestamp  # XXX split off to view?
-        self.point_weight[gauge] = pt
-        return pt.bias
+        return pt
     else:
-        return 0
+        return empty(Point)
 
 
 @internal
-def _checkpoint_gauge(gauge: address):
+def _checkpoint_gauge(gauge: address) -> Point:
     assert self.time_weight[gauge] > 0, "Gauge not alive"
 
     adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
@@ -155,13 +154,19 @@ def _checkpoint_gauge(gauge: address):
     aw: uint256 = self.adjusted_gauge_weight[gauge]
     aw_sum: uint256 = self.adjusted_gauge_weight_sum[gauge]
 
-    w_new: uint256 = self._get_weight(gauge)
+
+    pt: Point = self._get_weight(gauge)
+    self.time_weight[gauge] = block.timestamp
+    self.point_weight[gauge] = pt
+    w_new: uint256 = pt.bias
     aw_new: uint256 = aw_new * adjustment // 10**18
 
     self.gauge_weight[gauge] = w_new
     self.gauge_weight_sum[gauge] = w_sum + w_new - w
     self.adjusted_gauge_weight[gauge] = aw_new
     self.adjusted_gauge_weight_sum[gauge] = aw_sum + aw_new - aw
+
+    return pt
 
 
 @external
@@ -171,42 +176,14 @@ def add_gauge(addr: address):
     @param addr Gauge address
     """
     ownable._check_owner()
+    assert self.time_weight[gauge] == 0, "Gauge already added"
 
     n: uint256 = self.n_gauges
     self.n_gauges = n + 1
     self.gauges[n] = addr
-    self.time_weight[addr] = (block.timestamp + WEEK) // WEEK * WEEK
+    self.time_weight[addr] = block.timestamp
 
     log NewGauge(addr=addr)
-
-
-@external
-@view
-def gauge_relative_weight(addr: address, time: uint256 = block.timestamp) -> uint256:
-    """
-    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
-            (e.g. 1.0 == 1e18). Inflation which will be received by it is
-            inflation_rate * relative_weight / 1e18
-    @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
-    @return Value of relative weight normalized to 1e18
-    """
-    return self._gauge_relative_weight(addr, time)
-
-
-@external
-def gauge_relative_weight_write(addr: address, time: uint256 = block.timestamp) -> uint256:
-    """
-    @notice Get gauge weight normalized to 1e18 and also fill all the unfilled
-            values for type and gauge records
-    @dev Any address can call, however nothing is recorded if the values are filled already
-    @param addr Gauge address
-    @param time Relative weight at the specified timestamp in the past or present
-    @return Value of relative weight normalized to 1e18
-    """
-    self._get_weight(addr)
-    self._get_sum()  # Also calculates get_sum
-    return self._gauge_relative_weight(addr, time)
 
 
 @external
@@ -218,10 +195,9 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
     """
     n: uint256 = len(_gauge_addrs)
     assert len(_user_weights) == n, "Mismatch in lengths"
-    slope: int256 = staticcall VOTING_ESCROW.get_last_user_slope(msg.sender)
+    slope: uint256 = convert(staticcall VOTING_ESCROW.get_last_user_slope(msg.sender), uint256)
     lock_end: uint256 = staticcall VOTING_ESCROW.locked__end(msg.sender)
-    next_time: uint256 = (block.timestamp + WEEK) // WEEK * WEEK
-    assert lock_end > next_time, "Your token lock expires too soon"
+    assert lock_end > block.timestamp, "Expired"
 
     for i: uint256 in range(50):
         if i >= n:
@@ -236,17 +212,15 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
 
         # Prepare slopes and biases in memory
         old_slope: VotedSlope = self.vote_user_slopes[msg.sender][_gauge_addr]
-        old_dt: uint256 = 0
-        if old_slope.end > next_time:
-            old_dt = old_slope.end - next_time
-        old_bias: int256 = old_slope.slope * convert(old_dt, int256)
+        old_dt: uint256 = max(old_slope.end, block.timestamp) - block.timestamp
+        old_bias: int256 = old_slope.slope * old_dt
         new_slope: VotedSlope = VotedSlope(
-            slope = slope * convert(_user_weight, int256) // 10000,
+            slope = slope * _user_weight // 10000,
             power = _user_weight,
             end = lock_end
         )
-        new_dt: uint256 = lock_end - next_time  # dev: raises when expired
-        new_bias: int256 = new_slope.slope * convert(new_dt, int256)
+        new_dt: uint256 = lock_end - block.timestamp  # dev: raises when expired
+        new_bias: uint256 = new_slope.slope * new_dt
 
         # Check and update powers (weights) used
         power_used: uint256 = self.vote_user_power[msg.sender]
@@ -254,31 +228,26 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         assert power_used <= 10000, 'Used too much power'
         self.vote_user_power[msg.sender] = power_used
 
+        pt: Point = self._checkpoint_gauge(gauge)  # Contains old_weight_bias and old_weight_slope
+
         ## Remove old and schedule new slope changes
         # Remove slope changes for old slopes
         # Schedule recording of initial slope for next_time
-        old_weight_bias: int256 = self._get_weight(_gauge_addr)
-        old_weight_slope: int256 = self.points_weight[_gauge_addr][next_time].slope
-        old_sum_bias: int256 = self._get_sum()
-        old_sum_slope: int256 = self.points_sum[next_time].slope
-
-        self.points_weight[_gauge_addr][next_time].bias = max(old_weight_bias + new_bias - old_bias, 0)
-        self.points_sum[next_time].bias = max(old_sum_bias + new_bias - old_bias, 0)
-        if old_slope.end > next_time:
-            self.points_weight[_gauge_addr][next_time].slope = max(old_weight_slope + new_slope.slope - old_slope.slope, 0)
-            self.points_sum[next_time].slope = max(old_sum_slope + new_slope.slope - old_slope.slope, 0)
+        self.point_weight[_gauge_addr].bias = max(pt.bias + new_bias, old_bias) - old_bias
+        if old_slope.end > block.timestamp:
+            self.point_weight[_gauge_addr].slope = max(pt.slope + new_slope.slope) - old_slope.slope
         else:
-            self.points_weight[_gauge_addr][next_time].slope += new_slope.slope
-            self.points_sum[next_time].slope += new_slope.slope
+            self.point_weight[_gauge_addr].slope += new_slope.slope
         if old_slope.end > block.timestamp:
             # Cancel old slope changes if they still didn't happen
             self.changes_weight[_gauge_addr][old_slope.end] -= old_slope.slope
-            self.changes_sum[old_slope.end] -= old_slope.slope
         # Add slope changes for new slopes
         self.changes_weight[_gauge_addr][new_slope.end] += new_slope.slope
-        self.changes_sum[new_slope.end] += new_slope.slope
 
         self.vote_user_slopes[msg.sender][_gauge_addr] = new_slope
+
+        # point_weight has changed, so we are doing another checkpoint to enact the vote
+        self._checkpoint_gauge(gauge)
 
         # Record last action time
         self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
@@ -335,6 +304,35 @@ def checkpoint():
     @notice Checkpoint to fill data common for all gauges
     """
     self._get_sum()
+
+
+@external
+@view
+def gauge_relative_weight(addr: address, time: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get Gauge relative weight (not more than 1.0) normalized to 1e18
+            (e.g. 1.0 == 1e18). Inflation which will be received by it is
+            inflation_rate * relative_weight / 1e18
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    return self._gauge_relative_weight(addr, time)
+
+
+@external
+def gauge_relative_weight_write(addr: address, time: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get gauge weight normalized to 1e18 and also fill all the unfilled
+            values for type and gauge records
+    @dev Any address can call, however nothing is recorded if the values are filled already
+    @param addr Gauge address
+    @param time Relative weight at the specified timestamp in the past or present
+    @return Value of relative weight normalized to 1e18
+    """
+    self._get_weight(addr)
+    self._get_sum()  # Also calculates get_sum
+    return self._gauge_relative_weight(addr, time)
 
 
 def set_killed(gauge: address, is_killed: bool):
