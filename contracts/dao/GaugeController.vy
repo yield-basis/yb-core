@@ -276,17 +276,6 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
 
 
 @external
-def emit() -> uint256:
-    self._checkpoint_gauge(msg.sender)
-    emissions: uint256 = self.weighted_emissions_per_gauge[msg.sender]
-    to_send: uint256 = emissions - self.sent_emissions_per_gauge[msg.sender]
-    self.sent_emissions_per_gauge[msg.sender] = emissions
-    if to_send > 0:
-        extcall TOKEN.transfer(msg.sender, to_send)
-    return to_send
-
-
-@external
 @view
 def get_gauge_weight(addr: address) -> uint256:
     """
@@ -295,14 +284,6 @@ def get_gauge_weight(addr: address) -> uint256:
     @return Gauge weight
     """
     return self._get_weight(addr).bias
-
-
-@external
-def checkpoint(gauge: address):
-    """
-    @notice Checkpoint a gauge
-    """
-    self._checkpoint_gauge(gauge)
 
 
 @external
@@ -322,7 +303,26 @@ def gauge_relative_weight(gauge: address) -> uint256:
     pt: Point = self._get_weight(gauge)
     aw_new: uint256 = pt.bias * adjustment // 10**18
 
-    return self.adjusted_gauge_weight_sum + aw_new - aw
+    return aw_new * 10**18 // (self.adjusted_gauge_weight_sum + aw_new - aw)
+
+
+@external
+def checkpoint(gauge: address):
+    """
+    @notice Checkpoint a gauge
+    """
+    self._checkpoint_gauge(gauge)
+
+
+@external
+def emit() -> uint256:
+    self._checkpoint_gauge(msg.sender)
+    emissions: uint256 = self.weighted_emissions_per_gauge[msg.sender]
+    to_send: uint256 = emissions - self.sent_emissions_per_gauge[msg.sender]
+    self.sent_emissions_per_gauge[msg.sender] = emissions
+    if to_send > 0:
+        extcall TOKEN.transfer(msg.sender, to_send)
+    return to_send
 
 
 def set_killed(gauge: address, is_killed: bool):
