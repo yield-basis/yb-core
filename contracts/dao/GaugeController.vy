@@ -18,7 +18,6 @@ exports: (
 
 # All future times are rounded by week
 WEEK: constant(uint256) = 7 * 86400
-IWEEK: constant(int256) = 7 * 86400
 
 # Cannot change weight votes more often than once in 10 days
 WEIGHT_VOTE_DELAY: constant(uint256) = 10 * 86400
