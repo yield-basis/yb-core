@@ -128,6 +128,7 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, 
         mock_agg.address,
         flash.address,
         admin,  # Fee receiver
+        ZERO_ADDRESS.hex(),  # Gauge controller (zero address will be changed later)
         admin,  # Admin
         admin)  # Emergency admin
     with boa.env.prank(admin):
