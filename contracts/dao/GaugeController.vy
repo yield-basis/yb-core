@@ -42,6 +42,7 @@ interface Gauge:
 
 interface GovernanceToken:
     def emit(owner: address, rate_factor: uint256) -> uint256: nonpayable
+    def preview_emissions(t: uint256, rate_factor: uint256) -> uint256: view
     def transfer(_to: address, _amount: uint256) -> bool: nonpayable
 
 
@@ -311,6 +312,36 @@ def checkpoint(gauge: address):
     @notice Checkpoint a gauge
     """
     self._checkpoint_gauge(gauge)
+
+
+@external
+@view
+def preview_emissions(gauge: address, at_time: uint256) -> uint256:
+    """
+    @notice Checkpoint logic is re-done here without causing writes
+    """
+    if self.time_weight[gauge] > 0:
+        return 0
+
+    adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
+    t: uint256 = self.time_weight[gauge]
+
+    w: uint256 = self.gauge_weight[gauge]
+    aw: uint256 = self.adjusted_gauge_weight[gauge]
+    w_sum: uint256 = self.gauge_weight_sum
+    aw_sum: uint256 = self.adjusted_gauge_weight_sum
+
+    w_new: uint256 = self._get_weight(gauge).bias
+    aw_new: uint256 = w_new * adjustment // 10**18
+
+    w_sum = w_sum + w_new - w
+    aw_sum = aw_sum + aw_new - aw
+
+    d_emissions: uint256 = staticcall TOKEN.preview_emissions(at_time, aw_sum * 10**18 // w_sum)
+    specific_emissions: uint256 = self.specific_emissions + d_emissions * 10**18 // aw_sum
+    weighted_emissions_per_gauge: uint256 = self.weighted_emissions_per_gauge[gauge] + (specific_emissions - self.specific_emissions_per_gauge[gauge]) * aw // 10**18
+
+    return weighted_emissions_per_gauge - self.sent_emissions_per_gauge[gauge]
 
 
 @external
