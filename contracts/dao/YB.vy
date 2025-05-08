@@ -62,11 +62,6 @@ def preview_emissions(t: uint256, rate_factor: uint256) -> uint256:
 
 
 @external
-def emissions(t: uint256, rate_factor: uint256) -> uint256:
-    return self._emissions(t, rate_factor)
-
-
-@external
 def emit(owner: address, rate_factor: uint256) -> uint256:
     """
     @dev Creates `amount` tokens and assigns them to `owner`.
