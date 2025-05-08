@@ -14,7 +14,9 @@ initializes: erc20[ownable := ownable]
 
 exports: (
     erc20.IERC20,
-    erc20.decimals
+    erc20.decimals,
+    ownable.transfer_ownership,
+    ownable.owner
 )
 
 
@@ -25,9 +27,19 @@ interface GaugeController:
 
 interface Factory:
     def GAUGE_CONTROLLER() -> GaugeController: view
+    def admin() -> address: view
 
 interface IERC20Slice:
     def symbol() -> String[29]: view
+
+
+event Deposit:
+    provider: indexed(address)
+    value: uint256
+
+event Withdraw:
+    provider: indexed(address)
+    value: uint256
 
 
 struct Reward:
@@ -87,6 +99,7 @@ def __init__(lp_token: erc20.IERC20):
     LP_TOKEN = lp_token
     GC = staticcall Factory(msg.sender).GAUGE_CONTROLLER()
     YB = staticcall GC.TOKEN()
+    ownable.owner = staticcall Factory(msg.sender).admin()
 
 
 @external
