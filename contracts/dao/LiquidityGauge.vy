@@ -73,11 +73,11 @@ inflation_rate: public(uint256)
 
 # The goal is to be able to calculate ∫(rate * balance / totalSupply dt) from 0 till checkpoint
 # All values are kept in units of being multiplied by 1e18
-period: public(int128)
-period_timestamp: public(uint256[100000000000000000000000000000])
+period: public(uint256)
+period_timestamp: public(HashMap[uint256, uint256])
 
 # 1e18 * ∫(rate(t) / totalSupply(t) dt) from 0 till checkpoint
-integrate_inv_supply: public(uint256[100000000000000000000000000000])  # bump epoch when rate() changes
+integrate_inv_supply: public(HashMap[uint256, uint256])
 
 
 @deploy
