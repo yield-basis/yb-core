@@ -116,7 +116,13 @@ def flash(stablecoin):
 
 
 @pytest.fixture(scope="session")
-def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, mock_agg, flash, admin):
+def dummy_gc(collateral_token):
+    # GaugeController which uses collateral_token instead of YB and VotingEscrow
+    return boa.load('contracts/dao/GaugeController.vy', collateral_token, collateral_token)
+
+
+@pytest.fixture(scope="session")
+def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, mock_agg, flash, dummy_gc, admin):
     factory = boa.load(
         'contracts/Factory.vy',
         stablecoin.address,
@@ -128,7 +134,7 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, 
         mock_agg.address,
         flash.address,
         admin,  # Fee receiver
-        ZERO_ADDRESS.hex(),  # Gauge controller (zero address will be changed later)
+        dummy_gc.address,
         admin,  # Admin
         admin)  # Emergency admin
     with boa.env.prank(admin):
