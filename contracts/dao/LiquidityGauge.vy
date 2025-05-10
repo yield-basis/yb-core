@@ -55,6 +55,12 @@ struct Integral:
     v: uint256
     t: uint256
 
+struct RewardIntegrals:
+    integral_inv_supply: Integral
+    reward_rate_integral: Integral
+    user_rewards_integral: Integral
+    d_user_reward: uint256
+
 
 VERSION: public(constant(String[8])) = "v1.0.0"
 
@@ -71,7 +77,7 @@ integral_inv_supply: public(Integral)
 integral_inv_supply_4_token: public(HashMap[erc20.IERC20, uint256])
 
 reward_rate_integral: public(HashMap[erc20.IERC20, Integral])
-user_reward_rate_integral: public(HashMap[address, HashMap[erc20.IERC20, uint256]])
+reward_rate_integral_4_user: public(HashMap[address, HashMap[erc20.IERC20, uint256]])
 
 user_rewards_integral: public(HashMap[address, HashMap[erc20.IERC20, Integral]])
 
@@ -99,27 +105,25 @@ def name() -> String[39]:
 
 
 @internal
-def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> uint256:
-    integral_inv_supply: Integral = self.integral_inv_supply
-    integral_inv_supply.v += 10**36 * (block.timestamp - integral_inv_supply.t) // erc20.totalSupply
-    integral_inv_supply.t = block.timestamp
-    self.integral_inv_supply = integral_inv_supply
+@view
+def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> RewardIntegrals:
+    r: RewardIntegrals = empty(RewardIntegrals)
 
-    reward_rate_integral: Integral = self.reward_rate_integral[reward]
-    if block.timestamp > reward_rate_integral.t:
-        reward_rate_integral.v += (integral_inv_supply.v - self.integral_inv_supply_4_token[reward]) * d_reward //\
-           (block.timestamp - reward_rate_integral.t)
-        reward_rate_integral.t = block.timestamp
-        self.reward_rate_integral[reward] = reward_rate_integral
-        self.integral_inv_supply_4_token[reward] = integral_inv_supply.v
+    r.integral_inv_supply = self.integral_inv_supply
+    r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc20.totalSupply
+    r.integral_inv_supply.t = block.timestamp
 
-    d_user_reward: uint256 = 0
-    user_rewards_integral: Integral = self.user_rewards_integral[user][reward]
-    if block.timestamp > user_rewards_integral.t:
-        d_user_reward = reward_rate_integral.v - self.user_reward_rate_integral[user][reward]
-        user_rewards_integral.v += d_user_reward * erc20.balanceOf[user] // 10**18
-        user_rewards_integral.t = block.timestamp
-        self.user_rewards_integral[user][reward] = user_rewards_integral
-        self.user_reward_rate_integral[user][reward] = reward_rate_integral.v
+    r.reward_rate_integral = self.reward_rate_integral[reward]
+    if block.timestamp > r.reward_rate_integral.t:
+        r.reward_rate_integral.v += (r.integral_inv_supply.v - self.integral_inv_supply_4_token[reward]) * d_reward //\
+           (block.timestamp - r.reward_rate_integral.t)
+        r.reward_rate_integral.t = block.timestamp
 
-    return d_user_reward
+    r.user_rewards_integral = self.user_rewards_integral[user][reward]
+    if block.timestamp > r.user_rewards_integral.t:
+        r.d_user_reward = (r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward]) *\
+            erc20.balanceOf[user] // 10**18
+        r.user_rewards_integral.v += r.d_user_reward
+        r.user_rewards_integral.t = block.timestamp
+
+    return r
