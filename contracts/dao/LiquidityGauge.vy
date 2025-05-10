@@ -240,6 +240,7 @@ def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
         r.finish_time = last_reward_time + (r.finish_time - last_reward_time) * (r.total + amount) // r.total
     r.total += amount
 
+    assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
     self.rewards[token] = r
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
