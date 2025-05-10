@@ -148,3 +148,12 @@ def claim(reward: erc20.IERC20 = YB, user: address = msg.sender) -> uint256:
 
     assert extcall reward.transfer(user, r.d_user_reward, default_return_value=True)
     return r.d_user_reward
+
+
+@external
+@view
+def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
+    d_reward: uint256 = 0
+    if reward == YB:
+        d_reward = staticcall GC.preview_emissions(self, block.timestamp)
+    return self._checkpoint(reward, d_reward, user).d_user_reward
