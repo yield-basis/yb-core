@@ -47,6 +47,10 @@ event AddReward:
     distributor: address
     id: uint256
 
+event ChangeRewardDistributor:
+    token: indexed(address)
+    distributor: address
+
 event DepositRewards:
     token: indexed(address)
     distributor: address
@@ -184,8 +188,17 @@ def add_reward(token: erc20.IERC20, distributor: address):
     log AddReward(token=token.address, distributor=distributor, id=reward_id)
 
 
+@external
+def change_reward_distributor(token: erc20.IERC20, distributor: address):
+    assert token != YB, "YB"
+    assert distributor != empty(address)
+    assert self.rewards[token].distributor != empty(address), "Not added"
+    ownable._check_owner()
+    self.rewards[token].distributor = distributor
+    log ChangeRewardDistributor(token=token.address, distributor=distributor)
+
+
 # deposit
 # withdraw
-# add reward
 # deposit reward
 # change reward distributor
