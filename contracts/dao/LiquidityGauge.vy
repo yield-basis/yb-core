@@ -23,6 +23,7 @@ exports: (
 interface GaugeController:
     def is_killed(gauge: address) -> bool: view
     def emit() -> uint256: nonpayable
+    def preview_emissions(gauge: address, at_time: uint256) -> uint256: view
     def TOKEN() -> erc20.IERC20: view
 
 interface Factory:
@@ -50,6 +51,10 @@ struct Reward:
     last_update: uint256
     integral: uint256
 
+struct Integral:
+    v: uint256
+    t: uint256
+
 
 VERSION: public(constant(String[8])) = "v1.0.0"
 
@@ -58,38 +63,17 @@ GC: public(immutable(GaugeController))
 YB: public(immutable(erc20.IERC20))
 LP_TOKEN: public(immutable(erc20.IERC20))
 
-# For tracking external rewards
+
 reward_count: public(uint256)
-reward_tokens: public(address[MAX_REWARDS])
+reward_tokens: public(HashMap[uint256, erc20.IERC20])
 
-reward_data: public(HashMap[address, Reward])
+integral_inv_supply: public(Integral)
+integral_inv_supply_4_token: public(HashMap[erc20.IERC20, uint256])
 
-# claimant -> default reward receiver
-rewards_receiver: public(HashMap[address, address])
+reward_rate_integral: public(HashMap[erc20.IERC20, Integral])
+user_reward_rate_integral: public(HashMap[address, HashMap[erc20.IERC20, uint256]])
 
-# reward token -> claiming address -> integral
-reward_integral_for: public(HashMap[address, HashMap[address, uint256]])
-
-# user -> [256 claimable amount][uint256 claimed amount]
-claim_data: HashMap[address, HashMap[address, uint256]]
-
-# 1e18 * ∫(rate(t) / totalSupply(t) dt) from (last_action) till checkpoint
-integrate_inv_supply_of: public(HashMap[address, uint256])
-integrate_checkpoint_of: public(HashMap[address, uint256])
-
-# ∫(balance * rate(t) / totalSupply(t) dt) from 0 till checkpoint
-# Units: rate * t = already number of coins per address to issue
-integrate_fraction: public(HashMap[address, uint256])
-
-inflation_rate: public(uint256)
-
-# The goal is to be able to calculate ∫(rate * balance / totalSupply dt) from 0 till checkpoint
-# All values are kept in units of being multiplied by 1e18
-period: public(uint256)
-period_timestamp: public(HashMap[uint256, uint256])
-
-# 1e18 * ∫(rate(t) / totalSupply(t) dt) from 0 till checkpoint
-integrate_inv_supply: public(HashMap[uint256, uint256])
+user_rewards_integral: public(HashMap[address, HashMap[erc20.IERC20, Integral]])
 
 
 @deploy
@@ -112,3 +96,8 @@ def symbol() -> String[32]:
 @view
 def name() -> String[39]:
     return concat('YB Gauge: ', staticcall IERC20Slice(LP_TOKEN.address).symbol())
+
+
+@internal
+def _checkpoint(reward: erc20.IERC20, user: address):
+    pass
