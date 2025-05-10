@@ -100,8 +100,10 @@ def __init__(lp_token: erc20.IERC20):
     GC = staticcall Factory(msg.sender).GAUGE_CONTROLLER()
     YB = staticcall GC.TOKEN()
     ownable.owner = staticcall Factory(msg.sender).admin()
-    self.reward_count = 1
+    self.rewards[YB].distributor = GC.address
     self.reward_tokens[0] = YB
+    self.reward_count = 1
+    log AddReward(token=YB.address, distributor=GC.address, id=0)
 
 
 @external
