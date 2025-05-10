@@ -146,12 +146,31 @@ def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> Rewar
     return r
 
 
+@internal
+@view
+def _get_vested_rewards(token: erc20.IERC20) -> uint256:
+    assert self.rewards[token].distributor != empty(address), "No reward"
+
+    last_reward_time: uint256 = self.reward_rate_integral[token].t
+    used_rewards: uint256 = self.reward_rate_integral[token].v
+    finish_time: uint256 = self.rewards[token].finish_time
+    total: uint256 = self.rewards[token].total
+    if finish_time > last_reward_time:
+        new_used: uint256 = (total - used_rewards) * (block.timestamp - last_reward_time) //\
+            (finish_time - last_reward_time) + used_rewards
+        return min(new_used, total) - used_rewards
+    else:
+        return 0
+
+
 @external
 @nonreentrant
 def claim(reward: erc20.IERC20 = YB, user: address = msg.sender) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = extcall GC.emit()
+    else:
+        d_reward = self._get_vested_rewards(reward)
 
     r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
 
@@ -171,6 +190,8 @@ def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
+    else:
+        d_reward = self._get_vested_rewards(reward)
     return self._checkpoint(reward, d_reward, user).d_user_reward
 
 
@@ -225,4 +246,3 @@ def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
 
 # deposit
 # withdraw
-# deposit reward
