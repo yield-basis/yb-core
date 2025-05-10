@@ -217,11 +217,9 @@ def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
         # Keep the reward rate
         assert r.finish_time > last_reward_time, "Rate unknown"
         r.finish_time = last_reward_time + (r.finish_time - last_reward_time) * (r.total + amount) // r.total
-
     r.total += amount
 
     self.rewards[token] = r
-
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
 
