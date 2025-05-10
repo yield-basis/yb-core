@@ -42,9 +42,19 @@ event Withdraw:
     provider: indexed(address)
     value: uint256
 
+event AddReward:
+    token: indexed(address)
+    distributor: address
+
+event DepositRewards:
+    token: indexed(address)
+    distributor: address
+    amount: uint256
+    period_finish: uint256
+    rate: uint256
+
 
 struct Reward:
-    token: erc20.IERC20
     distributor: address
     period_finish: uint256
     rate: uint256
@@ -70,6 +80,7 @@ LP_TOKEN: public(immutable(erc20.IERC20))
 
 reward_count: public(uint256)
 reward_tokens: public(HashMap[uint256, erc20.IERC20])
+rewards: public(HashMap[erc20.IERC20, Reward])
 
 integral_inv_supply: public(Integral)
 integral_inv_supply_4_token: public(HashMap[erc20.IERC20, uint256])
@@ -155,3 +166,10 @@ def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
     if reward == YB:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
     return self._checkpoint(reward, d_reward, user).d_user_reward
+
+
+# deposit
+# withdraw
+# add reward
+# deposit reward
+# change reward distributor
