@@ -45,6 +45,7 @@ event Withdraw:
 event AddReward:
     token: indexed(address)
     distributor: address
+    id: uint256
 
 event DepositRewards:
     token: indexed(address)
@@ -166,6 +167,19 @@ def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
     if reward == YB:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
     return self._checkpoint(reward, d_reward, user).d_user_reward
+
+
+@external
+def add_reward(token: erc20.IERC20, distributor: address):
+    assert token != YB, "YB"
+    assert distributor != empty(address)
+    assert self.rewards[token].distributor == empty(address), "Already added"
+    ownable._check_owner()
+    self.rewards[token].distributor = distributor
+    reward_id: uint256 = self.reward_count
+    self.reward_tokens[reward_id] = token
+    self.reward_count = reward_id + 1
+    log AddReward(token=token.address, distributor=distributor, id=reward_id)
 
 
 # deposit
