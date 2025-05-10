@@ -44,12 +44,10 @@ event Withdraw:
 
 
 struct Reward:
-    token: address
+    token: erc20.IERC20
     distributor: address
     period_finish: uint256
     rate: uint256
-    last_update: uint256
-    integral: uint256
 
 struct Integral:
     v: uint256
