@@ -90,6 +90,8 @@ def __init__(lp_token: erc20.IERC20):
     GC = staticcall Factory(msg.sender).GAUGE_CONTROLLER()
     YB = staticcall GC.TOKEN()
     ownable.owner = staticcall Factory(msg.sender).admin()
+    self.reward_count = 1
+    self.reward_tokens[0] = YB
 
 
 @external
@@ -127,3 +129,22 @@ def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> Rewar
         r.user_rewards_integral.t = block.timestamp
 
     return r
+
+
+@external
+@nonreentrant
+def claim(reward: erc20.IERC20 = YB, user: address = msg.sender) -> uint256:
+    d_reward: uint256 = 0
+    if reward == YB:
+        d_reward = extcall GC.emit()
+
+    r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
+
+    self.integral_inv_supply = r.integral_inv_supply
+    self.integral_inv_supply_4_token[reward] = r.integral_inv_supply.v
+    self.reward_rate_integral[reward] = r.reward_rate_integral
+    self.reward_rate_integral_4_user[user][reward] = r.reward_rate_integral.v
+    self.user_rewards_integral[user][reward] = r.user_rewards_integral
+
+    assert extcall reward.transfer(user, r.d_user_reward, default_return_value=True)
+    return r.d_user_reward
