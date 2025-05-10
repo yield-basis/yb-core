@@ -55,14 +55,13 @@ event DepositRewards:
     token: indexed(address)
     distributor: address
     amount: uint256
-    period_finish: uint256
-    rate: uint256
+    finish_time: uint256
 
 
 struct Reward:
     distributor: address
-    period_finish: uint256
-    rate: uint256
+    finish_time: uint256
+    total: uint256
 
 struct Integral:
     v: uint256
@@ -198,7 +197,34 @@ def change_reward_distributor(token: erc20.IERC20, distributor: address):
     log ChangeRewardDistributor(token=token.address, distributor=distributor)
 
 
+@external
+def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
+    assert token != YB, "YB"
+    assert amount > 0, "No rewards"
+    r: Reward = self.rewards[token]
+
+    if msg.sender != r.distributor:
+        ownable._check_owner()
+
+    last_reward_time: uint256 = self.reward_rate_integral[token].t
+    used_rewards: uint256 = self.reward_rate_integral[token].v
+
+    if finish_time > 0:
+        # Change rate to meet new finish time
+        assert finish_time > block.timestamp, "Finishes in the past"
+        r.finish_time = finish_time
+    else:
+        # Keep the reward rate
+        assert r.finish_time > last_reward_time, "Rate unknown"
+        r.finish_time = last_reward_time + (r.finish_time - last_reward_time) * (r.total + amount) // r.total
+
+    r.total += amount
+
+    self.rewards[token] = r
+
+    log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
+
+
 # deposit
 # withdraw
 # deposit reward
-# change reward distributor
