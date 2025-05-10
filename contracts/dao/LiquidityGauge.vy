@@ -99,5 +99,27 @@ def name() -> String[39]:
 
 
 @internal
-def _checkpoint(reward: erc20.IERC20, user: address):
-    pass
+def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> uint256:
+    integral_inv_supply: Integral = self.integral_inv_supply
+    integral_inv_supply.v += 10**36 * (block.timestamp - integral_inv_supply.t) // erc20.totalSupply
+    integral_inv_supply.t = block.timestamp
+    self.integral_inv_supply = integral_inv_supply
+
+    reward_rate_integral: Integral = self.reward_rate_integral[reward]
+    if block.timestamp > reward_rate_integral.t:
+        reward_rate_integral.v += (integral_inv_supply.v - self.integral_inv_supply_4_token[reward]) * d_reward //\
+           (block.timestamp - reward_rate_integral.t)
+        reward_rate_integral.t = block.timestamp
+        self.reward_rate_integral[reward] = reward_rate_integral
+        self.integral_inv_supply_4_token[reward] = integral_inv_supply.v
+
+    d_user_reward: uint256 = 0
+    user_rewards_integral: Integral = self.user_rewards_integral[user][reward]
+    if block.timestamp > user_rewards_integral.t:
+        d_user_reward = reward_rate_integral.v - self.user_reward_rate_integral[user][reward]
+        user_rewards_integral.v += d_user_reward * erc20.balanceOf[user] // 10**18
+        user_rewards_integral.t = block.timestamp
+        self.user_rewards_integral[user][reward] = user_rewards_integral
+        self.user_reward_rate_integral[user][reward] = reward_rate_integral.v
+
+    return d_user_reward
