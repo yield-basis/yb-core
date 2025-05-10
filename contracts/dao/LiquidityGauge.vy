@@ -4,19 +4,19 @@
 @author Yield Basis
 @license MIT
 """
-from snekmate.auth import ownable
-from snekmate.tokens import erc20
+from ethereum.ercs import IERC20
+from snekmate.extensions import erc4626
 
 
-initializes: ownable
-initializes: erc20[ownable := ownable]
+initializes: erc4626
 
 
 exports: (
-    erc20.IERC20,
-    erc20.decimals,
-    ownable.transfer_ownership,
-    ownable.owner
+    erc4626.IERC20,
+    erc4626.IERC4626,
+    erc4626.decimals,
+    erc4626.ownable.transfer_ownership,
+    erc4626.ownable.owner
 )
 
 
@@ -24,7 +24,7 @@ interface GaugeController:
     def is_killed(gauge: address) -> bool: view
     def emit() -> uint256: nonpayable
     def preview_emissions(gauge: address, at_time: uint256) -> uint256: view
-    def TOKEN() -> erc20.IERC20: view
+    def TOKEN() -> IERC20: view
 
 interface Factory:
     def GAUGE_CONTROLLER() -> GaugeController: view
@@ -33,14 +33,6 @@ interface Factory:
 interface IERC20Slice:
     def symbol() -> String[29]: view
 
-
-event Deposit:
-    provider: indexed(address)
-    value: uint256
-
-event Withdraw:
-    provider: indexed(address)
-    value: uint256
 
 event AddReward:
     token: indexed(address)
@@ -78,31 +70,30 @@ VERSION: public(constant(String[8])) = "v1.0.0"
 
 MAX_REWARDS: constant(uint256) = 8
 GC: public(immutable(GaugeController))
-YB: public(immutable(erc20.IERC20))
-LP_TOKEN: public(immutable(erc20.IERC20))
+YB: public(immutable(IERC20))
+LP_TOKEN: public(immutable(IERC20))
 
 
 reward_count: public(uint256)
-reward_tokens: public(HashMap[uint256, erc20.IERC20])
-rewards: public(HashMap[erc20.IERC20, Reward])
+reward_tokens: public(HashMap[uint256, IERC20])
+rewards: public(HashMap[IERC20, Reward])
 
 integral_inv_supply: public(Integral)
-integral_inv_supply_4_token: public(HashMap[erc20.IERC20, uint256])
+integral_inv_supply_4_token: public(HashMap[IERC20, uint256])
 
-reward_rate_integral: public(HashMap[erc20.IERC20, Integral])
-reward_rate_integral_4_user: public(HashMap[address, HashMap[erc20.IERC20, uint256]])
+reward_rate_integral: public(HashMap[IERC20, Integral])
+reward_rate_integral_4_user: public(HashMap[address, HashMap[IERC20, uint256]])
 
-user_rewards_integral: public(HashMap[address, HashMap[erc20.IERC20, Integral]])
+user_rewards_integral: public(HashMap[address, HashMap[IERC20, Integral]])
 
 
 @deploy
-def __init__(lp_token: erc20.IERC20):
-    ownable.__init__()
-    erc20.__init__("YB Gauge: ..", "g(..)", 18, "Just say no", "to EIP712")
+def __init__(lp_token: IERC20):
+    erc4626.__init__("YB Gauge: ..", "g(..)", lp_token, 0, "Just say no", "to EIP712")
     LP_TOKEN = lp_token
     GC = staticcall Factory(msg.sender).GAUGE_CONTROLLER()
     YB = staticcall GC.TOKEN()
-    ownable.owner = staticcall Factory(msg.sender).admin()
+    erc4626.ownable.owner = staticcall Factory(msg.sender).admin()
     self.rewards[YB].distributor = GC.address
     self.reward_tokens[0] = YB
     self.reward_count = 1
@@ -123,11 +114,11 @@ def name() -> String[39]:
 
 @internal
 @view
-def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> RewardIntegrals:
+def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardIntegrals:
     r: RewardIntegrals = empty(RewardIntegrals)
 
     r.integral_inv_supply = self.integral_inv_supply
-    r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc20.totalSupply
+    r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc4626.erc20.totalSupply
     r.integral_inv_supply.t = block.timestamp
 
     r.reward_rate_integral = self.reward_rate_integral[reward]
@@ -139,7 +130,7 @@ def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> Rewar
     r.user_rewards_integral = self.user_rewards_integral[user][reward]
     if block.timestamp > r.user_rewards_integral.t:
         r.d_user_reward = (r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward]) *\
-            erc20.balanceOf[user] // 10**18
+            erc4626.erc20.balanceOf[user] // 10**18
         r.user_rewards_integral.v += r.d_user_reward
         r.user_rewards_integral.t = block.timestamp
 
@@ -148,7 +139,7 @@ def _checkpoint(reward: erc20.IERC20, d_reward: uint256, user: address) -> Rewar
 
 @internal
 @view
-def _get_vested_rewards(token: erc20.IERC20) -> uint256:
+def _get_vested_rewards(token: IERC20) -> uint256:
     assert self.rewards[token].distributor != empty(address), "No reward"
 
     last_reward_time: uint256 = self.reward_rate_integral[token].t
@@ -165,7 +156,7 @@ def _get_vested_rewards(token: erc20.IERC20) -> uint256:
 
 @external
 @nonreentrant
-def claim(reward: erc20.IERC20 = YB, user: address = msg.sender) -> uint256:
+def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = extcall GC.emit()
@@ -186,7 +177,7 @@ def claim(reward: erc20.IERC20 = YB, user: address = msg.sender) -> uint256:
 
 @external
 @view
-def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
+def preview_claim(reward: IERC20, user: address) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
@@ -196,11 +187,11 @@ def preview_claim(reward: erc20.IERC20, user: address) -> uint256:
 
 
 @external
-def add_reward(token: erc20.IERC20, distributor: address):
+def add_reward(token: IERC20, distributor: address):
     assert token != YB, "YB"
     assert distributor != empty(address)
     assert self.rewards[token].distributor == empty(address), "Already added"
-    ownable._check_owner()
+    erc4626.ownable._check_owner()
     self.rewards[token].distributor = distributor
     reward_id: uint256 = self.reward_count
     self.reward_tokens[reward_id] = token
@@ -209,23 +200,23 @@ def add_reward(token: erc20.IERC20, distributor: address):
 
 
 @external
-def change_reward_distributor(token: erc20.IERC20, distributor: address):
+def change_reward_distributor(token: IERC20, distributor: address):
     assert token != YB, "YB"
     assert distributor != empty(address)
     assert self.rewards[token].distributor != empty(address), "Not added"
-    ownable._check_owner()
+    erc4626.ownable._check_owner()
     self.rewards[token].distributor = distributor
     log ChangeRewardDistributor(token=token.address, distributor=distributor)
 
 
 @external
-def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
+def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     assert token != YB, "YB"
     assert amount > 0, "No rewards"
     r: Reward = self.rewards[token]
 
     if msg.sender != r.distributor:
-        ownable._check_owner()
+        erc4626.ownable._check_owner()
 
     last_reward_time: uint256 = self.reward_rate_integral[token].t
     used_rewards: uint256 = self.reward_rate_integral[token].v
@@ -243,7 +234,3 @@ def deposit_reward(token: erc20.IERC20, amount: uint256, finish_time: uint256):
     assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
     self.rewards[token] = r
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
-
-
-# deposit
-# withdraw
