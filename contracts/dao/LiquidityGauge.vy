@@ -14,8 +14,6 @@ initializes: erc4626
 exports: (
     erc4626.erc20.totalSupply,
     erc4626.erc20.balanceOf,
-    erc4626.erc20.transfer,
-    erc4626.erc20.transferFrom,
     erc4626.erc20.approve,
     erc4626.erc20.allowance,
     erc4626.decimals,
@@ -318,4 +316,18 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     return assets
 
 
-# XXX checkpoint at transfers
+@external
+def transfer(to: address, amount: uint256) -> bool:
+    self._checkpoint_user(msg.sender)
+    self._checkpoint_user(to)
+    erc4626.erc20._transfer(msg.sender, to, amount)
+    return True
+
+
+@external
+def transferFrom(owner: address, to: address, amount: uint256) -> bool:
+    self._checkpoint_user(owner)
+    self._checkpoint_user(to)
+    erc4626.erc20._spend_allowance(owner, msg.sender, amount)
+    erc4626.erc20._transfer(owner, to, amount)
+    return True
