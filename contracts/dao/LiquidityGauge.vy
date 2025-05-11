@@ -12,9 +12,25 @@ initializes: erc4626
 
 
 exports: (
-    erc4626.IERC20,
-    erc4626.IERC4626,
+    erc4626.erc20.totalSupply,
+    erc4626.erc20.balanceOf,
+    erc4626.erc20.transfer,
+    erc4626.erc20.transferFrom,
+    erc4626.erc20.approve,
+    erc4626.erc20.allowance,
     erc4626.decimals,
+    erc4626.totalAssets,
+    erc4626.convertToShares,
+    erc4626.convertToAssets,
+    erc4626.maxDeposit,
+    erc4626.previewDeposit,
+    erc4626.maxMint,
+    erc4626.previewMint,
+    erc4626.maxWithdraw,
+    erc4626.previewWithdraw,
+    erc4626.maxRedeem,
+    erc4626.previewRedeem,
+    erc4626.asset,
     erc4626.ownable.transfer_ownership,
     erc4626.ownable.owner
 )
@@ -266,4 +282,39 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
 
-# XXX checkpoint at transfers, desposits and withdrawals, adding rewards
+@external
+def deposit(assets: uint256, receiver: address) -> uint256:
+    assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
+    shares: uint256 = erc4626._preview_deposit(assets)
+    self._checkpoint_user(receiver)
+    erc4626._deposit(msg.sender, receiver, assets, shares)
+    return shares
+
+
+@external
+def mint(shares: uint256, receiver: address) -> uint256:
+    assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
+    assets: uint256 = erc4626._preview_mint(shares)
+    erc4626._deposit(msg.sender, receiver, assets, shares)
+    return assets
+
+
+@external
+def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
+    assert assets <= erc4626._max_withdraw(receiver), "erc4626: withdraw more than maximum"
+    shares: uint256 = erc4626._preview_withdraw(assets)
+    self._checkpoint_user(receiver)
+    erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
+    return shares
+
+
+@external
+def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
+    assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
+    assets: uint256 = erc4626._preview_redeem(shares)
+    self._checkpoint_user(receiver)
+    erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
+    return assets
+
+
+# XXX checkpoint at transfers
