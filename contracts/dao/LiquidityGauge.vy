@@ -118,21 +118,24 @@ def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardInteg
     r: RewardIntegrals = empty(RewardIntegrals)
 
     r.integral_inv_supply = self.integral_inv_supply
-    r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc4626.erc20.totalSupply
-    r.integral_inv_supply.t = block.timestamp
+    if block.timestamp > r.integral_inv_supply.t:
+        r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc4626.erc20.totalSupply
+        r.integral_inv_supply.t = block.timestamp
 
-    r.reward_rate_integral = self.reward_rate_integral[reward]
-    if block.timestamp > r.reward_rate_integral.t:
-        r.reward_rate_integral.v += (r.integral_inv_supply.v - self.integral_inv_supply_4_token[reward]) * d_reward //\
-           (block.timestamp - r.reward_rate_integral.t)
-        r.reward_rate_integral.t = block.timestamp
+    if reward.address != empty(address):
+        r.reward_rate_integral = self.reward_rate_integral[reward]
+        if block.timestamp > r.reward_rate_integral.t:
+            r.reward_rate_integral.v += (r.integral_inv_supply.v - self.integral_inv_supply_4_token[reward]) * d_reward //\
+               (block.timestamp - r.reward_rate_integral.t)
+            r.reward_rate_integral.t = block.timestamp
 
-    r.user_rewards_integral = self.user_rewards_integral[user][reward]
-    if block.timestamp > r.user_rewards_integral.t:
-        r.d_user_reward = (r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward]) *\
-            erc4626.erc20.balanceOf[user] // 10**18
-        r.user_rewards_integral.v += r.d_user_reward
-        r.user_rewards_integral.t = block.timestamp
+    if user != empty(address):
+        r.user_rewards_integral = self.user_rewards_integral[user][reward]
+        if block.timestamp > r.user_rewards_integral.t:
+            r.d_user_reward = (r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward]) *\
+                erc4626.erc20.balanceOf[user] // 10**18
+            r.user_rewards_integral.v += r.d_user_reward
+            r.user_rewards_integral.t = block.timestamp
 
     return r
 
@@ -234,3 +237,6 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
     self.rewards[token] = r
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
+
+
+# XXX checkpoint at transfers
