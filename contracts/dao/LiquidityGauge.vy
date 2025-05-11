@@ -295,6 +295,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 def mint(shares: uint256, receiver: address) -> uint256:
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
+    self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
     return assets
 
@@ -303,7 +304,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     assert assets <= erc4626._max_withdraw(receiver), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
-    self._checkpoint_user(receiver)
+    self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     return shares
 
@@ -312,7 +313,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
-    self._checkpoint_user(receiver)
+    self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     return assets
 
