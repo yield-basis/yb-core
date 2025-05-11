@@ -157,15 +157,20 @@ def _get_vested_rewards(token: IERC20) -> uint256:
         return 0
 
 
-@external
-@nonreentrant
-def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
+@internal
+def _vest_rewards(reward: IERC20) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = extcall GC.emit()
     else:
         d_reward = self._get_vested_rewards(reward)
+    return d_reward
 
+
+@external
+@nonreentrant
+def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
+    d_reward: uint256 = self._vest_rewards(reward)
     r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
 
     self.integral_inv_supply = r.integral_inv_supply
@@ -221,8 +226,13 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     if msg.sender != r.distributor:
         erc4626.ownable._check_owner()
 
-    last_reward_time: uint256 = self.reward_rate_integral[token].t
-    used_rewards: uint256 = self.reward_rate_integral[token].v
+    d_reward: uint256 = self._vest_rewards(token)
+    ri: RewardIntegrals = self._checkpoint(token, d_reward, empty(address))
+    self.integral_inv_supply = ri.integral_inv_supply
+    self.integral_inv_supply_4_token[token] = ri.integral_inv_supply.v
+    self.reward_rate_integral[token] = ri.reward_rate_integral
+
+    used_rewards: uint256 = ri.reward_rate_integral.v
 
     if finish_time > 0:
         # Change rate to meet new finish time
@@ -230,8 +240,8 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
         r.finish_time = finish_time
     else:
         # Keep the reward rate
-        assert r.finish_time > last_reward_time, "Rate unknown"
-        r.finish_time = last_reward_time + (r.finish_time - last_reward_time) * (r.total + amount) // r.total
+        assert r.finish_time > block.timestamp, "Rate unknown"
+        r.finish_time = block.timestamp + (r.finish_time - block.timestamp) * (r.total + amount) // r.total
     r.total += amount
 
     assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
