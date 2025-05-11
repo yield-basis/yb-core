@@ -11,7 +11,7 @@ module.exports = {
             throwOnTransactionFailures: true,
             throwOnCallFailures: true,
             blockGasLimit: 100000000,
-            chainId: 1
+            chainId: 31337
        }
     }
 }
