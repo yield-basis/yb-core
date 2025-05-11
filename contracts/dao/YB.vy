@@ -19,7 +19,8 @@ exports: (
     erc20.IERC20,
     erc20.IERC20Detailed,
     erc20.mint,
-    ownable.renounce_ownership,
+    erc20.renounce_ownership,
+    erc20.is_minter,
     erc20.set_minter
 )
 
