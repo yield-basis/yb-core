@@ -18,6 +18,7 @@ initializes: erc20[ownable := ownable]
 exports: (
     erc20.IERC20,
     erc20.IERC20Detailed,
+    erc20.mint,
     ownable.renounce_ownership,
     erc20.set_minter
 )
