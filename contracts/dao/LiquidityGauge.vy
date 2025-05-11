@@ -75,7 +75,7 @@ LP_TOKEN: public(immutable(IERC20))
 
 
 reward_count: public(uint256)
-reward_tokens: public(HashMap[uint256, IERC20])
+reward_tokens: public(IERC20[MAX_REWARDS])
 rewards: public(HashMap[IERC20, Reward])
 
 integral_inv_supply: public(Integral)
@@ -239,4 +239,4 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
 
-# XXX checkpoint at transfers, desposits and withdrawals
+# XXX checkpoint at transfers, desposits and withdrawals, adding rewards
