@@ -167,6 +167,23 @@ def _vest_rewards(reward: IERC20) -> uint256:
     return d_reward
 
 
+@internal
+def _checkpoint_user(user: address):
+    n: uint256 = self.reward_count
+    for i: uint256 in range(MAX_REWARDS):
+        if i == n:
+            break
+        reward: IERC20 = self.reward_tokens[i]
+        d_reward: uint256 = self._vest_rewards(reward)
+        r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
+        if i == 0:
+            self.integral_inv_supply = r.integral_inv_supply
+        self.integral_inv_supply_4_token[reward] = r.integral_inv_supply.v
+        self.reward_rate_integral[reward] = r.reward_rate_integral
+        self.reward_rate_integral_4_user[user][reward] = r.reward_rate_integral.v
+        self.user_rewards_integral[user][reward] = r.user_rewards_integral
+
+
 @external
 @nonreentrant
 def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
