@@ -239,4 +239,4 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
 
-# XXX checkpoint at transfers
+# XXX checkpoint at transfers, desposits and withdrawals
