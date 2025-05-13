@@ -181,7 +181,7 @@ def __init__(asset_token: IERC20, stablecoin: IERC20, cryptopool: CurveCryptoPoo
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
     """
     # Example:
-    # deposit_token = WBTC
+    # asset_token = WBTC
     # stablecoin = crvUSD
     # cryptopool = WBTC LP
 
@@ -272,18 +272,20 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     v_st_ideal: int256 = convert(prev.ideal_staked, int256)
     # ideal_staked is set when some tokens are transferred to staker address
 
-    dv_use: int256 = value_change * (10**18 - f_a) // 10**18
-    prev.admin += (value_change - dv_use)
+    # _36 postifix is to emphasize that the value is 1e36-based, not 1e18, for type tracking purposes
+
+    dv_use_36: int256 = value_change * (10**18 - f_a)
+    prev.admin += (value_change - dv_use_36 // 10**18)
 
     # dv_s is guaranteed to be <= dv_use
     # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
-    dv_s: int256 = dv_use * staked // supply
-    if dv_use > 0:
-        dv_s = min(dv_s, max(v_st_ideal - v_st, 0))
+    dv_s_36: int256 = dv_use_36 * staked // supply
+    if dv_use_36 > 0:
+        dv_s_36 = min(dv_s_36, max(v_st_ideal - v_st, 0) * 10**18)
 
     # new_staked_value is guaranteed to be <= new_total_value
-    new_total_value: int256 = max(prev_value + dv_use, 0)
-    new_staked_value: int256 = max(v_st + dv_s, 0)
+    new_total_value_36: int256 = max(prev_value * 10**18 + dv_use_36, 0)
+    new_staked_value_36: int256 = max(v_st * 10**18 + dv_s_36, 0)
 
     # Solution of:
     # staked - token_reduction       new_staked_value
@@ -300,7 +302,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # So when eps < 1e-8 - we'll limit token_reduction
 
     # If denominator is 0 -> token_reduction = 0 (not a revert)
-    token_reduction: int256 = unsafe_div(staked * new_total_value - new_staked_value * supply, new_total_value - new_staked_value)
+    token_reduction: int256 = unsafe_div(staked * new_total_value_36 - new_staked_value_36 * supply, new_total_value_36 - new_staked_value_36)
 
     max_token_reduction: int256 = abs(value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION)
 
@@ -315,7 +317,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     else:
         token_reduction = max(token_reduction, -max_token_reduction)
     # And don't allow negatives if denominator was too small
-    if new_total_value - new_staked_value < 10**4:
+    if new_total_value_36 - new_staked_value_36 < 10**4 * 10**18:
         token_reduction = max(token_reduction, 0)
 
     # Supply changes each time:
@@ -324,9 +326,9 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 
     return LiquidityValuesOut(
         admin=prev.admin,
-        total=convert(new_total_value, uint256),
+        total=convert(new_total_value_36 // 10**18, uint256),
         ideal_staked=prev.ideal_staked,
-        staked=convert(new_staked_value, uint256),
+        staked=convert(new_staked_value_36 // 10**18, uint256),
         staked_tokens=convert(staked - token_reduction, uint256),
         supply_tokens=convert(supply - token_reduction, uint256)
     )
@@ -509,7 +511,7 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
 
     frac: uint256 = 10**18 * shares // supply
     if lv.admin > 0 and lv.total != 0:
-        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+        frac = frac * lv.total // (convert(lv.admin, uint256) + lv.total)
 
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
@@ -552,7 +554,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     frac: uint256 = 10**18 * shares // supply
     frac_clean: int256 = convert(frac, int256)
     if lv.admin > 0 and lv.total != 0:
-        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+        frac = frac * lv.total // (convert(lv.admin, uint256) + lv.total)
 
     withdrawn_levamm: Pair = extcall amm._withdraw(frac)
     assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
@@ -678,6 +680,9 @@ def withdraw_admin_fees():
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
     assert fee_receiver != empty(address), "No fee_receiver"
 
+    staker: address = self.staker
+    assert fee_receiver != staker, "Staker=fee_receiver"
+
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     assert v.admin >= 0, "Loss made admin fee negative"
     self.totalSupply = v.supply_tokens
@@ -689,7 +694,6 @@ def withdraw_admin_fees():
     self.liquidity.total = new_total
     self.liquidity.admin = 0
     self.liquidity.staked = v.staked
-    staker: address = self.staker
     if staker != empty(address):
         self.balanceOf[staker] = v.staked_tokens
 
