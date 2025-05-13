@@ -181,7 +181,7 @@ def __init__(asset_token: IERC20, stablecoin: IERC20, cryptopool: CurveCryptoPoo
     @param admin Admin which can set callbacks, stablecoin allocator and fee. Sensitive!
     """
     # Example:
-    # deposit_token = WBTC
+    # asset_token = WBTC
     # stablecoin = crvUSD
     # cryptopool = WBTC LP
 
