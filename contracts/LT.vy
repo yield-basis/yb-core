@@ -511,7 +511,7 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
 
     frac: uint256 = 10**18 * shares // supply
     if lv.admin > 0 and lv.total != 0:
-        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+        frac = frac * lv.total // (convert(lv.admin, uint256) + lv.total)
 
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
@@ -554,7 +554,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     frac: uint256 = 10**18 * shares // supply
     frac_clean: int256 = convert(frac, int256)
     if lv.admin > 0 and lv.total != 0:
-        frac = frac * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+        frac = frac * lv.total // (convert(lv.admin, uint256) + lv.total)
 
     withdrawn_levamm: Pair = extcall amm._withdraw(frac)
     assert extcall CRYPTOPOOL.transferFrom(amm.address, self, withdrawn_levamm.collateral, default_return_value=True)
