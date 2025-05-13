@@ -680,6 +680,9 @@ def withdraw_admin_fees():
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
     assert fee_receiver != empty(address), "No fee_receiver"
 
+    staker: address = self.staker
+    assert fee_receiver != staker, "Staker=fee_receiver"
+
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     assert v.admin >= 0, "Loss made admin fee negative"
     self.totalSupply = v.supply_tokens
@@ -691,7 +694,6 @@ def withdraw_admin_fees():
     self.liquidity.total = new_total
     self.liquidity.admin = 0
     self.liquidity.staked = v.staked
-    staker: address = self.staker
     if staker != empty(address):
         self.balanceOf[staker] = v.staked_tokens
 
