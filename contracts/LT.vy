@@ -251,6 +251,28 @@ def min_admin_fee() -> uint256:
 
 
 @internal
+@pure
+def mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
+    sign: int256 = 1
+    ux: int256 = x
+    uy: int256 = y
+    ud: int256 = denominator
+    if x < 0:
+        sign = -1
+        ux = -x
+    if y < 0:
+        sign = -sign
+        uy = -y
+    if denominator < 0:
+        sign = -sign
+        ud = -denominator
+    return sign * convert(
+        math._mul_div(convert(ux, uint256), convert(uy, uint256), convert(ud, uint256), False),
+        int256
+    )
+
+
+@internal
 @view
 def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
@@ -280,7 +302,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 
     # dv_s is guaranteed to be <= dv_use
     # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
-    dv_s_36: int256 = dv_use_36 * staked // supply
+    dv_s_36: int256 = self.mul_div_signed(dv_use_36, staked, supply)
     if dv_use_36 > 0:
         dv_s_36 = min(dv_s_36, max(v_st_ideal - v_st, 0) * 10**18)
 
@@ -303,7 +325,9 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # So when eps < 1e-8 - we'll limit token_reduction
 
     # If denominator is 0 -> token_reduction = 0 (not a revert)
-    token_reduction: int256 = unsafe_div(staked * new_total_value_36 - new_staked_value_36 * supply, new_total_value_36 - new_staked_value_36)
+
+    token_reduction: int256 = new_total_value_36 - new_staked_value_36  # Denominator
+    token_reduction = self.mul_div_signed(new_total_value_36, staked, token_reduction) - self.mul_div_signed(new_staked_value_36, supply, token_reduction)
 
     max_token_reduction: int256 = abs(value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION)
 
