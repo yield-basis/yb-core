@@ -10,7 +10,8 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 from collections import namedtuple
 
 
-ValuesOut = namedtuple('ValuesOut', ['admin', 'total', 'ideal_staked', 'staked', 'staked_tokens', 'supply_tokens'])
+ValuesOut = namedtuple('ValuesOut', ['admin', 'total', 'ideal_staked', 'staked', 'staked_tokens', 'supply_tokens',
+                                     'token_reduction'])
 
 
 class StatefulTrader(RuleBasedStateMachine):

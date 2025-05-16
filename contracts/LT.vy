@@ -102,6 +102,7 @@ struct LiquidityValuesOut:
     staked: uint256
     staked_tokens: uint256
     supply_tokens: uint256
+    token_reduction: int256
 
 
 event SetStaker:
@@ -330,8 +331,17 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         ideal_staked=prev.ideal_staked,
         staked=convert(new_staked_value_36 // 10**18, uint256),
         staked_tokens=convert(staked - token_reduction, uint256),
-        supply_tokens=convert(supply - token_reduction, uint256)
+        supply_tokens=convert(supply - token_reduction, uint256),
+        token_reduction=token_reduction
     )
+
+
+@internal
+def _log_token_reduction(staker: address, token_reduction: int256):
+    if token_reduction < 0:
+        log IERC20.Transfer(sender=empty(address), receiver=staker, value=convert(-token_reduction, uint256))
+    if token_reduction > 0:
+        log IERC20.Transfer(sender=staker, receiver=empty(address), value=convert(token_reduction, uint256))
 
 
 @external
@@ -421,6 +431,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
         if staker != empty(address):
             self.balanceOf[staker] = liquidity_values.staked_tokens
+            self._log_token_reduction(staker, liquidity_values.token_reduction)
         # ideal_staked is only changed when we transfer coins to staker
         shares = supply * value_after // value_before - supply
 
@@ -470,6 +481,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
     if staker != empty(address):
         self.balanceOf[staker] = liquidity_values.staked_tokens
+        self._log_token_reduction(staker, liquidity_values.token_reduction)
 
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
@@ -696,6 +708,7 @@ def withdraw_admin_fees():
     self.liquidity.staked = v.staked
     if staker != empty(address):
         self.balanceOf[staker] = v.staked_tokens
+        self._log_token_reduction(staker, v.token_reduction)
 
     log WithdrawAdminFees(receiver=fee_receiver, amount=to_mint)
 
@@ -787,6 +800,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
             self.liquidity.total = liquidity.total
             self.totalSupply = liquidity.supply_tokens
             self.balanceOf[staker] = liquidity.staked_tokens
+            self._log_token_reduction(staker, liquidity.token_reduction)
 
         if _from == staker:
             # Reduce the staked part
