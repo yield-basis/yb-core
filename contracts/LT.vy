@@ -102,6 +102,7 @@ struct LiquidityValuesOut:
     staked: uint256
     staked_tokens: uint256
     supply_tokens: uint256
+    token_reduction: int256
 
 
 event SetStaker:
@@ -250,6 +251,23 @@ def min_admin_fee() -> uint256:
 
 
 @internal
+@pure
+def mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
+    value: int256 = convert(
+        math._mul_div(
+            convert(abs(x), uint256),
+            convert(abs(y), uint256),
+            convert(abs(denominator), uint256),
+            False),
+        int256)
+
+    if ((x < 0) != (y < 0)) != (denominator < 0):
+        value = -value
+
+    return value
+
+
+@internal
 @view
 def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
@@ -279,7 +297,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 
     # dv_s is guaranteed to be <= dv_use
     # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
-    dv_s_36: int256 = dv_use_36 * staked // supply
+    dv_s_36: int256 = self.mul_div_signed(dv_use_36, staked, supply)
     if dv_use_36 > 0:
         dv_s_36 = min(dv_s_36, max(v_st_ideal - v_st, 0) * 10**18)
 
@@ -302,7 +320,9 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # So when eps < 1e-8 - we'll limit token_reduction
 
     # If denominator is 0 -> token_reduction = 0 (not a revert)
-    token_reduction: int256 = unsafe_div(staked * new_total_value_36 - new_staked_value_36 * supply, new_total_value_36 - new_staked_value_36)
+
+    token_reduction: int256 = new_total_value_36 - new_staked_value_36  # Denominator
+    token_reduction = self.mul_div_signed(new_total_value_36, staked, token_reduction) - self.mul_div_signed(new_staked_value_36, supply, token_reduction)
 
     max_token_reduction: int256 = abs(value_change * supply // (prev_value + value_change + 1) * (10**18 - f_a) // SQRT_MIN_UNSTAKED_FRACTION)
 
@@ -330,8 +350,17 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         ideal_staked=prev.ideal_staked,
         staked=convert(new_staked_value_36 // 10**18, uint256),
         staked_tokens=convert(staked - token_reduction, uint256),
-        supply_tokens=convert(supply - token_reduction, uint256)
+        supply_tokens=convert(supply - token_reduction, uint256),
+        token_reduction=token_reduction
     )
+
+
+@internal
+def _log_token_reduction(staker: address, token_reduction: int256):
+    if token_reduction < 0:
+        log IERC20.Transfer(sender=empty(address), receiver=staker, value=convert(-token_reduction, uint256))
+    if token_reduction > 0:
+        log IERC20.Transfer(sender=staker, receiver=empty(address), value=convert(token_reduction, uint256))
 
 
 @external
@@ -421,6 +450,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
         if staker != empty(address):
             self.balanceOf[staker] = liquidity_values.staked_tokens
+            self._log_token_reduction(staker, liquidity_values.token_reduction)
         # ideal_staked is only changed when we transfer coins to staker
         shares = supply * value_after // value_before - supply
 
@@ -470,6 +500,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
     if staker != empty(address):
         self.balanceOf[staker] = liquidity_values.staked_tokens
+        self._log_token_reduction(staker, liquidity_values.token_reduction)
 
     admin_balance: uint256 = convert(max(liquidity_values.admin, 0), uint256)
 
@@ -696,6 +727,7 @@ def withdraw_admin_fees():
     self.liquidity.staked = v.staked
     if staker != empty(address):
         self.balanceOf[staker] = v.staked_tokens
+        self._log_token_reduction(staker, v.token_reduction)
 
     log WithdrawAdminFees(receiver=fee_receiver, amount=to_mint)
 
@@ -787,6 +819,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
             self.liquidity.total = liquidity.total
             self.totalSupply = liquidity.supply_tokens
             self.balanceOf[staker] = liquidity.staked_tokens
+            self._log_token_reduction(staker, liquidity.token_reduction)
 
         if _from == staker:
             # Reduce the staked part
