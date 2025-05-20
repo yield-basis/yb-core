@@ -566,7 +566,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
     @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
     """
-    assert receiver != self.staker, "Withdraw to staker"
+    staker: address = self.staker
+    assert receiver != staker, "Withdraw to staker"
 
     supply: uint256 = 0
     lv: LiquidityValuesOut = empty(LiquidityValuesOut)
@@ -582,6 +583,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
         self.liquidity.total = lv.total
         self.liquidity.staked = lv.staked
         self.totalSupply = supply
+        self.balanceOf[staker] = lv.staked_tokens
+        self._log_token_reduction(staker, lv.token_reduction)
 
     assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
 
