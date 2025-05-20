@@ -17,6 +17,7 @@ demo_user_key = bytes.fromhex("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efca
 BTC_TOKEN = "0x18084fba666a33d37592fa2633fd49a74dd93a88"
 USD_TOKEN = "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e"
 TEST_RESERVE = "0x2889302a794da87fbf1d6db415c1492194663d13"
+AGG = "0x18672b1b0c623a30089A280Ed9256379fb0E4E62"
 
 
 if __name__ == '__main__':
@@ -43,13 +44,13 @@ if __name__ == '__main__':
         usd.transfer(admin, 200_000 * 10**18)
 
     with boa.env.prank(admin):
-        amm_interface = boa.load_partial('contracts/twocrypto/CurveTwocryptoOptimized.vy')
+        amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
-        math_impl = boa.load('contracts/twocrypto/CurveCryptoMathOptimized2.vy')
-        views_impl = boa.load('contracts/twocrypto/CurveCryptoViews2Optimized.vy')
+        math_impl = boa.load('contracts/testing/twocrypto/StableswapMath.vy')
+        views_impl = boa.load('contracts/testing/twocrypto/TwocryptoView.vy')
         gauge_impl = "0x0000000000000000000000000000000000000000"
 
-        factory = boa.load('contracts/twocrypto/CurveTwocryptoFactory.vy')
+        factory = boa.load('contracts/testing/twocrypto/TwocryptoFactory.vy')
         factory.initialise_ownership(admin, admin)
         factory.set_pool_implementation(amm_impl, 0)
         factory.set_gauge_implementation(gauge_impl)
@@ -74,7 +75,7 @@ if __name__ == '__main__':
                 100_000 * 10**18  # initial_price: uint256
             ))
 
-        cryptopool_oracle = boa.load('contracts/CryptopoolLPOracle.vy', pool.address)
+        cryptopool_oracle = boa.load('contracts/CryptopoolLPOracle.vy', pool.address, AGG)
 
         lt = boa.load(
             'contracts/LT.vy',
