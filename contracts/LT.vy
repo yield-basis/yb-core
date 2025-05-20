@@ -482,7 +482,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     assert shares > 0, "Withdrawing nothing"
 
     staker: address = self.staker
-    assert receiver != staker, "Withdraw to staker"
+    assert staker not in [msg.sender, receiver], "Withdraw to/from staker"
 
     assert not (staticcall self.amm.is_killed()), "We're dead. Use emergency_withdraw"
 
@@ -567,7 +567,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
     """
     staker: address = self.staker
-    assert receiver != staker, "Withdraw to staker"
+    assert staker not in [msg.sender, receiver], "Withdraw to/from staker"
 
     supply: uint256 = 0
     lv: LiquidityValuesOut = empty(LiquidityValuesOut)
