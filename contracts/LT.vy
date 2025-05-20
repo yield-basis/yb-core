@@ -40,7 +40,7 @@ interface LevAMM:
     def set_fee(fee: uint256): nonpayable
 
 interface CurveCryptoPool:
-    def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
+    def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address, donation: bool) -> uint256: nonpayable
     def remove_liquidity(amount: uint256, min_amounts: uint256[2]) -> uint256[2]: nonpayable
     def lp_price() -> uint256: view
     def get_virtual_price() -> uint256: view
@@ -54,10 +54,8 @@ interface CurveCryptoPool:
     def approve(_to: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
-    def donate(amounts: uint256[2], min_amount: uint256): nonpayable
     def remove_liquidity_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256, min_amount_j: uint256) -> uint256: nonpayable
     def calc_withdraw_fixed_out(token_amount: uint256, i: uint256, amount_i: uint256) -> uint256: view
-    def calc_remove_liquidity(amount: uint256) -> uint256[2]: view
 
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
@@ -422,7 +420,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
-    lp_tokens: uint256 = extcall CRYPTOPOOL.add_liquidity([debt, assets], 0, amm.address)
+    lp_tokens: uint256 = extcall CRYPTOPOOL.add_liquidity([debt, assets], 0, amm.address, False)
     p_o: uint256 = self._price_oracle_w()
 
     supply: uint256 = self.totalSupply
@@ -484,7 +482,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     assert shares > 0, "Withdrawing nothing"
 
     staker: address = self.staker
-    assert receiver != staker, "Withdraw to staker"
+    assert staker not in [msg.sender, receiver], "Withdraw to/from staker"
 
     assert not (staticcall self.amm.is_killed()), "We're dead. Use emergency_withdraw"
 
@@ -547,7 +545,12 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
     lp_collateral: uint256 = (staticcall amm.collateral_amount()) * frac // 10**18
     debt: int256 = convert(math._ceil_div((staticcall amm.get_debt()) * frac, 10**18), int256)
 
-    withdraw_amounts: uint256[2] = staticcall CRYPTOPOOL.calc_remove_liquidity(lp_collateral)
+    cryptopool_supply: uint256 = staticcall CRYPTOPOOL.totalSupply()
+    withdraw_amounts: uint256[2] = [staticcall CRYPTOPOOL.balances(0), staticcall CRYPTOPOOL.balances(1)]
+    withdraw_amounts = [
+        lp_collateral * withdraw_amounts[0] // cryptopool_supply,
+        lp_collateral * withdraw_amounts[1] // cryptopool_supply
+    ]
 
     return (withdraw_amounts[1], convert(withdraw_amounts[0], int256) - debt)
 
@@ -563,7 +566,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     @param receiver Receiver of the assets who is optional. If not specified - receiver is the sender
     @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
     """
-    assert receiver != self.staker, "Withdraw to staker"
+    staker: address = self.staker
+    assert staker not in [msg.sender, receiver], "Withdraw to/from staker"
 
     supply: uint256 = 0
     lv: LiquidityValuesOut = empty(LiquidityValuesOut)
@@ -579,6 +583,8 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
         self.liquidity.total = lv.total
         self.liquidity.staked = lv.staked
         self.totalSupply = supply
+        self.balanceOf[staker] = lv.staked_tokens
+        self._log_token_reduction(staker, lv.token_reduction)
 
     assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
 
@@ -695,7 +701,7 @@ def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
     min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
-    extcall CRYPTOPOOL.donate([amount, 0], min_amount)
+    extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, self, True)
     log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
 
 

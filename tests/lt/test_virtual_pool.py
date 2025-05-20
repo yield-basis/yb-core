@@ -53,3 +53,4 @@ def test_virtual_pool(factory, cryptopool, yb_lt, collateral_token, stablecoin, 
                 assert before[i] - after[i] == in_amount
                 assert after[j] - before[j] == out_amount
                 assert before[2] == after[2] == 0
+                assert abs(expected_out - out_amount) / expected_out < 3e-5
