@@ -20,14 +20,12 @@ event FlashLoan:
 
 CRVUSD: immutable(address)
 fee: public(constant(uint256)) = 0  # 1 == 0.01 %
-ceiling: public(uint256)
 
 
 @deploy
-def __init__(crvusd: address, ceiling: uint256):
+def __init__(crvusd: address):
     CRVUSD = crvusd
     extcall ERC20(CRVUSD).approve(msg.sender, max_value(uint256))
-    self.ceiling = ceiling
 
 
 @external
@@ -48,9 +46,10 @@ def flashLoan(receiver: ERC3156FlashBorrower, token: address, amount: uint256, d
     @param data A data parameter to be passed on to the `receiver` for any custom use.
     """
     assert token == CRVUSD, "FlashLender: Unsupported currency"
+    ceiling: uint256 = staticcall ERC20(CRVUSD).balanceOf(self)
     extcall ERC20(CRVUSD).transfer(receiver.address, amount)
     extcall receiver.onFlashLoan(msg.sender, CRVUSD, amount, 0, data)
-    assert staticcall ERC20(CRVUSD).balanceOf(self) >= self.ceiling, "FlashLender: Repay failed"
+    assert staticcall ERC20(CRVUSD).balanceOf(self) >= ceiling, "FlashLender: Repay failed"
 
     log FlashLoan(caller=msg.sender, receiver=receiver.address, amount=amount)
 
