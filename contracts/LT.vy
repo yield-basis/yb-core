@@ -574,7 +574,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     amm: LevAMM = self.amm
     killed: bool = staticcall amm.is_killed()
 
-    if killed:
+    if killed or staker == empty(address):
         supply = self.totalSupply
     else:
         lv = self._calculate_values(self._price_oracle_w())
