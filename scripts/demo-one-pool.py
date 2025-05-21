@@ -7,6 +7,10 @@ from time import sleep
 import subprocess
 from eth_account import account
 from boa.network import ExternalAccount
+from collections import namedtuple
+
+
+Market = namedtuple('Market', ['asset', 'cryptopool', 'amm', 'lt', 'price_oracle', 'virtual_pool', 'staker'])
 
 
 NETWORK = "http://localhost:8545"
@@ -18,6 +22,7 @@ BTC_TOKEN = "0x18084fba666a33d37592fa2633fd49a74dd93a88"
 USD_TOKEN = "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e"
 TEST_RESERVE = "0x2889302a794da87fbf1d6db415c1492194663d13"
 AGG = "0x18672b1b0c623a30089A280Ed9256379fb0E4E62"
+FLASH = "0xC9332fdCB1C491Dcc683bAe86Fe3cb70360738BC"
 
 
 if __name__ == '__main__':
@@ -75,51 +80,65 @@ if __name__ == '__main__':
                 100_000 * 10**18  # initial_price: uint256
             ))
 
-        cryptopool_oracle = boa.load('contracts/CryptopoolLPOracle.vy', pool.address, AGG)
+        amm_interface = boa.load_partial('contracts/AMM.vy')
+        yb_amm_impl = amm_interface.deploy_as_blueprint()
+        lt_interface = boa.load_partial('contracts/LT.vy')
+        yb_lt_impl = lt_interface.deploy_as_blueprint()
+        vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
+        oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
+        gauge_impl = "0x0000000000000000000000000000000000000000"
+        # agg
+        # flash
+        fee_receiver = "0x0000000000000000000000000000000000000000"
 
-        lt = boa.load(
-            'contracts/LT.vy',
-            btc.address,
-            usd.address,
-            pool.address,
+        factory = boa.load(
+            'contracts/Factory.vy',
+            USD_TOKEN,
+            yb_amm_impl,
+            yb_lt_impl,
+            vpool_impl,
+            oracle_impl,
+            gauge_impl,
+            AGG,
+            FLASH,
+            fee_receiver,
+            admin,
             admin)
-
-        amm = boa.load(
-            'contracts/AMM.vy',
-            lt.address,
-            usd.address,
-            pool.address,
-            2 * 10**18,  # leverage = 2.0
-            int(0.007e18),  # fee
-            cryptopool_oracle.address
-        )
-        lt.set_amm(amm.address)
 
         # Seed liqudiity with 2 dollars
         btc.approve(pool.address, 2**256-1)
         usd.approve(pool.address, 2**256-1)
         pool.add_liquidity([10**18, 10**18 // 100_000], 0)
 
-        usd.approve(lt.address, 2**256-1)
-        lt.allocate_stablecoins(admin, 200_000 * 10**18)
+        # Get stables for factory
+        usd.approve(factory.address, 2**256-1)
+        factory.set_allocator(admin, 200_000 * 10**18)
 
-    print(f"Pool:   {pool.address}")
-    print(f"AMM:    {amm.address}")
-    print(f"LT:     {lt.address}")
+        # Create market
+        factory.add_market(pool.address, int(0.01 * 1e18), int(0.1 / (365 * 86400) * 1e18), 200_000 * 10**18)
+        market = Market(*factory.markets(0))
+
+    print(f"Pool:   {market.cryptopool}")
+    print(f"AMM:    {market.amm}")
+    print(f"LT:     {market.lt}")
+    print(f"VPool:  {market.virtual_pool}")
+
+    yb_amm = amm_interface.at(market.amm)
+    yb_lt = lt_interface.at(market.lt)
 
     with open('pool_abi.json', 'w') as f:
         json.dump(pool.abi, f)
 
     with open('amm_abi.json', 'w') as f:
-        json.dump(amm.abi, f)
+        json.dump(yb_amm.abi, f)
 
     with open('lt_abi.json', 'w') as f:
-        json.dump(lt.abi, f)
+        json.dump(yb_lt.abi, f)
 
     if '--deposit' in sys.argv[1:]:
         print('Simulating deposit')
-        btc.approve(lt.address, 2**256-1)
-        lt.deposit(int(0.5e18), int(50_000e18), 0)
+        btc.approve(yb_lt.address, 2**256-1)
+        yb_lt.deposit(int(0.5e18), int(50_000e18), 0)
         print('Deposited')
 
     if '--hardhat' in sys.argv[1:]:
