@@ -23,9 +23,9 @@ fee: public(constant(uint256)) = 0  # 1 == 0.01 %
 
 
 @deploy
-def __init__(crvusd: address):
+def __init__(crvusd: address, admin: address):
     CRVUSD = crvusd
-    extcall ERC20(CRVUSD).approve(msg.sender, max_value(uint256))
+    extcall ERC20(CRVUSD).approve(admin, max_value(uint256))
 
 
 @external

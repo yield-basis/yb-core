@@ -111,8 +111,8 @@ def gauge_impl(gauge_interface):
 
 
 @pytest.fixture(scope="session")
-def flash(stablecoin):
-    return boa.load('contracts/testing/FlashLender.vy', stablecoin.address)
+def flash(stablecoin, admin):
+    return boa.load('contracts/testing/FlashLender.vy', stablecoin.address, admin)
 
 
 @pytest.fixture(scope="session")
