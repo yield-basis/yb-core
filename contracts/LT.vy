@@ -251,6 +251,9 @@ def min_admin_fee() -> uint256:
 @internal
 @pure
 def mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
+    if denominator == 0:
+        return 0
+
     value: int256 = convert(
         math._mul_div(
             convert(abs(x), uint256),
