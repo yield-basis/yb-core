@@ -1,6 +1,6 @@
 # @version 0.4.1
 """
-@title crvUSD Fake FlashLender
+@title crvUSD Test FlashLender
 @notice ERC3156 contract for crvUSD flash loans
 """
 
