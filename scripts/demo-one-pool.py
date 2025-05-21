@@ -118,13 +118,17 @@ if __name__ == '__main__':
         factory.add_market(pool.address, int(0.01 * 1e18), int(0.1 / (365 * 86400) * 1e18), 200_000 * 10**18)
         market = Market(*factory.markets(0))
 
-    print(f"Pool:   {market.cryptopool}")
-    print(f"AMM:    {market.amm}")
-    print(f"LT:     {market.lt}")
-    print(f"VPool:  {market.virtual_pool}")
+    print(f"Factory: {factory.address}")
+    print(f"Pool:    {market.cryptopool}")
+    print(f"AMM:     {market.amm}")
+    print(f"LT:      {market.lt}")
+    print(f"VPool:   {market.virtual_pool}")
 
     yb_amm = amm_interface.at(market.amm)
     yb_lt = lt_interface.at(market.lt)
+
+    with open('factory_abi.json', 'w') as f:
+        json.dump(factory.abi, f)
 
     with open('pool_abi.json', 'w') as f:
         json.dump(pool.abi, f)
