@@ -65,19 +65,19 @@ if __name__ == '__main__':
         # Params have nothing to do with reality!
         pool = amm_interface.at(
             factory.deploy_pool(
-                "Test pool",  # _name: String[64]
+                "Test WBTC/crvUSD pool",  # _name: String[64]
                 "TST",  # _symbol: String[32]
                 [usd.address, btc.address],
                 0,  # implementation_id: uint256
-                5 * 10000 * 2**2,  # A: uint256
-                int(1e-5 * 1e18),  # gamma: uint256
-                int(0.0025 * 1e10),  # mid_fee: uint256
-                int(0.0045 * 1e10),  # out_fee: uint256
-                int(0.01 * 1e18),  # fee_gamma: uint256
-                int(1e-10 * 1e18),  # allowed_extra_profit: uint256
-                int(1e-6 * 1e18),  # adjustment_step: uint256
-                600,  # ma_exp_time: uint256
-                100_000 * 10**18  # initial_price: uint256
+                int(15.68 * 10000 * 2**2),  # A: uint256
+                int(1e-5 * 1e18),           # gamma: uint256 <- does not matter with stableswap
+                int(0.003 * 1e10),          # mid_fee: uint256
+                int(0.0227 * 1e10),         # out_fee: uint256
+                int(0.196 * 1e18),          # fee_gamma: uint256
+                int(1e-10 * 1e18),          # allowed_extra_profit: uint256
+                int(1e-6 * 1e18),           # adjustment_step: uint256
+                600,                        # ma_exp_time: uint256
+                100_000 * 10**18            # initial_price: uint256  XXX
             ))
 
         amm_interface = boa.load_partial('contracts/AMM.vy')
