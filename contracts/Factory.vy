@@ -1,6 +1,6 @@
 # @version 0.4.1
 """
-@title LT
+@title Factory
 @notice Factory for Yield Basis
 @author Scientia Spectra AG
 @license Copyright (c) 2025

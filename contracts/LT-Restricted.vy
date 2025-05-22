@@ -1,6 +1,6 @@
 # @version 0.4.1
 """
-@title LT
+@title LT (Restricted test)
 @notice Implementation of leveraged liquidity for Yield Basis
 @author Scientia Spectra AG
 @license Copyright (c) 2025
@@ -419,6 +419,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     """
     staker: address = self.staker
     assert receiver != staker, "Deposit to staker"
+    self._check_admin()  # XXX
 
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)

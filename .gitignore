@@ -5,3 +5,4 @@
 /.hypothesis
 __pycache__
 *.pyc
+/.venv
