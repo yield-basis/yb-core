@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
 import boa
-import sys
 import os
 import json
-from time import sleep
-import subprocess
 from getpass import getpass
 from eth_account import account
 from collections import namedtuple
@@ -40,10 +37,6 @@ def account_load(fname):
 
 
 if __name__ == '__main__':
-    if '--hardhat' in sys.argv[1:]:
-        hardhat = subprocess.Popen(HARDHAT_COMMAND)
-        sleep(10)
-
     verifier = Etherscan(ARBISCAN_URL, ARBISCAN_KEY)
     boa.set_network_env(NETWORK)
     deployer = account_load('yb-deployer')
@@ -155,6 +148,3 @@ if __name__ == '__main__':
 
     yb_amm = amm_interface.at(market.amm)
     yb_lt = lt_interface.at(market.lt)
-
-    if '--hardhat' in sys.argv[1:]:
-        hardhat.wait()
