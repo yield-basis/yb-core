@@ -577,7 +577,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     amm: LevAMM = self.amm
     killed: bool = staticcall amm.is_killed()
 
-    if killed or staker == empty(address):
+    if killed:
         supply = self.totalSupply
     else:
         lv = self._calculate_values(self._price_oracle_w())
@@ -586,8 +586,9 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
         self.liquidity.total = lv.total
         self.liquidity.staked = lv.staked
         self.totalSupply = supply
-        self.balanceOf[staker] = lv.staked_tokens
-        self._log_token_reduction(staker, lv.token_reduction)
+        if staker != empty(address):
+            self.balanceOf[staker] = lv.staked_tokens
+            self._log_token_reduction(staker, lv.token_reduction)
 
     assert supply >= MIN_SHARE_REMAINDER + shares or supply == shares, "Remainder too small"
 
