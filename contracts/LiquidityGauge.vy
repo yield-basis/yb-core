@@ -1,6 +1,6 @@
 # @version 0.4.1
 """
-@title YBGaugeV1
+@title YBGauge
 @author Yield Basis
 @license MIT
 @notice Implementation contract inspired by Curve Finance gauges, but without boosts
