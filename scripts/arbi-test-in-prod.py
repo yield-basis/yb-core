@@ -83,7 +83,7 @@ if __name__ == '__main__':
                 int(0.196 * 1e18),          # fee_gamma: uint256
                 int(1e-10 * 1e18),          # allowed_extra_profit: uint256
                 int(1e-6 * 1e18),           # adjustment_step: uint256
-                600,                        # ma_exp_time: uint256
+                866,                        # ma_exp_time: uint256
                 price_oracle                # initial_price: uint256
             ))
 
