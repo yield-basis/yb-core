@@ -7,16 +7,16 @@ from getpass import getpass
 from eth_account import account
 from collections import namedtuple
 from boa.explorer import Etherscan
+from boa.contracts.vyper.vyper_contract import VyperBlueprint
 
 from keys import ARBISCAN_KEY
+from keys import ARBITRUM_NETWORK as NETWORK
 
 
 Market = namedtuple('Market', ['asset', 'cryptopool', 'amm', 'lt', 'price_oracle', 'virtual_pool', 'staker'])
 
 
-NETWORK = "https://arbitrum.drpc.org"
 ARBISCAN_URL = "https://api.arbiscan.io/api"
-HARDHAT_COMMAND = ["npx", "hardhat", "node", "--fork", "https://arbitrum.drpc.org", "--port", "8545"]
 
 YB_MULTISIG = "0xd396db54cAB0eCB51d43e82f71adc0B70a077aAF"
 BTC_TOKEN = "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f"  # WBTC on arbitrum
@@ -36,6 +36,9 @@ def account_load(fname):
         return account.Account.from_key(pkey)
 
 
+VyperBlueprint.ctor_calldata = b''  # Hack to make boa verify blueprints
+
+
 if __name__ == '__main__':
     verifier = Etherscan(ARBISCAN_URL, ARBISCAN_KEY)
     boa.set_network_env(NETWORK)
@@ -51,100 +54,100 @@ if __name__ == '__main__':
     price_oracle = pool_for_oracle.price_oracle(0)
     print("Price:", price_oracle / 1e18)
 
-    with boa.env.prank(deployer):
-        amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
-        amm_impl = amm_interface.deploy_as_blueprint()
-        boa.verify(amm_impl, verifier)
-        math_impl = boa.load('contracts/testing/twocrypto/StableswapMath.vy')
-        boa.verify(math_impl, verifier)
-        views_impl = boa.load('contracts/testing/twocrypto/TwocryptoView.vy')
-        boa.verify(views_impl, verifier)
-        gauge_impl = "0x0000000000000000000000000000000000000000"
+    print("== Deploying Twocrypto ==")
+    amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
+    amm_impl = amm_interface.deploy_as_blueprint()
+    boa.verify(amm_impl, verifier)
+    math_impl = boa.load('contracts/testing/twocrypto/StableswapMath.vy')
+    boa.verify(math_impl, verifier)
+    views_impl = boa.load('contracts/testing/twocrypto/TwocryptoView.vy')
+    boa.verify(views_impl, verifier)
+    gauge_impl = "0x0000000000000000000000000000000000000000"
 
-        factory = boa.load('contracts/testing/twocrypto/TwocryptoFactory.vy')
-        boa.verify(factory, verifier)
-        factory.initialise_ownership(YB_MULTISIG, deployer)  # fee_receiver, admin
-        factory.set_pool_implementation(amm_impl, 0)
-        factory.set_gauge_implementation(gauge_impl)
-        factory.set_views_implementation(views_impl)
-        factory.set_math_implementation(math_impl)
+    factory = boa.load('contracts/testing/twocrypto/TwocryptoFactory.vy')
+    boa.verify(factory, verifier)
+    factory.initialise_ownership(YB_MULTISIG, deployer)  # fee_receiver, admin
+    factory.set_pool_implementation(amm_impl, 0)
+    factory.set_gauge_implementation(gauge_impl)
+    factory.set_views_implementation(views_impl)
+    factory.set_math_implementation(math_impl)
 
-        # Params have nothing to do with reality!
-        pool = amm_interface.at(
-            factory.deploy_pool(
-                "Test WBTC/crvUSD pool",  # _name: String[64]
-                "TST",  # _symbol: String[32]
-                [usd.address, btc.address],
-                0,  # implementation_id: uint256
-                int(15.68 * 10000 * 2**2),  # A: uint256
-                int(1e-5 * 1e18),           # gamma: uint256 <- does not matter with stableswap
-                int(0.003 * 1e10),          # mid_fee: uint256
-                int(0.0227 * 1e10),         # out_fee: uint256
-                int(0.196 * 1e18),          # fee_gamma: uint256
-                int(1e-10 * 1e18),          # allowed_extra_profit: uint256
-                int(1e-6 * 1e18),           # adjustment_step: uint256
-                866,                        # ma_exp_time: uint256
-                price_oracle                # initial_price: uint256
-            ))
+    # Params have nothing to do with reality!
+    pool = amm_interface.at(
+        factory.deploy_pool(
+            "Test WBTC/crvUSD pool",  # _name: String[64]
+            "TST",  # _symbol: String[32]
+            [usd.address, btc.address],
+            0,  # implementation_id: uint256
+            int(15.68 * 10000 * 2**2),  # A: uint256
+            int(1e-5 * 1e18),           # gamma: uint256 <- does not matter with stableswap
+            int(0.003 * 1e10),          # mid_fee: uint256
+            int(0.0227 * 1e10),         # out_fee: uint256
+            int(0.196 * 1e18),          # fee_gamma: uint256
+            int(1e-10 * 1e18),          # allowed_extra_profit: uint256
+            int(1e-6 * 1e18),           # adjustment_step: uint256
+            866,                        # ma_exp_time: uint256
+            price_oracle                # initial_price: uint256
+        ))
 
-        factory.commit_transfer_ownership(YB_MULTISIG)  # New owner must accept!
+    factory.commit_transfer_ownership(YB_MULTISIG)  # New owner must accept!
 
-        amm_interface = boa.load_partial('contracts/AMM.vy')
-        yb_amm_impl = amm_interface.deploy_as_blueprint()
-        boa.verify(yb_amm_impl, verifier)
-        lt_interface = boa.load_partial('contracts/LT-Restricted.vy')
-        yb_lt_impl = lt_interface.deploy_as_blueprint()
-        boa.verify(yb_lt_impl, verifier)
-        vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
-        boa.verify(vpool_impl, verifier)
-        oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
-        boa.verify(oracle_impl, verifier)
-        gauge_impl = "0x0000000000000000000000000000000000000000"
-        # agg
-        # flash
-        fee_receiver = YB_MULTISIG
-        factory_admin = deployer
-        emergency_admin = YB_MULTISIG
+    print("== Deploying YB ==")
+    amm_interface = boa.load_partial('contracts/AMM.vy')
+    yb_amm_impl = amm_interface.deploy_as_blueprint()
+    boa.verify(yb_amm_impl, verifier)
+    lt_interface = boa.load_partial('contracts/LT-Restricted.vy')
+    yb_lt_impl = lt_interface.deploy_as_blueprint()
+    boa.verify(yb_lt_impl, verifier)
+    vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
+    boa.verify(vpool_impl, verifier)
+    oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
+    boa.verify(oracle_impl, verifier)
+    gauge_impl = "0x0000000000000000000000000000000000000000"
+    # agg
+    # flash
+    fee_receiver = YB_MULTISIG
+    factory_admin = deployer
+    emergency_admin = YB_MULTISIG
 
-        yb_factory = boa.load(
-            'contracts/Factory.vy',
-            USD_TOKEN,
-            yb_amm_impl,
-            yb_lt_impl,
-            vpool_impl,
-            oracle_impl,
-            gauge_impl,
-            AGG,
-            FLASH,
-            fee_receiver,
-            factory_admin,
-            emergency_admin)
-        boa.verify(yb_factory, verifier)
+    yb_factory = boa.load(
+        'contracts/Factory.vy',
+        USD_TOKEN,
+        yb_amm_impl,
+        yb_lt_impl,
+        vpool_impl,
+        oracle_impl,
+        gauge_impl,
+        AGG,
+        FLASH,
+        fee_receiver,
+        factory_admin,
+        emergency_admin)
+    boa.verify(yb_factory, verifier)
 
-        # Seed liqudiity with 2 dollars
-        btc.approve(pool.address, 2**256-1)
-        usd.approve(pool.address, 2**256-1)
-        # $400 seed
-        pool.add_liquidity([200 * 10**18 // REDUCE_SIZE, int(200 * 10**8 / (price_oracle / 1e18)) // REDUCE_SIZE], 0)
+    print("== Seed Twocrypto ==")
+    # Seed liqudiity with 2 dollars
+    btc.approve(pool.address, 2**256-1)
+    usd.approve(pool.address, 2**256-1)
+    # $400 seed
+    pool.add_liquidity([200 * 10**18 // REDUCE_SIZE, int(200 * 10**8 / (price_oracle / 1e18)) // REDUCE_SIZE], 0)
 
-        # Get stables for factory
-        usd.approve(yb_factory.address, 2**256-1)
-        yb_factory.set_allocator(deployer, 50_000 * 10**18 // REDUCE_SIZE)
+    print("== Creating market ==")
+    # Get stables for factory
+    usd.approve(yb_factory.address, 2**256-1)
+    yb_factory.set_allocator(deployer, 50_000 * 10**18 // REDUCE_SIZE)
 
-        # Create market
-        yb_fee = int(0.0085 * 1e18)
-        yb_rate = int(0.187 * 2 / (365 * 86400) * 1e18)
-        yb_factory.add_market(pool.address, yb_fee, yb_rate, 50_000 * 10**18 // REDUCE_SIZE)
-        market = Market(*yb_factory.markets(0))
+    # Create market
+    yb_fee = int(0.0085 * 1e18)
+    yb_rate = int(0.187 * 2 / (365 * 86400) * 1e18)
+    yb_factory.add_market(pool.address, yb_fee, yb_rate, 50_000 * 10**18 // REDUCE_SIZE)
+    market = Market(*yb_factory.markets(0))
 
-        # Set admin to msig
-        yb_factory.set_admin(YB_MULTISIG, YB_MULTISIG)
+    # Set admin to msig
+    yb_factory.set_admin(YB_MULTISIG, YB_MULTISIG)
 
     print(f"Factory: {yb_factory.address}")
     print(f"Pool:    {market.cryptopool}")
     print(f"AMM:     {market.amm}")
     print(f"LT:      {market.lt}")
     print(f"VPool:   {market.virtual_pool}")
-
-    yb_amm = amm_interface.at(market.amm)
-    yb_lt = lt_interface.at(market.lt)
