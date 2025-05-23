@@ -69,7 +69,7 @@ if __name__ == '__main__':
                 "TST",  # _symbol: String[32]
                 [usd.address, btc.address],
                 0,  # implementation_id: uint256
-                int(15.68 * 10000 * 2**2),  # A: uint256
+                int(15.68 * 10000),  # A: uint256
                 int(1e-5 * 1e18),           # gamma: uint256 <- does not matter with stableswap
                 int(0.003 * 1e10),          # mid_fee: uint256
                 int(0.0227 * 1e10),         # out_fee: uint256
@@ -79,6 +79,7 @@ if __name__ == '__main__':
                 600,                        # ma_exp_time: uint256
                 100_000 * 10**18            # initial_price: uint256  XXX
             ))
+        pool.set_admin_fee(0)
 
         amm_interface = boa.load_partial('contracts/AMM.vy')
         yb_amm_impl = amm_interface.deploy_as_blueprint()
