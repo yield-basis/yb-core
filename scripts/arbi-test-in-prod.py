@@ -89,6 +89,7 @@ if __name__ == '__main__':
             866,                        # ma_exp_time: uint256
             price_oracle                # initial_price: uint256
         ))
+    pool.set_admin_fee(0)
 
     factory.commit_transfer_ownership(YB_MULTISIG)  # New owner must accept!
 
