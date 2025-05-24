@@ -80,6 +80,44 @@ class StatefulVE(RuleBasedStateMachine):
                 self.ve_mock.increase_amount(amount)
                 self.voting_balances[user]['value'] += amount
 
+    @rule(uid=user_id, lock_duration=lock_duration)
+    def increase_unlock_time(self, uid, lock_duration):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        unlock_time = min(t + lock_duration, 2**256 - 1)
+        unlock_time_round = unlock_time // WEEK * WEEK
+        with boa.env.prank(user):
+            if self.voting_balances[user]['unlock_time'] <= t:
+                with boa.reverts('Lock expired'):
+                    self.ve_mock.increase_unlock_time(unlock_time)
+            elif self.voting_balances[user]['value'] == 0:
+                with boa.reverts('Nothing is locked'):
+                    self.ve_mock.increase_unlock_time(unlock_time)
+            elif unlock_time_round <= self.voting_balances[user]['unlock_time']:
+                with boa.reverts('Can only increase lock duration'):
+                    self.ve_mock.increase_unlock_time(unlock_time)
+            elif unlock_time_round > t + 86400 * 365 * 4:
+                with boa.reverts('Voting lock can be 4 years max'):
+                    self.ve_mock.increase_unlock_time(unlock_time)
+            else:
+                self.ve_mock.increase_unlock_time(unlock_time)
+                self.voting_balances[user]['unlock_time'] == self.ve_mock.locked(user).end
+
+    @rule(uid=user_id)
+    def withdraw(self, uid):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        with boa.env.prank(user):
+            if self.voting_balances[user]['unlock_time'] > t:
+                with boa.reverts("The lock didn't expire"):
+                    self.ve_mock.withdraw()
+            elif self.voting_balances[user]['value'] == 0:
+                with boa.reverts('erc721: invalid token ID'):
+                    self.ve_mock.withdraw()
+            else:
+                self.ve_mock.withdraw()
+                self.voting_balances[user]['value'] = 0
+
 
 def test_ve(ve_mock, mock_gov_token, accounts):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
