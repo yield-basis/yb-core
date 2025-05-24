@@ -118,6 +118,15 @@ class StatefulVE(RuleBasedStateMachine):
                 self.ve_mock.withdraw()
                 self.voting_balances[user]['value'] = 0
 
+    @rule(uid=user_id)
+    def checkpoint(self, uid):
+        with boa.env.prank(self.accounts[uid]):
+            self.ve_mock.checkpoint()
+
+    @rule(dt=dt)
+    def time_travel(self, dt):
+        boa.env.time_travel(dt)
+
 
 def test_ve(ve_mock, mock_gov_token, accounts):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
