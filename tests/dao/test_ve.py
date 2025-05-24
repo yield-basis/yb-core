@@ -121,6 +121,33 @@ class StatefulVE(RuleBasedStateMachine):
                 self.ve_mock.withdraw()
                 self.voting_balances[user]['value'] = 0
 
+    @rule(uid1=user_id, uid2=user_id)
+    def merge(self, uid1, uid2):
+        user1 = self.accounts[uid1]
+        user2 = self.accounts[uid2]
+        max_time = boa.env.evm.patch.timestamp // WEEK * WEEK + MAX_TIME
+        t1 = self.voting_balances[user1]['unlock_time']
+        t2 = self.voting_balances[user2]['unlock_time']
+        if self.voting_balances[user1]['value'] == 0:
+            with boa.reverts():
+                self.ve_mock.tokenOfOwnerByIndex(user1, 0)
+            return
+        id1 = self.ve_mock.tokenOfOwnerByIndex(user1, 0)
+        with boa.env.prank(user1):
+            if user1 == user2:
+                with boa.reverts():
+                    self.ve_mock.transferFrom(user1, user2, id1)
+            elif self.voting_balances[user2]['value'] == 0:
+                with boa.reverts():
+                    self.ve_mock.transferFrom(user1, user2, id1)
+            elif t1 != max_time or t2 != max_time:
+                with boa.reverts("Need max veLock"):
+                    self.ve_mock.transferFrom(user1, user2, id1)
+            else:
+                self.ve_mock.transferFrom(user1, user2, id1)
+                self.voting_balances[user2]['value'] += self.voting_balances[user1]['value']
+                self.voting_balances[user1]['value'] = 0
+
     @rule(uid=user_id)
     def checkpoint(self, uid):
         with boa.env.prank(self.accounts[uid]):

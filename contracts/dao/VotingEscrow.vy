@@ -476,6 +476,7 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
     checker: TransferClearanceChecker = self.transfer_clearance_checker
     if checker.address != empty(address):
         assert staticcall checker.ve_transfer_allowed()
+    assert owner != to
 
     owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
     to_time: uint256 = self.locked[to].end // WEEK * WEEK
