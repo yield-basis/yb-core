@@ -26,7 +26,7 @@ FLASH = "0x0B68dBC2DE05448A195ea80BCe6356076ADca981"
 
 POOL_FOR_ORACLE = "0x82670f35306253222F8a165869B28c64739ac62e"
 
-REDUCE_SIZE = 1000
+REDUCE_SIZE = 1
 
 
 def account_load(fname):
@@ -79,7 +79,7 @@ if __name__ == '__main__':
             "TST",  # _symbol: String[32]
             [usd.address, btc.address],
             0,  # implementation_id: uint256
-            int(15.68 * 10000 * 2**2),  # A: uint256
+            int(15.68 * 10000),  # A: uint256
             int(1e-5 * 1e18),           # gamma: uint256 <- does not matter with stableswap
             int(0.003 * 1e10),          # mid_fee: uint256
             int(0.0227 * 1e10),         # out_fee: uint256
@@ -89,6 +89,7 @@ if __name__ == '__main__':
             866,                        # ma_exp_time: uint256
             price_oracle                # initial_price: uint256
         ))
+    pool.set_admin_fee(0)
 
     factory.commit_transfer_ownership(YB_MULTISIG)  # New owner must accept!
 
