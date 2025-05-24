@@ -479,8 +479,8 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
 
     owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
     to_time: uint256 = self.locked[to].end // WEEK * WEEK
-    now: uint256 = block.timestamp // WEEK * WEEK
-    return owner_time == now and to_time == now
+    max_time: uint256 = block.timestamp // WEEK * WEEK + UMAXTIME
+    return owner_time == max_time and to_time == max_time
 
 
 @internal
