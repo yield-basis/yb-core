@@ -1,10 +1,11 @@
 import boa
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 
 
 WEEK = 7 * 86400
+MAX_TIME = 86400 * 365 * 4
 
 
 def test_ve_admin(ve_mock, admin, accounts):
@@ -30,6 +31,8 @@ class StatefulVE(RuleBasedStateMachine):
             self.mock_gov_token._mint_for_testing(user, self.USER_TOTAL)
             self.voting_balances[user] = {'value': 0, 'unlock_time': 0}
 
+        self.initial_timestamp = boa.env.evm.patch.timestamp
+
     @rule(uid=user_id, amount=amount, lock_duration=lock_duration)
     def create_lock(self, uid, amount, lock_duration):
         user = self.accounts[uid]
@@ -46,7 +49,7 @@ class StatefulVE(RuleBasedStateMachine):
             elif unlock_time_round <= t:
                 with boa.reverts('Can only lock until time in the future'):
                     self.ve_mock.create_lock(amount, unlock_time)
-            elif unlock_time_round > t + 86400 * 365 * 4:
+            elif unlock_time_round > t + MAX_TIME:
                 with boa.reverts('Voting lock can be 4 years max'):
                     self.ve_mock.create_lock(amount, unlock_time)
             elif amount > self.mock_gov_token.balanceOf(user):
@@ -96,7 +99,7 @@ class StatefulVE(RuleBasedStateMachine):
             elif unlock_time_round <= self.voting_balances[user]['unlock_time']:
                 with boa.reverts('Can only increase lock duration'):
                     self.ve_mock.increase_unlock_time(unlock_time)
-            elif unlock_time_round > t + 86400 * 365 * 4:
+            elif unlock_time_round > t + MAX_TIME:
                 with boa.reverts('Voting lock can be 4 years max'):
                     self.ve_mock.increase_unlock_time(unlock_time)
             else:
@@ -126,6 +129,31 @@ class StatefulVE(RuleBasedStateMachine):
     @rule(dt=dt)
     def time_travel(self, dt):
         boa.env.time_travel(dt)
+
+    @invariant()
+    def token_balances(self):
+        for user in self.accounts:
+            assert self.mock_gov_token.balanceOf(user) == 10**40 - self.voting_balances[user]['value']
+
+    @invariant()
+    def escrow_current_votes(self):
+        total_votes = 0
+        timestamp = boa.env.evm.patch.timestamp
+        for acct in self.accounts:
+            data = self.voting_balances[acct]
+            vote = self.ve_mock.getVotes(acct)
+            total_votes += vote
+            if data["unlock_time"] > timestamp and data["value"] // MAX_TIME > 0:
+                assert vote > 0
+            elif data["value"] == 0 or data["unlock_time"] <= timestamp:
+                assert vote == 0
+        assert self.ve_mock.totalVotes() == total_votes
+
+    @rule(dt=dt)
+    def historic_votes(self, dt):
+        timestamp = max(boa.env.evm.patch.timestamp - dt, self.initial_timestamp)
+        total_votes = sum(self.ve_mock.getPastVotes(user, timestamp) for user in self.accounts)
+        assert self.ve_mock.getPastTotalSupply(timestamp) == total_votes
 
 
 def test_ve(ve_mock, mock_gov_token, accounts):
