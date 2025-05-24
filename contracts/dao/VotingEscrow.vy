@@ -47,7 +47,8 @@ exports: (
     erc721.totalSupply,
     erc721.tokenByIndex,
     erc721.tokenOfOwnerByIndex,
-    ownable.transfer_ownership
+    ownable.transfer_ownership,
+    ownable.owner
 )
 
 

@@ -1,0 +1,67 @@
+import boa
+from hypothesis import settings
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
+
+
+WEEK = 7 * 86400
+
+
+def test_ve_admin(ve_mock, admin, accounts):
+    assert ve_mock.owner() == admin
+    with boa.env.prank(admin):
+        ve_mock.transfer_ownership(accounts[0])
+    assert ve_mock.owner() == accounts[0]
+
+
+class StatefulVE(RuleBasedStateMachine):
+    USER_TOTAL = 10**40
+    user_id = st.integers(min_value=0, max_value=9)
+    amount = st.integers(min_value=0, max_value=(2**256 - 1))
+    lock_duration = st.integers(min_value=0, max_value=(2**256 - 1))
+    dt = st.integers(min_value=0, max_value=30 * 86400)
+
+    def __init__(self):
+        super().__init__()
+        self.voting_balances = {}
+        for user in self.accounts:
+            with boa.env.prank(user):
+                self.mock_gov_token.approve(self.ve_mock.address, 2**256 - 1)
+            self.mock_gov_token._mint_for_testing(user, self.USER_TOTAL)
+            self.voting_balances[user] = {'value': 0, 'unlock_time': 0}
+
+    @rule(uid=user_id, amount=amount, lock_duration=lock_duration)
+    def create_lock(self, uid, amount, lock_duration):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        unlock_time = min(t + lock_duration, 2**256 - 1)
+        unlock_time_round = unlock_time // WEEK * WEEK
+        with boa.env.prank(user):
+            if amount == 0:
+                with boa.reverts():
+                    self.ve_mock.create_lock(amount, unlock_time)
+            elif self.voting_balances[user]['value'] > 0:
+                with boa.reverts('Withdraw old tokens first'):
+                    self.ve_mock.create_lock(amount, unlock_time)
+            elif unlock_time_round <= t:
+                with boa.reverts('Can only lock until time in the future'):
+                    self.ve_mock.create_lock(amount, unlock_time)
+            elif unlock_time_round > t + 86400 * 365 * 4:
+                with boa.reverts('Voting lock can be 4 years max'):
+                    self.ve_mock.create_lock(amount, unlock_time)
+            elif amount > self.mock_gov_token.balanceOf(user):
+                with boa.reverts():
+                    self.ve_mock.create_lock(amount, unlock_time)
+            else:
+                self.ve_mock.create_lock(amount, unlock_time)
+                self.voting_balances[user] = {'value': amount, 'unlock_time': unlock_time_round}
+                st_amount, st_time = self.ve_mock.locked(user)
+                assert st_amount == amount
+                assert st_time == unlock_time_round
+
+
+def test_ve(ve_mock, mock_gov_token, accounts):
+    StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=10)  # 2000, 100
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    run_state_machine_as_test(StatefulVE)
