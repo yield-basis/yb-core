@@ -59,9 +59,30 @@ class StatefulVE(RuleBasedStateMachine):
                 assert st_amount == amount
                 assert st_time == unlock_time_round
 
+    @rule(uid=user_id, amount=amount)
+    def increase_amount(self, uid, amount):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        with boa.env.prank(user):
+            if amount == 0:
+                with boa.reverts():
+                    self.ve_mock.increase_amount(amount)
+            elif self.voting_balances[user]['value'] == 0:
+                with boa.reverts('No existing lock found'):
+                    self.ve_mock.increase_amount(amount)
+            elif self.voting_balances[user]['unlock_time'] <= t:
+                with boa.reverts('Cannot add to expired lock. Withdraw'):
+                    self.ve_mock.increase_amount(amount)
+            elif amount > self.mock_gov_token.balanceOf(user):
+                with boa.reverts():
+                    self.ve_mock.increase_amount(amount)
+            else:
+                self.ve_mock.increase_amount(amount)
+                self.voting_balances[user]['value'] += amount
+
 
 def test_ve(ve_mock, mock_gov_token, accounts):
-    StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=10)  # 2000, 100
+    StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
