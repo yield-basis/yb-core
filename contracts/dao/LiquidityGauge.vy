@@ -141,7 +141,7 @@ def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardInteg
 
     r.integral_inv_supply = self.integral_inv_supply
     if block.timestamp > r.integral_inv_supply.t:
-        r.integral_inv_supply.v += 10**36 * (block.timestamp - r.integral_inv_supply.t) // erc4626.erc20.totalSupply
+        r.integral_inv_supply.v += unsafe_div(10**36 * (block.timestamp - r.integral_inv_supply.t), erc4626.erc20.totalSupply)
         r.integral_inv_supply.t = block.timestamp
 
     if reward.address != empty(address):
