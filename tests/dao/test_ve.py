@@ -182,6 +182,16 @@ class StatefulVE(RuleBasedStateMachine):
         total_votes = sum(self.ve_mock.getPastVotes(user, timestamp) for user in self.accounts)
         assert self.ve_mock.getPastTotalSupply(timestamp) == total_votes
 
+    @invariant()
+    def check_vote_decay(self):
+        now = boa.env.evm.patch.timestamp
+        for user in self.accounts:
+            user_votes = self.ve_mock.getVotes(user)
+            expected_votes = max(
+                self.voting_balances[user]['value'] // MAX_TIME * (self.voting_balances[user]['unlock_time'] - now),
+                0)
+            assert abs(user_votes - expected_votes) <= 10
+
 
 def test_ve(ve_mock, mock_gov_token, accounts):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
