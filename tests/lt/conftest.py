@@ -102,7 +102,7 @@ def oracle_impl(oracle_interface):
 
 @pytest.fixture(scope="session")
 def gauge_interface():
-    return boa.load_partial('contracts/LiquidityGauge.vy')
+    return boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
 
 
 @pytest.fixture(scope="session")
