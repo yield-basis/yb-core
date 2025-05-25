@@ -36,6 +36,13 @@ interface YbAMM:
     def COLLATERAL() -> Pool: view
 
 
+event TokenExchange:
+    buyer: indexed(address)
+    sold_id: uint256
+    tokens_sold: uint256
+    bought_id: uint256
+    tokens_bought: uint256
+
 struct AMMState:
     collateral: uint256
     debt: uint256
@@ -170,6 +177,8 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     out_amount: uint256 = staticcall out_coin.balanceOf(self)
     assert out_amount >= min_out, "Slippage"
     assert extcall out_coin.transfer(_for, out_amount, default_return_value=True)
+
+    log TokenExchange(buyer=_for, sold_id=i, tokens_sold=in_amount, bought_id=j, tokens_bought=out_amount)
     return out_amount
 
 
