@@ -126,6 +126,14 @@ def name() -> String[39]:
     return concat('YB Gauge: ', staticcall IERC20Slice(LP_TOKEN.address).symbol())
 
 
+@external
+@view
+def get_adjustment() -> uint256:
+    staked: uint256 = staticcall LP_TOKEN.balanceOf(self)
+    supply: uint256 = staticcall LP_TOKEN.totalSupply()
+    return isqrt(staked * 10**36 // supply)
+
+
 @internal
 @view
 def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardIntegrals:
