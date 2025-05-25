@@ -53,7 +53,7 @@ def _emissions(t: uint256, rate_factor: uint256) -> uint256:
     rate: int256 = convert(max_mint_rate * rate_factor // 10**18, int256)
     reserve: int256 = convert(self.reserve, int256)
     return convert(
-        reserve - reserve * math._wad_exp(-dt * rate // 10**18) // 10**18,
+        reserve * (10**18 - math._wad_exp(-dt * rate // 10**18)) // 10**18,
         uint256)
 
 
