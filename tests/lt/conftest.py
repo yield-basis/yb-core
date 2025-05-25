@@ -119,7 +119,9 @@ def flash(stablecoin, admin):
 def dummy_gc(collateral_token, yb, admin):
     # Fake GC which uses collateral token instead of ve
     with boa.env.prank(admin):
-        return boa.load('contracts/dao/GaugeController.vy', yb, collateral_token)
+        gc = boa.load('contracts/dao/GaugeController.vy', yb, collateral_token)
+        yb.set_minter(gc.address, True)
+        return gc
 
 
 @pytest.fixture(scope="session")
