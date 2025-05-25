@@ -206,12 +206,6 @@ def __init__(asset_token: IERC20, stablecoin: IERC20, cryptopool: CurveCryptoPoo
 
 
 @internal
-@pure
-def sqrt(arg: uint256) -> uint256:
-    return isqrt(arg)
-
-
-@internal
 @view
 def _check_admin():
     admin: address = self.admin
@@ -280,7 +274,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
     # staked is guaranteed to be <= supply
 
     f_a: int256 = convert(
-        10**18 - (10**18 - self._min_admin_fee()) * self.sqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
+        10**18 - (10**18 - self._min_admin_fee()) * isqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
     cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
