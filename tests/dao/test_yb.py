@@ -2,7 +2,7 @@ import boa
 from math import exp
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, initialize
 from .conftest import RATE
 
 
@@ -27,8 +27,12 @@ def test_mint(yb, admin, accounts):
 class StatefulYB(RuleBasedStateMachine):
     dt = st.integers(min_value=0, max_value=30 * 86400)
     rate_factor = st.integers(min_value=0, max_value=2 * 10**18)
+    preallocation = st.integers(min_value=0, max_value=10**9 * 10**18)
 
-    # XXX preallocation in init?
+    @initialize(preallocation=preallocation)
+    def preallocate(self, preallocation):
+        with boa.env.prank(self.admin):
+            self.yb.mint(self.accounts[1], preallocation)
 
     @rule(dt=dt, rate_factor=rate_factor)
     def emit(self, dt, rate_factor):
