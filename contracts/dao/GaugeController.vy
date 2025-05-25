@@ -192,7 +192,7 @@ def _checkpoint_gauge(gauge: address) -> Point:
 @external
 def add_gauge(gauge: address):
     """
-    @notice Add gauge `gauge` of type `gauge_type` with weight `weight`
+    @notice Add gauge `gauge`
     @param gauge Gauge address
     """
     ownable._check_owner()

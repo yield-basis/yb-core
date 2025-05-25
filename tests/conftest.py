@@ -10,6 +10,8 @@ boa.env.enable_fast_mode()
 
 
 PRICE = 100_000
+RESERVE = 10**9
+RATE = 10**9 // (365 * 86400)
 
 
 settings.register_profile("default", deadline=timedelta(seconds=1000))
@@ -69,3 +71,9 @@ def amm(amm_deployer, admin, stablecoin, collateral_token, price_oracle, account
                 stablecoin.approve(amm.address, 2**256-1)
                 collateral_token.approve(amm.address, 2**256-1)
         return amm
+
+
+@pytest.fixture(scope="session")
+def yb(admin):
+    with boa.env.prank(admin):
+        return boa.load('contracts/dao/YB.vy', RESERVE, RATE)

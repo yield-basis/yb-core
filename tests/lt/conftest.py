@@ -116,9 +116,10 @@ def flash(stablecoin, admin):
 
 
 @pytest.fixture(scope="session")
-def dummy_gc(collateral_token):
-    # GaugeController which uses collateral_token instead of YB and VotingEscrow
-    return boa.load('contracts/dao/GaugeController.vy', collateral_token, collateral_token)
+def dummy_gc(collateral_token, yb, admin):
+    # Fake GC which uses collateral token instead of ve
+    with boa.env.prank(admin):
+        return boa.load('contracts/dao/GaugeController.vy', yb, collateral_token)
 
 
 @pytest.fixture(scope="session")
@@ -144,13 +145,15 @@ def factory(stablecoin, amm_impl, lt_impl, vpool_impl, oracle_impl, gauge_impl, 
 
 
 @pytest.fixture(scope="session")
-def yb_market(factory, cryptopool, admin):
+def yb_market(factory, cryptopool, dummy_gc, admin):
     fee = int(0.007e18)
     rate = int(0.1e18 / (365 * 86400))
     ceiling = 0
 
     with boa.env.prank(admin):
-        return factory.add_market(cryptopool.address, fee, rate, ceiling)
+        market = factory.add_market(cryptopool.address, fee, rate, ceiling)
+        dummy_gc.add_gauge(market.staker)
+        return market
 
 
 @pytest.fixture(scope="session")
