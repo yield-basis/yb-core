@@ -155,12 +155,12 @@ def yb_market(factory, cryptopool, admin):
 
 @pytest.fixture(scope="session")
 def yb_amm(amm_interface, yb_market):
-    return amm_interface.at(yb_market[2])
+    return amm_interface.at(yb_market.amm)
 
 
 @pytest.fixture(scope="session")
 def cryptopool_oracle(oracle_interface, yb_market):
-    return oracle_interface.at(yb_market[4])
+    return oracle_interface.at(yb_market.price_oracle)
 
 
 @pytest.fixture(scope="session")
@@ -186,7 +186,7 @@ def yb_allocated(yb_lt, admin):
 
 @pytest.fixture(scope="session")
 def yb_staker(gauge_interface, yb_market, yb_lt, accounts, admin):
-    staker = gauge_interface.at(yb_market[6])
+    staker = gauge_interface.at(yb_market.staker)
     for addr in accounts + [admin]:
         with boa.env.prank(addr):
             yb_lt.approve(staker.address, 2**256-1)
