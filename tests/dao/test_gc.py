@@ -64,7 +64,7 @@ class StatefulVE(RuleBasedStateMachine):
         boa.env.time_travel(dt)
 
 
-def test_ve(ve_yb, yb, accounts, admin):
+def test_ve(ve_yb, yb, gc, accounts, admin):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
