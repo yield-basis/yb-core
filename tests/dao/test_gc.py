@@ -1,4 +1,5 @@
 import boa
+import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule
@@ -6,6 +7,21 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 
 WEEK = 7 * 86400
 MAX_TIME = 86400 * 365 * 4
+
+
+# Fake gauge:
+# get_adjustment()
+# set_adjustment() (0..1)
+# mint()
+
+@pytest.fixture(scope="session")
+def fake_gauges(mock_gov_token, gc, admin):
+    gauge_deployer = boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
+    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(10)]
+    with boa.env.prank(admin):
+        for gauge in gauges:
+            gc.add_gauge(gauge.address)
+    return gauges
 
 
 class StatefulVE(RuleBasedStateMachine):
@@ -64,7 +80,7 @@ class StatefulVE(RuleBasedStateMachine):
         boa.env.time_travel(dt)
 
 
-def test_ve(ve_yb, yb, gc, accounts, admin):
+def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
