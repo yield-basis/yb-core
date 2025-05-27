@@ -7,6 +7,7 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 
 WEEK = 7 * 86400
 MAX_TIME = 86400 * 365 * 4
+N_POOLS = 10
 
 
 # Fake gauge:
@@ -17,7 +18,7 @@ MAX_TIME = 86400 * 365 * 4
 @pytest.fixture(scope="session")
 def fake_gauges(mock_gov_token, gc, admin):
     gauge_deployer = boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
-    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(10)]
+    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(N_POOLS)]
     with boa.env.prank(admin):
         for gauge in gauges:
             gc.add_gauge(gauge.address)
@@ -30,6 +31,8 @@ class StatefulVE(RuleBasedStateMachine):
     amount = st.integers(min_value=1, max_value=10**40)
     lock_duration = st.integers(min_value=7 * 86400, max_value=MAX_TIME)
     dt = st.integers(min_value=0, max_value=30 * 86400)
+    gauge_ids = st.lists(st.integers(min_value=0, max_value=N_POOLS - 1), min_size=0, max_size=N_POOLS)
+    weight = st.integers(min_value=0, max_value=10001)
 
     def __init__(self):
         super().__init__()
@@ -74,6 +77,26 @@ class StatefulVE(RuleBasedStateMachine):
                 return
             else:
                 self.ve_yb.increase_unlock_time(unlock_time)
+
+    @rule(gauge_ids=gauge_ids, uid=user_id, weight=weight)
+    def vote(self, gauge_ids, uid, weight):
+        user = self.accounts[uid]
+        gauges = [self.fake_gauges[gauge_id] for gauge_id in gauge_ids]
+        weights = [weight] * len(gauges)
+        with boa.env.prank(user):
+            if self.ve_yb.locked(user).end <= boa.env.evm.patch.timestamp:
+                with boa.reverts("Expired"):
+                    self.gc.vote_for_gauge_weights(gauges, weights)
+            elif len(set(gauge_ids)) < len(gauge_ids):
+                try:
+                    self.gc.vote_for_gauge_weights(gauges, weights)
+                    raise Exception("Did not raise")
+                except boa.BoaError as e:
+                    err = str(e)
+                    if "Cannot vote so often" in err or "Used too much power" in err:
+                        return
+                    else:
+                        raise
 
     @rule(dt=dt)
     def time_travel(self, dt):

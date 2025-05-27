@@ -24,4 +24,6 @@ def ve_yb(yb, admin):
 @pytest.fixture(scope="session")
 def gc(ve_yb, yb, admin):
     with boa.env.prank(admin):
-        return boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
+        gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
+        yb.set_minter(gc.address, True)
+        return gc
