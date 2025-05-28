@@ -7,7 +7,7 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 
 WEEK = 7 * 86400
 MAX_TIME = 86400 * 365 * 4
-N_POOLS = 10
+N_POOLS = 5
 WEIGHT_VOTE_DELAY = 10 * 86400
 
 
@@ -164,7 +164,7 @@ class StatefulVE(RuleBasedStateMachine):
 
 
 def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
-    StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
+    StatefulVE.TestCase.settings = settings(max_examples=2000, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
