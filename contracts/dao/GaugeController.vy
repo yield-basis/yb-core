@@ -355,6 +355,7 @@ def emit() -> uint256:
     return to_send
 
 
+@external
 def set_killed(gauge: address, is_killed: bool):
     ownable._check_owner()
     self.is_killed[gauge] = is_killed

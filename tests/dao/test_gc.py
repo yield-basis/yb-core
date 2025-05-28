@@ -34,6 +34,7 @@ class StatefulVE(RuleBasedStateMachine):
     dt = st.integers(min_value=0, max_value=30 * 86400)
     gauge_ids = st.lists(st.integers(min_value=0, max_value=N_POOLS - 1), min_size=0, max_size=N_POOLS)
     weight = st.integers(min_value=0, max_value=10001)
+    gauge_id = st.integers(min_value=0, max_value=N_POOLS - 1)
 
     def __init__(self):
         super().__init__()
@@ -89,6 +90,9 @@ class StatefulVE(RuleBasedStateMachine):
             if self.ve_yb.locked(user).end <= t:
                 with boa.reverts("Expired"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
+            elif any(self.gc.is_killed(g) for g in gauges):
+                with boa.reverts():
+                    self.gc.vote_for_gauge_weights(gauges, weights)
             elif weight > 10000:
                 with boa.reverts("Weight too large"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
@@ -117,6 +121,27 @@ class StatefulVE(RuleBasedStateMachine):
                     self.gc.vote_for_gauge_weights(gauges, weights)
             else:
                 self.gc.vote_for_gauge_weights(gauges, weights)
+
+    @rule(gauge_id=gauge_id)
+    def checkpoint(self, gauge_id):
+        self.gc.checkpoint(self.fake_gauges[gauge_id])
+
+    @rule(gauge_id=gauge_id)
+    def emit(self, gauge_id):
+        t = boa.env.evm.patch.timestamp
+        gauge = self.fake_gauges[gauge_id]
+        expected_emissions = self.gc.preview_emissions(gauge, t)
+        with boa.env.prank(gauge.address):
+            before = self.yb.balanceOf(gauge.address)
+            self.gc.emit()
+            after = self.yb.balanceOf(gauge.address)
+        assert after - before == expected_emissions
+
+    @rule(gauge_id=gauge_id)
+    def kill_toggle(self, gauge_id):
+        gauge = self.fake_gauges[gauge_id]
+        with boa.env.prank(self.admin):
+            self.gc.set_killed(gauge.address, not self.gc.is_killed(gauge.address))
 
     @rule(dt=dt)
     def time_travel(self, dt):
