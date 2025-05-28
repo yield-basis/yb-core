@@ -8,6 +8,7 @@ from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test
 WEEK = 7 * 86400
 MAX_TIME = 86400 * 365 * 4
 N_POOLS = 10
+WEIGHT_VOTE_DELAY = 10 * 86400
 
 
 # Fake gauge:
@@ -83,9 +84,13 @@ class StatefulVE(RuleBasedStateMachine):
         user = self.accounts[uid]
         gauges = [self.fake_gauges[gauge_id] for gauge_id in gauge_ids]
         weights = [weight] * len(gauges)
+        t = boa.env.evm.patch.timestamp
         with boa.env.prank(user):
-            if self.ve_yb.locked(user).end <= boa.env.evm.patch.timestamp:
+            if self.ve_yb.locked(user).end <= t:
                 with boa.reverts("Expired"):
+                    self.gc.vote_for_gauge_weights(gauges, weights)
+            elif weight > 10000:
+                with boa.reverts("Weight too large"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
             elif len(set(gauge_ids)) < len(gauge_ids):
                 try:
@@ -97,6 +102,21 @@ class StatefulVE(RuleBasedStateMachine):
                         return
                     else:
                         raise
+            elif any(t < self.gc.last_user_vote(user, gauge) + WEIGHT_VOTE_DELAY for gauge in gauges):
+                try:
+                    self.gc.vote_for_gauge_weights(gauges, weights)
+                    raise Exception("Did not raise")
+                except boa.BoaError as e:
+                    err = str(e)
+                    if "Cannot vote so often" in err or "Used too much power" in err:
+                        return
+                    else:
+                        raise
+            elif len(gauge_ids) * weight + self.gc.vote_user_power(user) > 10000:
+                with boa.reverts('Used too much power'):
+                    self.gc.vote_for_gauge_weights(gauges, weights)
+            else:
+                self.gc.vote_for_gauge_weights(gauges, weights)
 
     @rule(dt=dt)
     def time_travel(self, dt):
