@@ -90,7 +90,7 @@ class StatefulVE(RuleBasedStateMachine):
             if self.ve_yb.locked(user).end <= t:
                 with boa.reverts("Expired"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
-            elif any(self.gc.is_killed(g) for g in gauges):
+            elif any(self.gc.is_killed(g) for g in gauges) and weight > 0:
                 with boa.reverts():
                     self.gc.vote_for_gauge_weights(gauges, weights)
             elif weight > 10000:
