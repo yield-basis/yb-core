@@ -2,7 +2,7 @@ import boa
 import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 
 
 WEEK = 7 * 86400
@@ -10,11 +10,6 @@ MAX_TIME = 86400 * 365 * 4
 N_POOLS = 10
 WEIGHT_VOTE_DELAY = 10 * 86400
 
-
-# Fake gauge:
-# get_adjustment()
-# set_adjustment() (0..1)
-# mint()
 
 @pytest.fixture(scope="session")
 def fake_gauges(mock_gov_token, gc, admin):
@@ -35,6 +30,7 @@ class StatefulVE(RuleBasedStateMachine):
     gauge_ids = st.lists(st.integers(min_value=0, max_value=N_POOLS - 1), min_size=0, max_size=N_POOLS)
     weight = st.integers(min_value=0, max_value=10001)
     gauge_id = st.integers(min_value=0, max_value=N_POOLS - 1)
+    adjustment = st.integers(min_value=0, max_value=10**18)
 
     def __init__(self):
         super().__init__()
@@ -44,6 +40,10 @@ class StatefulVE(RuleBasedStateMachine):
                 self.yb.approve(self.ve_yb.address, 2**256 - 1)
             with boa.env.prank(self.admin):
                 self.yb.mint(user, self.USER_TOTAL)
+
+    @rule(adj=adjustment)
+    def set_adjustment(self, gauge_id, adj):
+        self.fake_gauges[gauge_id].set_adjustment(adj)
 
     @rule(uid=user_id, amount=amount, lock_duration=lock_duration)
     def create_lock(self, uid, amount, lock_duration):
@@ -147,9 +147,16 @@ class StatefulVE(RuleBasedStateMachine):
     def time_travel(self, dt):
         boa.env.time_travel(dt)
 
+    @invariant()
+    def check_sum_votes(self):
+        sum_adj_votes = sum(self.gc.get_gauge_weight(g.address) * g.get_adjustment() // 10**18 for g in self.fake_gauges)
+        if sum_adj_votes > 0:
+            sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
+            assert sum_votes == 10**18
+
     def teardown(self):
         # Check that all votes go to zero after long enough time
-        boa.env.time_travel(365 * 86400 * 4)
+        boa.env.time_travel(MAX_TIME)
         for g in self.fake_gauges:
             self.gc.checkpoint(g.address)
         for g in self.fake_gauges:

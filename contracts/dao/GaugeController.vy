@@ -303,7 +303,7 @@ def gauge_relative_weight(gauge: address) -> uint256:
     pt: Point = self._get_weight(gauge)
     aw_new: uint256 = pt.bias * adjustment // 10**18
 
-    return aw_new * 10**18 // (self.adjusted_gauge_weight_sum + aw_new - aw)
+    return unsafe_div(aw_new * 10**18, self.adjusted_gauge_weight_sum + aw_new - aw)
 
 
 @external
