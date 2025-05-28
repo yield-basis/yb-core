@@ -566,5 +566,6 @@ def locked__end(_addr: address) -> uint256:
     return self.locked[_addr].end
 
 
+# TODO check that all votes are zero before transfers
 # TODO delegation
 # TODO autorelock to max

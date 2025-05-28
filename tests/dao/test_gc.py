@@ -147,6 +147,14 @@ class StatefulVE(RuleBasedStateMachine):
     def time_travel(self, dt):
         boa.env.time_travel(dt)
 
+    def teardown(self):
+        # Check that all votes go to zero after long enough time
+        boa.env.time_travel(365 * 86400 * 4)
+        for g in self.fake_gauges:
+            self.gc.checkpoint(g.address)
+        for g in self.fake_gauges:
+            assert self.gc.get_gauge_weight(g.address) == 0
+
 
 def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
     StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
