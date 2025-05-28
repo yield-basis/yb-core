@@ -41,7 +41,7 @@ class StatefulVE(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 self.yb.mint(user, self.USER_TOTAL)
 
-    @rule(adj=adjustment)
+    @rule(gauge_id=gauge_id, adj=adjustment)
     def set_adjustment(self, gauge_id, adj):
         self.fake_gauges[gauge_id].set_adjustment(adj)
 
