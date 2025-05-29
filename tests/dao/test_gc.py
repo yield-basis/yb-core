@@ -1,5 +1,6 @@
 import boa
 import pytest
+from math import log
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
@@ -90,10 +91,10 @@ class StatefulVE(RuleBasedStateMachine):
             if self.ve_yb.locked(user).end <= t:
                 with boa.reverts("Expired"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
-            elif any(self.gc.is_killed(g) for g in gauges) and weight > 0:
+            elif any(self.gc.is_killed(g) for g in gauges) and weight > 0 and len(gauge_ids) > 0:
                 with boa.reverts():
                     self.gc.vote_for_gauge_weights(gauges, weights)
-            elif weight > 10000:
+            elif len(gauge_ids) > 0 and weight > 10000:
                 with boa.reverts("Weight too large"):
                     self.gc.vote_for_gauge_weights(gauges, weights)
             elif len(set(gauge_ids)) < len(gauge_ids):
@@ -116,7 +117,9 @@ class StatefulVE(RuleBasedStateMachine):
                         return
                     else:
                         raise
-            elif len(gauge_ids) * weight + self.gc.vote_user_power(user) > 10000:
+            elif (len(gauge_ids) * weight
+                  - sum(self.gc.vote_user_slopes(user, self.fake_gauges[g].address).power for g in gauge_ids)
+                  + self.gc.vote_user_power(user)) > 10000:
                 with boa.reverts('Used too much power'):
                     self.gc.vote_for_gauge_weights(gauges, weights)
             else:
@@ -149,10 +152,18 @@ class StatefulVE(RuleBasedStateMachine):
 
     @invariant()
     def check_sum_votes(self):
-        sum_adj_votes = sum(self.gc.get_gauge_weight(g.address) * g.get_adjustment() // 10**18 for g in self.fake_gauges)
+        sum_adj_votes = self.gc.adjusted_gauge_weight_sum()
+        uncertainty = 100 * N_POOLS * 10**18 // (sum_adj_votes + 1) + 1
         if sum_adj_votes > 0:
             sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
-            assert sum_votes == 10**18
+            adj = [g.get_adjustment() for g in self.fake_gauges]
+            aw = [self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges]
+            gw = [self.gc.get_gauge_weight(g.address) for g in self.fake_gauges]
+            agws = self.gc.adjusted_gauge_weight_sum()
+            if sum_votes == 0:
+                assert uncertainty > 5 * 10**17
+            else:
+                assert abs(log(sum_votes / 1e18)) <= uncertainty / 1e18
 
     def teardown(self):
         # Check that all votes go to zero after long enough time
@@ -161,6 +172,7 @@ class StatefulVE(RuleBasedStateMachine):
             self.gc.checkpoint(g.address)
         for g in self.fake_gauges:
             assert self.gc.get_gauge_weight(g.address) == 0
+        super().teardown()
 
 
 def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
@@ -168,3 +180,19 @@ def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
+
+
+def test_ve_one(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.check_sum_votes()
+    state.set_adjustment(adj=21944, gauge_id=0)
+    state.check_sum_votes()
+    state.create_lock(amount=12_171_973_003_973_568_000, lock_duration=70681194, uid=8)
+    state.check_sum_votes()
+    state.vote(gauge_ids=[0, 1], uid=8, weight=644)
+    state.check_sum_votes()
+    state.set_adjustment(adj=1, gauge_id=0)
+    state.check_sum_votes()
+    state.teardown()
