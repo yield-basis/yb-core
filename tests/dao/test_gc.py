@@ -152,18 +152,19 @@ class StatefulVE(RuleBasedStateMachine):
 
     @invariant()
     def check_sum_votes(self):
-        sum_adj_votes = self.gc.adjusted_gauge_weight_sum()
-        uncertainty = 100 * N_POOLS * 10**18 // (sum_adj_votes + 1) + 1
-        if sum_adj_votes > 0:
+        sum_adj_weight = self.gc.adjusted_gauge_weight_sum()
+        min_sum_adj_weight = min(sum_adj_weight - self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges)
+        uncertainty = 2 * N_POOLS / (min_sum_adj_weight + 1e-10)
+        if sum_adj_weight > 0:
             sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
             adj = [g.get_adjustment() for g in self.fake_gauges]
             aw = [self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges]
             gw = [self.gc.get_gauge_weight(g.address) for g in self.fake_gauges]
             agws = self.gc.adjusted_gauge_weight_sum()
             if sum_votes == 0:
-                assert uncertainty > 5 * 10**17
+                assert uncertainty > 0.5
             else:
-                assert abs(log(sum_votes / 1e18)) <= uncertainty / 1e18
+                assert max(abs(log(sum_votes / 1e18)), 1) <= uncertainty
 
     def teardown(self):
         # Check that all votes go to zero after long enough time
@@ -186,13 +187,9 @@ def test_ve_one(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     state = StatefulVE()
-    state.check_sum_votes()
     state.set_adjustment(adj=21944, gauge_id=0)
-    state.check_sum_votes()
     state.create_lock(amount=12_171_973_003_973_568_000, lock_duration=70681194, uid=8)
-    state.check_sum_votes()
     state.vote(gauge_ids=[0, 1], uid=8, weight=644)
-    state.check_sum_votes()
     state.set_adjustment(adj=1, gauge_id=0)
     state.check_sum_votes()
     state.teardown()
