@@ -1,5 +1,6 @@
 import boa
 import pytest
+import os
 from math import log
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -171,8 +172,9 @@ class StatefulVE(RuleBasedStateMachine):
         super().teardown()
 
 
-def test_gc(ve_yb, yb, gc, fake_gauges, accounts, admin):
-    StatefulVE.TestCase.settings = settings(max_examples=2000, stateful_step_count=100)  # 2000, 100
+@pytest.mark.parametrize("_tmp", range(int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", 1))))  # This splits the test into small chunks which are easier to parallelize
+def test_gc(ve_yb, yb, gc, fake_gauges, accounts, admin, _tmp):
+    StatefulVE.TestCase.settings = settings(max_examples=1000, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
