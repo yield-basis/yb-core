@@ -296,14 +296,7 @@ def gauge_relative_weight(gauge: address) -> uint256:
     @param gauge Gauge address
     @return Value of relative weight normalized to 1e18
     """
-    adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
-
-
-    aw: uint256 = self.adjusted_gauge_weight[gauge]
-    pt: Point = self._get_weight(gauge)
-    aw_new: uint256 = pt.bias * adjustment // 10**18
-
-    return unsafe_div(aw_new * 10**18, self.adjusted_gauge_weight_sum + aw_new - aw)
+    return unsafe_div(self.adjusted_gauge_weight[gauge] * 10**18, self.adjusted_gauge_weight_sum)
 
 
 @external
@@ -323,19 +316,12 @@ def preview_emissions(gauge: address, at_time: uint256) -> uint256:
     if self.time_weight[gauge] > 0:
         return 0
 
-    adjustment: uint256 = min(staticcall Gauge(gauge).get_adjustment(), 10**18)
     t: uint256 = self.time_weight[gauge]
 
     w: uint256 = self.gauge_weight[gauge]
     aw: uint256 = self.adjusted_gauge_weight[gauge]
     w_sum: uint256 = self.gauge_weight_sum
     aw_sum: uint256 = self.adjusted_gauge_weight_sum
-
-    w_new: uint256 = self._get_weight(gauge).bias
-    aw_new: uint256 = w_new * adjustment // 10**18
-
-    w_sum = w_sum + w_new - w
-    aw_sum = aw_sum + aw_new - aw
 
     d_emissions: uint256 = staticcall TOKEN.preview_emissions(at_time, aw_sum * 10**18 // w_sum)
     specific_emissions: uint256 = self.specific_emissions + d_emissions * 10**18 // aw_sum
