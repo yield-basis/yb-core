@@ -153,16 +153,11 @@ class StatefulVE(RuleBasedStateMachine):
     @invariant()
     def check_sum_votes(self):
         sum_adj_weight = self.gc.adjusted_gauge_weight_sum()
-        min_sum_adj_weight = min(sum_adj_weight - self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges)
-        uncertainty = 100 * N_POOLS / max(min_sum_adj_weight, 1e-10)
+        uncertainty = 100 * N_POOLS / max(sum_adj_weight, 1e-10)
         if sum_adj_weight > 0:
             sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
-            adj = [g.get_adjustment() for g in self.fake_gauges]
-            aw = [self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges]
-            gw = [self.gc.get_gauge_weight(g.address) for g in self.fake_gauges]
-            agws = self.gc.adjusted_gauge_weight_sum()
             if sum_votes == 0:
-                assert uncertainty > 0.5 or sum(g * a // 10**18 for (g, a) in zip(gw, adj)) == 0
+                assert uncertainty > 0.5 or sum(self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges) == 0
             else:
                 assert min(abs(log(sum_votes / 1e18)), 1) <= uncertainty
 
@@ -176,14 +171,14 @@ class StatefulVE(RuleBasedStateMachine):
         super().teardown()
 
 
-def test_ve(ve_yb, yb, gc, fake_gauges, accounts, admin):
+def test_gc(ve_yb, yb, gc, fake_gauges, accounts, admin):
     StatefulVE.TestCase.settings = settings(max_examples=2000, stateful_step_count=100)  # 2000, 100
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
 
 
-def test_ve_one(ve_yb, yb, gc, fake_gauges, accounts, admin):
+def test_gc_one(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     state = StatefulVE()
@@ -195,7 +190,7 @@ def test_ve_one(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
-def test_ve_two(ve_yb, yb, gc, fake_gauges, accounts, admin):
+def test_gc_two(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     state = StatefulVE()
@@ -225,7 +220,7 @@ def test_ve_two(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
-def test_ve_three(ve_yb, yb, gc, fake_gauges, accounts, admin):
+def test_gc_three(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     state = StatefulVE()
