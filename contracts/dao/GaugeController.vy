@@ -300,6 +300,15 @@ def gauge_relative_weight(gauge: address) -> uint256:
 
 
 @external
+@view
+def ve_transfer_allowed(users: DynArray[address, 10]) -> bool:
+    allowed: bool = True
+    for user: address in users:
+        allowed = allowed and (self.vote_user_power[user] == 0)
+    return allowed
+
+
+@external
 def checkpoint(gauge: address):
     """
     @notice Checkpoint a gauge
