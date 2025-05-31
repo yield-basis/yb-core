@@ -127,6 +127,34 @@ class StatefulVE(RuleBasedStateMachine):
             else:
                 self.gc.vote_for_gauge_weights(gauges, weights)
 
+    @rule(uid1=user_id, uid2=user_id)
+    def merge(self, uid1, uid2):
+        user1 = self.accounts[uid1]
+        user2 = self.accounts[uid2]
+        max_time = boa.env.evm.patch.timestamp // WEEK * WEEK + MAX_TIME
+        amount1, t1 = self.ve_yb.locked(user1)
+        amount2, t2 = self.ve_yb.locked(user2)
+        if amount1 == 0:
+            with boa.reverts():
+                self.ve_yb.tokenOfOwnerByIndex(user1, 0)
+            return
+        id1 = self.ve_yb.tokenOfOwnerByIndex(user1, 0)
+        with boa.env.prank(user1):
+            if user1 == user2:
+                with boa.reverts():
+                    self.ve_yb.transferFrom(user1, user2, id1)
+            elif amount2 == 0:
+                with boa.reverts():
+                    self.ve_yb.transferFrom(user1, user2, id1)
+            elif self.gc.vote_user_power(user1) != 0 or self.gc.vote_user_power(user2) != 0:
+                with boa.reverts("Not allowed"):
+                    self.ve_yb.transferFrom(user1, user2, id1)
+            elif t1 != max_time or t2 != max_time:
+                with boa.reverts("Need max veLock"):
+                    self.ve_yb.transferFrom(user1, user2, id1)
+            else:
+                self.ve_yb.transferFrom(user1, user2, id1)
+
     @rule(gauge_id=gauge_id)
     def checkpoint(self, gauge_id):
         self.gc.checkpoint(self.fake_gauges[gauge_id])
@@ -234,6 +262,21 @@ def test_gc_three(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.vote(gauge_ids=[0, 3], uid=0, weight=1)
     state.set_adjustment(adj=0, gauge_id=0)
     state.check_sum_votes()
+    state.teardown()
+
+
+def test_gc_merge(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.check_sum_votes()
+    state.create_lock(amount=1, lock_duration=604800, uid=1)
+    state.check_sum_votes()
+    state.create_lock(amount=1, lock_duration=604800, uid=0)
+    state.check_sum_votes()
+    state.vote(gauge_ids=[0], uid=0, weight=1)
+    state.check_sum_votes()
+    state.merge(uid1=0, uid2=1)
     state.teardown()
 
 
