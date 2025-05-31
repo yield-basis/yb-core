@@ -4,6 +4,7 @@ import os
 from math import log
 from hypothesis import settings
 from hypothesis import strategies as st
+from hypothesis import given
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 
 
@@ -234,3 +235,49 @@ def test_gc_three(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.set_adjustment(adj=0, gauge_id=0)
     state.check_sum_votes()
     state.teardown()
+
+
+@pytest.fixture(scope="session")
+def lock_for_accounts(yb, ve_yb, accounts, admin):
+    with boa.env.prank(admin):
+        for user in accounts:
+            yb.mint(user, 10**18)
+    end_lock = boa.env.evm.patch.timestamp + MAX_TIME
+    for user in accounts:
+        with boa.env.prank(user):
+            yb.approve(ve_yb.address, 2**256-1)
+            ve_yb.create_lock(10**18, end_lock)
+
+
+@pytest.fixture(scope="session")
+def prepare_gauges(fake_gauges):
+    for gauge in fake_gauges:
+        gauge.set_adjustment(10**18)
+
+
+@given(
+        vote_split=st.lists(
+            st.lists(
+                st.integers(min_value=0, max_value=10000),
+                min_size=N_POOLS, max_size=N_POOLS),
+            min_size=10, max_size=10)
+)
+def test_vote_split(mock_gov_token, fake_gauges, gc, yb, ve_yb, accounts, lock_for_accounts, prepare_gauges, vote_split):
+    if sum(sum(v) for v in vote_split) == 0:
+        return
+    vote_tracker = {g: 0 for g in fake_gauges}
+    for votes, user in zip(vote_split, accounts):
+        with boa.env.prank(user):
+            if sum(votes) > 10000:
+                with boa.reverts('Used too much power'):
+                    gc.vote_for_gauge_weights(fake_gauges, votes)
+                return
+            else:
+                gc.vote_for_gauge_weights(fake_gauges, votes)
+                for gauge, vote in zip(fake_gauges, votes):
+                    vote_tracker[gauge] += vote
+    sum_votes = sum(vote_tracker.values())
+    vote_tracker = {g: v / sum_votes for g, v in vote_tracker.items()}
+    for g, v in vote_tracker.items():
+        rw = gc.gauge_relative_weight(g)
+        assert abs(rw / 1e18 - v) < 1e-12
