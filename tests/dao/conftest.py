@@ -26,4 +26,5 @@ def gc(ve_yb, yb, admin):
     with boa.env.prank(admin):
         gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
         yb.set_minter(gc.address, True)
+        ve_yb.set_transfer_clearance_checker(gc.address)
         return gc
