@@ -157,6 +157,7 @@ class StatefulVE(RuleBasedStateMachine):
         uncertainty = 100 * N_POOLS / max(sum_adj_weight, 1e-10)
         if sum_adj_weight > 0:
             sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
+            assert sum_votes <= 10**18
             if sum_votes == 0:
                 assert uncertainty > 0.5 or sum(self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges) == 0
             else:
