@@ -305,7 +305,7 @@ def prepare_gauges(fake_gauges):
                 min_size=N_POOLS, max_size=N_POOLS),
             min_size=10, max_size=10)
 )
-def test_vote_split(mock_gov_token, fake_gauges, gc, yb, ve_yb, accounts, lock_for_accounts, prepare_gauges, vote_split):
+def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges, vote_split):
     if sum(sum(v) for v in vote_split) == 0:
         return
     vote_tracker = {g: 0 for g in fake_gauges}
@@ -319,8 +319,29 @@ def test_vote_split(mock_gov_token, fake_gauges, gc, yb, ve_yb, accounts, lock_f
                 gc.vote_for_gauge_weights(fake_gauges, votes)
                 for gauge, vote in zip(fake_gauges, votes):
                     vote_tracker[gauge] += vote
+
     sum_votes = sum(vote_tracker.values())
     vote_tracker = {g: v / sum_votes for g, v in vote_tracker.items()}
     for g, v in vote_tracker.items():
-        rw = gc.gauge_relative_weight(g)
-        assert abs(rw / 1e18 - v) < 1e-12
+        rw = gc.gauge_relative_weight(g) / 1e18
+        assert abs(rw - v) < 1e-12
+
+    dt = MAX_TIME // 40
+
+    t_passed = 0
+    initial_aw = {g: gc.adjusted_gauge_weight(g.address) for g in fake_gauges}
+    initial_aws = gc.adjusted_gauge_weight_sum()
+    for i in range(50):
+        boa.env.time_travel(dt)
+        t_passed += dt
+        for g in fake_gauges:
+            gc.checkpoint(g.address)
+        aws = gc.adjusted_gauge_weight_sum()
+        assert abs(aws - initial_aws * max(1 - t_passed / MAX_TIME, 0)) < initial_aws * 5e-4
+        for g in fake_gauges:
+            rw = gc.gauge_relative_weight(g.address) / 1e18
+            aw = gc.adjusted_gauge_weight(g.address)
+            expected_weight = initial_aw[g] * max(1 - t_passed / MAX_TIME, 0)
+            if rw != 0:
+                assert abs(rw - vote_tracker[g]) < 1e-12
+                assert abs(aw - expected_weight) < initial_aw[g] * 5e-4
