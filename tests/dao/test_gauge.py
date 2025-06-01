@@ -1,5 +1,6 @@
 import pytest
 import boa
+import os
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
@@ -61,11 +62,25 @@ class StatefulG(RuleBasedStateMachine):
             if shares <= self.gauges[gid].balanceOf(user):
                 self.gauges[gid].redeem(shares, user, user)
 
-    def transfer(self):
-        pass
+    @rule(from_uid=user_id, to_uid=user_id, amount=token_amount, gid=gauge_id)
+    def transfer(self, from_uid, to_uid, amount, gid):
+        gauge = self.gauges[gid]
+        from_user = self.accounts[from_uid]
+        to_user = self.accounts[to_uid]
+        if amount <= gauge.balanceOf(from_user):
+            with boa.env.prank(from_user):
+                gauge.transfer(to_user, amount)
 
+    @rule()
     def claim(self):
-        pass
+        for user in self.accounts:
+            with boa.env.prank(user):
+                for gauge in self.gauges:
+                    expected_amount = gauge.preview_claim(self.yb.address, user)
+                    d_yb = self.yb.balanceOf(user)
+                    gauge.claim()
+                    d_yb = self.yb.balanceOf(user) - d_yb
+                    assert expected_amount == d_yb
 
     @invariant()
     def check_adjustment(self):
@@ -79,19 +94,85 @@ class StatefulG(RuleBasedStateMachine):
             else:
                 assert abs((bal / supply)**0.5 - measured_adjustment / 1e18) < 1e-9
 
-    def check_mint_sum(self):
-        pass
+    def mint_all(self):
+        for user in self.accounts:
+            with boa.env.prank(user):
+                for gauge in self.gauges:
+                    gauge.claim()
 
-    def check_mint_split(self):
-        pass
+    @rule(dt=dt)
+    def check_mint_sum(self, dt):
+        self.mint_all()
+        t = boa.env.evm.patch.timestamp
+        rate_factor = self.gc.adjusted_gauge_weight_sum() * 10**18 // (self.gc.gauge_weight_sum() or 1)
+        assert rate_factor <= 10**18
+        expected_emissions = self.yb.preview_emissions(t + dt, rate_factor)
+
+        supply_before = self.yb.totalSupply()
+        balances_before = [self.yb.balanceOf(user) for user in self.accounts]
+
+        boa.env.time_travel(dt)
+        self.mint_all()
+
+        supply_after = self.yb.totalSupply()
+        balances_after = [self.yb.balanceOf(user) for user in self.accounts]
+
+        assert supply_before + expected_emissions == supply_after
+        assert sum(balances_before) + expected_emissions == sum(balances_after)
+
+    @rule(dt=dt, gid=gauge_id)
+    def check_mint_split_between_users(self, gid, dt):
+        gauge = self.gauges[gid]
+        lp_balances = [gauge.balanceOf(user) for user in self.accounts]
+
+        for user in self.accounts:
+            with boa.env.prank(user):
+                gauge.claim()
+
+        boa.env.time_travel(dt)
+
+        claimed = []
+        for user in self.accounts:
+            with boa.env.prank(user):
+                claimed.append(gauge.claim())
+
+        if sum(claimed) > 0:
+            for claim, lp_balance in zip(claimed, lp_balances):
+                assert abs(claim / sum(claimed) - lp_balance / (sum(lp_balances) or 1)) <= 1e-8
+
+    @rule(dt=dt, uid=user_id)
+    def check_mint_split_between_gauges(self, uid, dt):
+        user = self.accounts[uid]
+        lp_fracs = [g.balanceOf(user) / (g.totalSupply() or 1) for g in self.gauges]
+        adjustments = [g.get_adjustment() for g in self.gauges]
+        avotes = [a * v / 1e18 for a, v in zip(adjustments, VOTES)]
+
+        with boa.env.prank(user):
+            for g in self.gauges:
+                g.claim()
+            supply_before = self.yb.totalSupply()
+
+            boa.env.time_travel(dt)
+
+            claimed = []
+            for g in self.gauges:
+                claimed.append(g.claim())
+            supply_after = self.yb.totalSupply()
+
+            for claim, frac, vote in zip(claimed, lp_fracs, avotes):
+                exp_claimed = (supply_after - supply_before) * vote / (sum(avotes) or 1) * frac
+                assert abs(claim - exp_claimed) <= max(max(claim, exp_claimed) / 1e6, 1)
 
     @rule(dt=dt)
     def time_travel(self, dt):
         boa.env.time_travel(dt)
 
+    # XXX TODO add_reward etc for non-standard rewards
 
-def test_gauges(mock_lp, gauges, gc, accounts, vote_for_gauges):
-    StatefulG.TestCase.settings = settings(max_examples=100, stateful_step_count=100)
+
+@pytest.mark.parametrize("_tmp", range(int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", 1))))  # This splits the test into small chunks which are easier to parallelize
+def test_gauges(mock_lp, gauges, gc, yb, accounts, vote_for_gauges, _tmp):
+    StatefulG.TestCase.settings = settings(max_examples=20, stateful_step_count=100)
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     run_state_machine_as_test(StatefulG)
