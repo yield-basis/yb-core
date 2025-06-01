@@ -69,8 +69,15 @@ class StatefulG(RuleBasedStateMachine):
 
     @invariant()
     def check_adjustment(self):
+        supply = self.mock_lp.totalSupply()
         for g in self.gauges:
-            assert g.get_adjustment() <= 10**18
+            measured_adjustment = g.get_adjustment()
+            assert measured_adjustment <= 10**18
+            bal = self.mock_lp.balanceOf(g.address)
+            if supply == 0:
+                assert measured_adjustment == 0
+            else:
+                assert abs((bal / supply)**0.5 - measured_adjustment / 1e18) < 1e-9
 
     def check_mint_sum(self):
         pass
