@@ -131,7 +131,7 @@ def name() -> String[39]:
 def get_adjustment() -> uint256:
     staked: uint256 = staticcall LP_TOKEN.balanceOf(self)
     supply: uint256 = staticcall LP_TOKEN.totalSupply()
-    return isqrt(staked * 10**36 // supply)
+    return isqrt(unsafe_div(staked * 10**36, supply))
 
 
 @internal
