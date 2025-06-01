@@ -6,22 +6,12 @@ from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis import given
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
+from .conftest import N_POOLS
 
 
 WEEK = 7 * 86400
 MAX_TIME = 86400 * 365 * 4
-N_POOLS = 5
 WEIGHT_VOTE_DELAY = 10 * 86400
-
-
-@pytest.fixture(scope="session")
-def fake_gauges(mock_gov_token, gc, admin):
-    gauge_deployer = boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
-    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(N_POOLS)]
-    with boa.env.prank(admin):
-        for gauge in gauges:
-            gc.add_gauge(gauge.address)
-    return gauges
 
 
 class StatefulVE(RuleBasedStateMachine):
