@@ -13,6 +13,11 @@ def mock_gov_token(token_mock):
 
 
 @pytest.fixture(scope="session")
+def mock_lp(mock_gov_token):
+    return mock_gov_token
+
+
+@pytest.fixture(scope="session")
 def ve_mock(mock_gov_token, admin):
     with boa.env.prank(admin):
         return boa.load('contracts/dao/VotingEscrow.vy', mock_gov_token.address, "veValueless", "veGov", "gov._yb.eth")
