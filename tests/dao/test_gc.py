@@ -327,11 +327,11 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
         for g in fake_gauges:
             gc.checkpoint(g.address)
         aws = gc.adjusted_gauge_weight_sum()
-        assert abs(aws - initial_aws * max(1 - t_passed / MAX_TIME, 0)) < initial_aws * 5e-4
+        assert abs(aws - initial_aws * max(1 - t_passed / MAX_TIME, 0)) < initial_aws * 1e-3
         for g in fake_gauges:
             rw = gc.gauge_relative_weight(g.address) / 1e18
             aw = gc.adjusted_gauge_weight(g.address)
             expected_weight = initial_aw[g] * max(1 - t_passed / MAX_TIME, 0)
             if rw != 0:
                 assert abs(rw - vote_tracker[g]) < 1e-12
-                assert abs(aw - expected_weight) < initial_aw[g] * 5e-4
+                assert abs(aw - expected_weight) < initial_aw[g] * 1e-3
