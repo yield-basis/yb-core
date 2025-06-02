@@ -13,4 +13,3 @@ admin: public(immutable(address))
 def __init__(_admin: address, _gauge_controller: address):
     admin = _admin
     gauge_controller = _gauge_controller
-
