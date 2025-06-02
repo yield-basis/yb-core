@@ -67,6 +67,9 @@ event SetAdmin:
 event SetMinAdminFee:
     admin_fee: uint256
 
+event SetGaugeController:
+    gc: address
+
 event MarketParameters:
     idx: indexed(uint256)
     asset_token: indexed(address)
@@ -81,7 +84,7 @@ event MarketParameters:
 
 MAX_MARKETS: public(constant(uint256)) = 50000
 LEVERAGE: public(constant(uint256)) = 2 * 10**18
-GAUGE_CONTROLLER: public(immutable(address))
+gauge_controller: public(address)
 
 amm_impl: public(address)
 lt_impl: public(address)
@@ -126,7 +129,7 @@ def __init__(
     assert staticcall IERC20Detailed(stablecoin.address).decimals() == 18
 
     STABLECOIN = stablecoin
-    GAUGE_CONTROLLER = gauge_controller
+    self.gauge_controller = gauge_controller
     self.amm_impl = amm_impl
     self.lt_impl = lt_impl
     self.virtual_pool_impl = virtual_pool_impl
@@ -329,6 +332,14 @@ def set_fee_receiver(new_fee_receiver: address):
     assert msg.sender == self.admin, "Access"
     self.fee_receiver = new_fee_receiver
     log SetFeeReceiver(fee_receiver=new_fee_receiver)
+
+
+@external
+def set_gauge_cotroller(gc: address):
+    assert msg.sender == self.admin, "Access"
+    assert gc == empty(address), "Already set"
+    self.gauge_controller = gc
+    log SetGaugeController(gc=gc)
 
 
 @external

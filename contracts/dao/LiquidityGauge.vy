@@ -41,7 +41,7 @@ interface GaugeController:
     def TOKEN() -> IERC20: view
 
 interface Factory:
-    def GAUGE_CONTROLLER() -> GaugeController: view
+    def gauge_controller() -> GaugeController: view
     def admin() -> address: view
 
 interface IERC20Slice:
@@ -105,7 +105,7 @@ user_rewards_integral: public(HashMap[address, HashMap[IERC20, Integral]])
 def __init__(lp_token: IERC20):
     erc4626.__init__("YB Gauge: ..", "g(..)", lp_token, 0, "Just say no", "to EIP712")
     LP_TOKEN = lp_token
-    GC = staticcall Factory(msg.sender).GAUGE_CONTROLLER()
+    GC = staticcall Factory(msg.sender).gauge_controller()
     YB = staticcall GC.TOKEN()
     erc4626.ownable.owner = staticcall Factory(msg.sender).admin()
     self.rewards[YB].distributor = GC.address
