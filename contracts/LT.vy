@@ -372,12 +372,13 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     p_o: uint256 = self._price_oracle()
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
-        v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
-        # Liquidity contains admin fees, so we need to subtract
-        # If admin fees are negative - we get LESS LP tokens
-        # value_before = v.value_before - liquidity.admin = total
-        value_after: uint256 = convert(convert(v.value_after * 10**18 // p_o, int256) - liquidity.admin, uint256)
-        return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
+        if liquidity.total > 0:
+            v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
+            # Liquidity contains admin fees, so we need to subtract
+            # If admin fees are negative - we get LESS LP tokens
+            # value_before = v.value_before - liquidity.admin = total
+            value_after: uint256 = convert(convert(v.value_after * 10**18 // p_o, int256) - liquidity.admin, uint256)
+            return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
     return v.value * 10**18 // p_o
