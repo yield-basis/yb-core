@@ -640,6 +640,14 @@ def set_amm(amm: LevAMM):
 @nonreentrant
 def set_admin(new_admin: address):
     self._check_admin()
+
+    # Sanity check for the new admin
+    if new_admin.is_contract:
+        check_address: address = staticcall Factory(new_admin).admin()
+        check_address = staticcall Factory(new_admin).emergency_admin()
+        check_address = staticcall Factory(new_admin).fee_receiver()
+        check_uint: uint256 = staticcall Factory(new_admin).min_admin_fee()
+
     self.admin = new_admin
     log SetAdmin(admin=new_admin)
 
