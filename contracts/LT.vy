@@ -596,18 +596,18 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     withdrawn_cswap: uint256[2] = extcall CRYPTOPOOL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
     stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
 
+    self._burn(msg.sender, shares)
+
+    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
+    if self.liquidity.admin < 0 or killed:
+        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
+
     if stables_to_return > 0:
         assert extcall STABLECOIN.transfer(receiver, convert(stables_to_return, uint256), default_return_value=True)
     elif stables_to_return < 0:
         assert extcall STABLECOIN.transferFrom(msg.sender, self, convert(-stables_to_return, uint256), default_return_value=True)
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
-
-    self._burn(msg.sender, shares)
-
-    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
-    if self.liquidity.admin < 0 or killed:
-        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
 
     return (withdrawn_cswap[1], stables_to_return)
 
