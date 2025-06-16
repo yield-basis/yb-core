@@ -460,6 +460,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.admin = 0                # if we had admin fees - give them to the first depositor; simpler to handle
         self.balanceOf[staker] = 0
 
+    assert shares + supply >= MIN_SHARE_REMAINDER, "Remainder too small"
     assert shares >= min_shares, "Slippage"
 
     self._mint(receiver, shares)
@@ -596,18 +597,18 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     withdrawn_cswap: uint256[2] = extcall CRYPTOPOOL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
     stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
 
+    self._burn(msg.sender, shares)
+
+    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
+    if self.liquidity.admin < 0 or killed:
+        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
+
     if stables_to_return > 0:
         assert extcall STABLECOIN.transfer(receiver, convert(stables_to_return, uint256), default_return_value=True)
     elif stables_to_return < 0:
         assert extcall STABLECOIN.transferFrom(msg.sender, self, convert(-stables_to_return, uint256), default_return_value=True)
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
-
-    self._burn(msg.sender, shares)
-
-    self.liquidity.total = self.liquidity.total * (supply - shares) // supply
-    if self.liquidity.admin < 0 or killed:
-        self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
 
     return (withdrawn_cswap[1], stables_to_return)
 
@@ -747,6 +748,7 @@ def set_staker(staker: address):
     if staker_balance > 0:
         # Take that all as admin fee, staker should not have this
         fee_receiver: address = staticcall Factory(self.admin).fee_receiver()
+        assert staker != fee_receiver, "Staker=fee_receiver"
         self._transfer(staker, fee_receiver, staker_balance)
 
     self.staker = staker
