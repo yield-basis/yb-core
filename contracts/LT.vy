@@ -748,6 +748,7 @@ def set_staker(staker: address):
     if staker_balance > 0:
         # Take that all as admin fee, staker should not have this
         fee_receiver: address = staticcall Factory(self.admin).fee_receiver()
+        assert staker != fee_receiver, "Staker=fee_receiver"
         self._transfer(staker, fee_receiver, staker_balance)
 
     self.staker = staker
