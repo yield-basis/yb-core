@@ -109,6 +109,7 @@ def __init__(lt_contract: address,
     STABLECOIN = stablecoin
     COLLATERAL = collateral
     LEVERAGE = leverage
+    assert fee <= MAX_FEE, "Fee too high"
     self.fee = fee
     PRICE_ORACLE_CONTRACT = price_oracle_contract
 
