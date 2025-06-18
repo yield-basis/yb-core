@@ -126,6 +126,7 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256, fee: uint256, data: Bytes[10**5]):
     assert initiator == self
     assert token == STABLECOIN.address
+    assert msg.sender == (staticcall FACTORY.flash()).address, "Wrong caller"
 
     # executor
     i: uint256 = 0
@@ -183,4 +184,3 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
 
 # XXX include methods to determine max_in / max_out
-# XXX include possibility to change VirtualPool in factory
