@@ -171,7 +171,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
     assert extcall in_coin.transferFrom(msg.sender, self, in_amount, default_return_value=True)
 
-    data: Bytes[10**5] = empty(Bytes[10**5])
+    data: Bytes[128] = empty(Bytes[128])
     data = abi_encode(i, in_amount)
     extcall flash.flashLoan(self, STABLECOIN.address, staticcall flash.maxFlashLoan(STABLECOIN.address), data)
 
