@@ -538,6 +538,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
 @external
 @view
+@nonreentrant
 def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
     """
     @notice Method to simulate repay of the debt from the wallet and withdraw what is in the AMM. Does not use heavy math but
