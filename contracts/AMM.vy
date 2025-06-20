@@ -142,6 +142,7 @@ def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256, safe_limits: b
     # debt <= coll_value * 10**18 // (4 * LEV_RATIO)  ( == 9 / 16 * coll_value)
     # debt in equilibrium = coll_value * (LEVERAGE - 1.0) / LEVERAGE  ( == 1/2 * coll_value)
     # When L=2, critical value of debt corresponds to p_amm = 9/16 * p_o
+    # Just in case, we limit between (1/16 .. 8.5/16) which is a somewaht tighter range
 
     coll_value: uint256 = p_oracle * collateral * COLLATERAL_PRECISION // 10**18
 
