@@ -414,7 +414,7 @@ def max_debt() -> uint256:
 
 @external
 @view
-def admin_fees() -> uint256:
+def accumulated_interest() -> uint256:
     """
     @notice Calculate the amount of fees obtained from the interest
     """

@@ -62,7 +62,7 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
     assert _p_o == p_o
     assert abs(_v_after - pool_value // 2) // _v_after < 1e-7
 
-    assert amm.admin_fees() == 0
+    assert amm.accumulated_interest() == 0
 
 
 @given(
