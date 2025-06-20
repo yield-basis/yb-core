@@ -18,9 +18,9 @@ interface IERC20Slice:
     def symbol() -> String[29]: view
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue: nonpayable
     def _withdraw(frac: uint256) -> Pair: nonpayable
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
     def fee() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
@@ -77,11 +77,6 @@ struct AMMState:
 struct Pair:
     collateral: uint256
     debt: uint256
-
-struct ValueChange:
-    p_o: uint256
-    value_before: uint256
-    value_after: uint256
 
 struct OraclizedValue:
     p_o: uint256
@@ -392,13 +387,13 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         if liquidity.total > 0:
-            v: ValueChange = staticcall amm.value_change(lp_tokens, debt, True)
-            if amm_max_debt < v.value_after:
+            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True)
+            if amm_max_debt < v.value:
                 raise "Debt too high"
             # Liquidity contains admin fees, so we need to subtract
             # If admin fees are negative - we get LESS LP tokens
             # value_before = v.value_before - liquidity.admin = total
-            value_after: uint256 = convert(convert(v.value_after * 10**18 // p_o, int256) - liquidity.admin, uint256)
+            value_after: uint256 = convert(convert(v.value * 10**18 // p_o, int256) - liquidity.admin, uint256)
             return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt)
@@ -451,13 +446,13 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     if supply > 0:
         liquidity_values = self._calculate_values(p_o)
 
-    v: ValueChange = extcall amm._deposit(lp_tokens, debt)
-    value_after: uint256 = v.value_after * 10**18 // p_o
+    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt)
+    value_after: uint256 = v.value * 10**18 // p_o
 
     # Value is measured in USD
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
-    assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
+    assert staticcall amm.max_debt() // 2 >= v.value, "Debt too high"
 
     if supply > 0 and liquidity_values.total > 0:
         supply = liquidity_values.supply_tokens
@@ -512,7 +507,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     liquidity_values: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     supply: uint256 = liquidity_values.supply_tokens
     self.liquidity.admin = liquidity_values.admin
-    self.liquidity.total = liquidity_values.total
+    # self.liquidity.total = liquidity_values.total  no need to update since we will record this value later
     self.liquidity.staked = liquidity_values.staked
     self.totalSupply = supply
 

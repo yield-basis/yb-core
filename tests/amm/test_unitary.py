@@ -54,15 +54,13 @@ def test_view_methods(stablecoin, collateral_token, amm, price_oracle, admin, ac
     assert _p_o == p_o
     assert abs(_value - 2 * debt) / (2 * debt) < 1e-7
 
-    _p_o, _v_before, _v_after = amm.value_change(collateral_amount, debt, True)
+    _p_o, _v_after = amm.value_change(collateral_amount, debt, True)
     assert _p_o == p_o
-    assert pool_value == _v_before
-    assert abs(_v_after - 2 * _v_before) // _v_after < 1e-7
+    assert abs(_v_after - 2 * pool_value) // _v_after < 1e-7
 
-    _p_o, _v_before, _v_after = amm.value_change(collateral_amount // 2, debt // 2, False)
+    _p_o, _v_after = amm.value_change(collateral_amount // 2, debt // 2, False)
     assert _p_o == p_o
-    assert pool_value == _v_before
-    assert abs(_v_after - _v_before // 2) // _v_after < 1e-7
+    assert abs(_v_after - pool_value // 2) // _v_after < 1e-7
 
     assert amm.admin_fees() == 0
 
@@ -90,9 +88,8 @@ def test_deposit_withdraw(amm, price_oracle, admin, accounts,
             amm._deposit(collateral_amount, debt)
 
     with boa.env.prank(admin):
-        p_o_amm, value_before, value_after = amm._deposit(collateral_amount, debt)
+        p_o_amm, value_after = amm._deposit(collateral_amount, debt)
         assert p_o_amm == p_o
-        assert value_before == 0
         if collateral_amount > 0:
             assert value_after > 0
         else:

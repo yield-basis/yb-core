@@ -29,11 +29,6 @@ struct Pair:
     collateral: uint256
     debt: uint256
 
-struct ValueChange:
-    p_o: uint256
-    value_before: uint256
-    value_after: uint256
-
 struct OraclizedValue:
     p_o: uint256
     value: uint256
@@ -298,7 +293,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         out_amount = (collateral - y) * (10**18 - fee) // 10**18
         assert out_amount >= min_out, "Slippage"
         debt -= in_amount
-        collateral = self.collateral_amount - out_amount
+        collateral -= out_amount
         self.redeemed += in_amount
         assert extcall STABLECOIN.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall COLLATERAL.transfer(_for, out_amount, default_return_value=True)
@@ -310,7 +305,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         assert out_amount >= min_out, "Slippage"
         debt += out_amount
         self.minted += out_amount
-        collateral = self.collateral_amount + in_amount
+        collateral = y
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
@@ -327,15 +322,13 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
+def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue:
     assert msg.sender == LT_CONTRACT, "Access violation"
     assert not self.is_killed
 
     p_o: uint256 = extcall PRICE_ORACLE_CONTRACT.price_w()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt_w()
-
-    value_before: uint256 = self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     debt += d_debt
     collateral += d_collateral
@@ -348,7 +341,7 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange:
     value_after: uint256 = self.get_x0(p_o, collateral, debt, True) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     log AddLiquidityRaw(token_amounts=[d_collateral, d_debt], invariant=value_after, price_oracle=p_o)
-    return ValueChange(p_o=p_o, value_before=value_before, value_after=value_after)
+    return OraclizedValue(p_o=p_o, value=value_after)
 
 
 @external
@@ -394,12 +387,10 @@ def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
 
 @external
 @view
-def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange:
+def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue:
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
-
-    x0_before: uint256 = self.get_x0(p_o, collateral, debt, False)
 
     if is_deposit:
         collateral += collateral_amount
@@ -410,10 +401,9 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
 
     x0_after: uint256 = self.get_x0(p_o, collateral, debt, is_deposit)
 
-    return ValueChange(
+    return OraclizedValue(
         p_o = p_o,
-        value_before = x0_before * 10**18 // (2 * LEVERAGE - 10**18),
-        value_after = x0_after * 10**18 // (2 * LEVERAGE - 10**18))
+        value = x0_after * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
@@ -469,6 +459,7 @@ def set_killed(is_killed: bool):
 
 @external
 @nonreentrant
+@view
 def check_nonreentrant():
     pass
 
