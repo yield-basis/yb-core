@@ -151,6 +151,7 @@ CRYPTOPOOL_N_COINS: constant(uint256) = 2
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
 MIN_SHARE_REMAINDER: constant(uint256) = 10**6  # We leave at least this much of shares if > 0
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14  # == 1e-4, avoiding infinite APR and 0/0 errors
+MIN_STAKED_FOR_FEES: constant(int256) = 10**16
 
 admin: public(address)
 amm: public(LevAMM)
@@ -287,14 +288,28 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 
     # _36 postifix is to emphasize that the value is 1e36-based, not 1e18, for type tracking purposes
 
-    dv_use_36: int256 = value_change * (10**18 - f_a)
+    # Admin fees are earned only when all losses are paid off
+    dv_use_36: int256 = 0
+    v_st_loss: int256 = max(v_st_ideal - v_st, 0)
+    if staked >= MIN_STAKED_FOR_FEES:
+        if value_change > 0:
+            # Admin fee is only charged once the loss if fully paid off
+            v_loss: int256 = min(value_change, v_st_loss * supply // staked)
+            dv_use_36 = v_loss * 10**18 + (value_change - v_loss) * (10**18 - f_a)
+        else:
+            # Admin doesn't pay for value loss
+            dv_use_36 = value_change * 10**18
+    else:
+        # If stakeda part is small - positive admin fees are charged on profits and negative on losses
+        dv_use_36 = value_change * (10**18 - f_a)
+
     prev.admin += (value_change - dv_use_36 // 10**18)
 
     # dv_s is guaranteed to be <= dv_use
     # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
     dv_s_36: int256 = self.mul_div_signed(dv_use_36, staked, supply)
     if dv_use_36 > 0:
-        dv_s_36 = min(dv_s_36, max(v_st_ideal - v_st, 0) * 10**18)
+        dv_s_36 = min(dv_s_36, v_st_loss * 10**18)
 
     # new_staked_value is guaranteed to be <= new_total_value
     new_total_value_36: int256 = max(prev_value * 10**18 + dv_use_36, 0)
