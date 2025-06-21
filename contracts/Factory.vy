@@ -191,7 +191,7 @@ def add_market(
     )
     extcall LT(market.lt).set_amm(market.amm)
     extcall LT(market.lt).set_rate(rate)
-    extcall STABLECOIN.approve(market.lt, max_value(uint256))
+    assert extcall STABLECOIN.approve(market.lt, max_value(uint256), default_return_value=True)
     extcall LT(market.lt).allocate_stablecoins(debt_ceiling)
 
     if self.virtual_pool_impl != empty(address) and self.flash != empty(address):
@@ -275,7 +275,7 @@ def set_mint_factory(mint_factory: address):
     assert mint_factory != empty(address)
     self.mint_factory = mint_factory
     # crvUSD factory can take back as much as it wants. Very important function - this is why it can be called only once
-    extcall STABLECOIN.approve(mint_factory, max_value(uint256))
+    assert extcall STABLECOIN.approve(mint_factory, max_value(uint256), default_return_value=True)
 
     log SetAllocator(allocator=mint_factory, amount=max_value(uint256))
 
@@ -290,12 +290,12 @@ def set_allocator(allocator: address, amount: uint256):
     old_allocation: uint256 = self.allocators[allocator]
     if amount > old_allocation:
         # Use transferFrom
-        extcall STABLECOIN.transferFrom(allocator, self, amount - old_allocation)
+        assert extcall STABLECOIN.transferFrom(allocator, self, amount - old_allocation, default_return_value=True)
         self.allocators[allocator] = amount
 
     elif amount < old_allocation:
         # Allow to take back the allocation via transferFrom, but not more than the allocation reduction
-        extcall STABLECOIN.approve(allocator, (staticcall STABLECOIN.allowance(self, allocator)) + old_allocation - amount)
+        assert extcall STABLECOIN.approve(allocator, (staticcall STABLECOIN.allowance(self, allocator)) + old_allocation - amount, default_return_value=True)
         self.allocators[allocator] = amount
 
     log SetAllocator(allocator=allocator, amount=amount)

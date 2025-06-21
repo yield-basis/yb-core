@@ -18,9 +18,9 @@ interface IERC20Slice:
     def symbol() -> String[29]: view
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256) -> ValueChange: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue: nonpayable
     def _withdraw(frac: uint256) -> Pair: nonpayable
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> ValueChange: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
     def fee() -> uint256: view
     def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
@@ -77,11 +77,6 @@ struct AMMState:
 struct Pair:
     collateral: uint256
     debt: uint256
-
-struct ValueChange:
-    p_o: uint256
-    value_before: uint256
-    value_after: uint256
 
 struct OraclizedValue:
     p_o: uint256
@@ -151,6 +146,7 @@ CRYPTOPOOL_N_COINS: constant(uint256) = 2
 FEE_CLAIM_DISCOUNT: constant(uint256) = 10**16
 MIN_SHARE_REMAINDER: constant(uint256) = 10**6  # We leave at least this much of shares if > 0
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14  # == 1e-4, avoiding infinite APR and 0/0 errors
+MIN_STAKED_FOR_FEES: constant(int256) = 10**16
 
 admin: public(address)
 amm: public(LevAMM)
@@ -287,14 +283,28 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
 
     # _36 postifix is to emphasize that the value is 1e36-based, not 1e18, for type tracking purposes
 
-    dv_use_36: int256 = value_change * (10**18 - f_a)
+    # Admin fees are earned only when all losses are paid off
+    dv_use_36: int256 = 0
+    v_st_loss: int256 = max(v_st_ideal - v_st, 0)
+    if staked >= MIN_STAKED_FOR_FEES:
+        if value_change > 0:
+            # Admin fee is only charged once the loss if fully paid off
+            v_loss: int256 = min(value_change, v_st_loss * supply // staked)
+            dv_use_36 = v_loss * 10**18 + (value_change - v_loss) * (10**18 - f_a)
+        else:
+            # Admin doesn't pay for value loss
+            dv_use_36 = value_change * 10**18
+    else:
+        # If stakeda part is small - positive admin fees are charged on profits and negative on losses
+        dv_use_36 = value_change * (10**18 - f_a)
+
     prev.admin += (value_change - dv_use_36 // 10**18)
 
     # dv_s is guaranteed to be <= dv_use
     # if staked < supply (not exactly 100.0% staked) - dv_s is strictly < dv_use
     dv_s_36: int256 = self.mul_div_signed(dv_use_36, staked, supply)
     if dv_use_36 > 0:
-        dv_s_36 = min(dv_s_36, max(v_st_ideal - v_st, 0) * 10**18)
+        dv_s_36 = min(dv_s_36, v_st_loss * 10**18)
 
     # new_staked_value is guaranteed to be <= new_total_value
     new_total_value_36: int256 = max(prev_value * 10**18 + dv_use_36, 0)
@@ -363,23 +373,32 @@ def _log_token_reduction(staker: address, token_reduction: int256):
 @nonreentrant
 def preview_deposit(assets: uint256, debt: uint256) -> uint256:
     """
-    @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage
+    @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage.
+            Reverts if amounts are too high
     @param assets Amount of crypto to deposit
     @param debt Amount of stables to borrow for MMing (approx same value as crypto)
     """
     lp_tokens: uint256 = staticcall CRYPTOPOOL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
     p_o: uint256 = self._price_oracle()
+    amm: LevAMM = self.amm
+    amm_max_debt: uint256 = staticcall amm.max_debt() // 2
+
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
-        v: ValueChange = staticcall self.amm.value_change(lp_tokens, debt, True)
-        # Liquidity contains admin fees, so we need to subtract
-        # If admin fees are negative - we get LESS LP tokens
-        # value_before = v.value_before - liquidity.admin = total
-        value_after: uint256 = convert(convert(v.value_after * 10**18 // p_o, int256) - liquidity.admin, uint256)
-        return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
+        if liquidity.total > 0:
+            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True)
+            if amm_max_debt < v.value:
+                raise "Debt too high"
+            # Liquidity contains admin fees, so we need to subtract
+            # If admin fees are negative - we get LESS LP tokens
+            # value_before = v.value_before - liquidity.admin = total
+            value_after: uint256 = convert(convert(v.value * 10**18 // p_o, int256) - liquidity.admin, uint256)
+            return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
-    v: OraclizedValue = staticcall self.amm.value_oracle_for(lp_tokens, debt)
+    v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt)
+    if amm_max_debt < v.value:
+        raise "Debt too high"
     return v.value * 10**18 // p_o
 
 
@@ -427,13 +446,13 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     if supply > 0:
         liquidity_values = self._calculate_values(p_o)
 
-    v: ValueChange = extcall amm._deposit(lp_tokens, debt)
-    value_after: uint256 = v.value_after * 10**18 // p_o
+    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt)
+    value_after: uint256 = v.value * 10**18 // p_o
 
     # Value is measured in USD
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
     # If value becomes too large - we don't allow to deposit more to have a buffer when the price rises
-    assert staticcall amm.max_debt() // 2 >= v.value_after, "Debt too high"
+    assert staticcall amm.max_debt() // 2 >= v.value, "Debt too high"
 
     if supply > 0 and liquidity_values.total > 0:
         supply = liquidity_values.supply_tokens
@@ -488,7 +507,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     liquidity_values: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
     supply: uint256 = liquidity_values.supply_tokens
     self.liquidity.admin = liquidity_values.admin
-    self.liquidity.total = liquidity_values.total
+    # self.liquidity.total = liquidity_values.total  no need to update since we will record this value later
     self.liquidity.staked = liquidity_values.staked
     self.totalSupply = supply
 
@@ -519,6 +538,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
 @external
 @view
+@nonreentrant
 def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
     """
     @notice Method to simulate repay of the debt from the wallet and withdraw what is in the AMM. Does not use heavy math but
@@ -620,7 +640,10 @@ def pricePerShare() -> uint256:
     Non-manipulatable "fair price per share" oracle
     """
     v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
-    return v.total * 10**18 // v.supply_tokens
+    if v.supply_tokens == 0:
+        return 10**18
+    else:
+        return v.total * 10**18 // v.supply_tokens
 
 
 @external
@@ -639,6 +662,14 @@ def set_amm(amm: LevAMM):
 @nonreentrant
 def set_admin(new_admin: address):
     self._check_admin()
+
+    # Sanity check for the new admin
+    if new_admin.is_contract:
+        check_address: address = staticcall Factory(new_admin).admin()
+        check_address = staticcall Factory(new_admin).emergency_admin()
+        check_address = staticcall Factory(new_admin).fee_receiver()
+        check_uint: uint256 = staticcall Factory(new_admin).min_admin_fee()
+
     self.admin = new_admin
     log SetAdmin(admin=new_admin)
 
