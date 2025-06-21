@@ -20,6 +20,7 @@ pytest-forked = "^1.6.0"
 ipython = "^9"
 # matplotlib = "^3"  # Only for graphs, otherwise not needed
 snekmate = "0.1.1"
+numpy = "^2"
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,9 +1,9 @@
 import boa
-from math import exp
+from numpy import exp, longdouble
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, initialize
-from .conftest import RATE
+from .conftest import RATE, RESERVE
 
 
 def test_mint(yb, admin, accounts):
@@ -37,24 +37,25 @@ class StatefulYB(RuleBasedStateMachine):
     @rule(dt=dt, rate_factor=rate_factor)
     def emit(self, dt, rate_factor):
         user = self.accounts[0]
-        t0 = boa.env.evm.patch.timestamp
+        t0 = self.yb.last_minted()
         boa.env.time_travel(dt)
         t = boa.env.evm.patch.timestamp
         if rate_factor > 10**18:
             with boa.reverts():
                 self.yb.preview_emissions(t, rate_factor)
         else:
-            rate = RATE * rate_factor // 10**18
+            rate = RATE * 10**18 // RESERVE * rate_factor
             expected_emissions = self.yb.preview_emissions(t, rate_factor)
             reserve = d_reserve = self.yb.reserve()
-            calculated_emissions = int(reserve * (1 - exp(-(t - t0) * rate / 1e18)))
+            relative_emitted = 1 - exp(-longdouble((t - t0) * rate // 10**18) / longdouble(1e18))
+            calculated_emissions = int(reserve * relative_emitted)
             d_balance = self.yb.balanceOf(user)
             with boa.env.prank(self.admin):
                 emitted = self.yb.emit(user, rate_factor)
             d_balance = self.yb.balanceOf(user) - d_balance
             d_reserve -= self.yb.reserve()
             assert d_balance == emitted == expected_emissions
-            assert abs(emitted - calculated_emissions) / (emitted + 1) < 1e-9
+            assert abs(emitted - calculated_emissions) / (emitted + 1) < 2e-18 / (relative_emitted or 1)
 
 
 def test_yb(yb, admin, accounts):

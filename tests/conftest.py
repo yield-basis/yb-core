@@ -10,8 +10,8 @@ boa.env.enable_fast_mode()
 
 
 PRICE = 100_000
-RESERVE = 10**9
-RATE = 10**9 // (365 * 86400)
+RESERVE = 10**9 * 10**18
+RATE = 10**9 * 10**18 // (4 * 365 * 86400)
 
 
 settings.register_profile("default", deadline=timedelta(seconds=1000))
