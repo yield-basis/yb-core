@@ -54,6 +54,7 @@ class StatefulYB(RuleBasedStateMachine):
             d_balance = self.yb.balanceOf(user)
             with boa.env.prank(self.admin):
                 emitted = self.yb.emit(user, rate_factor)
+            assert self.yb.last_minted() > 0
             d_balance = self.yb.balanceOf(user) - d_balance
             d_reserve -= self.yb.reserve()
             assert d_balance == emitted == expected_emissions
