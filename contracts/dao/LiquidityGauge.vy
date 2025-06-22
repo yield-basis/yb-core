@@ -78,7 +78,6 @@ struct RewardIntegrals:
     integral_inv_supply: Integral
     reward_rate_integral: Integral
     user_rewards_integral: Integral
-    d_user_reward: uint256
 
 
 VERSION: public(constant(String[8])) = "v1.0.0"
@@ -100,6 +99,7 @@ reward_rate_integral: public(HashMap[IERC20, Integral])
 reward_rate_integral_4_user: public(HashMap[address, HashMap[IERC20, uint256]])
 
 user_rewards_integral: public(HashMap[address, HashMap[IERC20, Integral]])
+claimed_rewards: public(HashMap[address, HashMap[IERC20, uint256]])
 
 
 @deploy
@@ -155,12 +155,11 @@ def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardInteg
     if user != empty(address):
         r.user_rewards_integral = self.user_rewards_integral[user][reward]
         if block.timestamp > r.user_rewards_integral.t:
-            r.d_user_reward = math._mul_div(
+            r.user_rewards_integral.v += math._mul_div(
                 r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward],
                 erc4626.erc20.balanceOf[user],
                 10**36,
                 False)
-            r.user_rewards_integral.v += r.d_user_reward
             r.user_rewards_integral.t = block.timestamp
 
     return r
@@ -222,8 +221,11 @@ def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
     self.reward_rate_integral_4_user[user][reward] = r.reward_rate_integral.v
     self.user_rewards_integral[user][reward] = r.user_rewards_integral
 
-    assert extcall reward.transfer(user, r.d_user_reward, default_return_value=True)
-    return r.d_user_reward
+    d_reward = r.user_rewards_integral.v - self.claimed_rewards[user][reward]
+    self.claimed_rewards[user][reward] = r.user_rewards_integral.v
+
+    assert extcall reward.transfer(user, d_reward, default_return_value=True)
+    return d_reward
 
 
 @external
@@ -234,7 +236,9 @@ def preview_claim(reward: IERC20, user: address) -> uint256:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
     else:
         d_reward = self._get_vested_rewards(reward)
-    return self._checkpoint(reward, d_reward, user).d_user_reward
+
+    r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
+    return r.user_rewards_integral.v - self.claimed_rewards[user][reward]
 
 
 @external
