@@ -143,14 +143,15 @@ class StatefulG(RuleBasedStateMachine):
     @rule(dt=dt, uid=user_id)
     def check_mint_split_between_gauges(self, uid, dt):
         user = self.accounts[uid]
-        lp_fracs = [g.balanceOf(user) / (g.totalSupply() or 1) for g in self.gauges]
-        adjustments = [g.get_adjustment() for g in self.gauges]
-        avotes = [a * v / 1e18 for a, v in zip(adjustments, VOTES)]
+        gauge_supplies = [g.totalSupply() for g in self.gauges]
+        lp_fracs = [g.balanceOf(user) / (supply or 1) for g, supply in zip(self.gauges, gauge_supplies)]
 
         with boa.env.prank(user):
             for g in self.gauges:
                 g.claim()
             supply_before = self.yb.totalSupply()
+
+            relative_weights = [self.gc.gauge_relative_weight(g) for g in self.gauges]
 
             boa.env.time_travel(dt)
 
@@ -159,8 +160,8 @@ class StatefulG(RuleBasedStateMachine):
                 claimed.append(g.claim())
             supply_after = self.yb.totalSupply()
 
-            for claim, frac, vote in zip(claimed, lp_fracs, avotes):
-                exp_claimed = (supply_after - supply_before) * vote / (sum(avotes) or 1) * frac
+            for claim, frac, rw in zip(claimed, lp_fracs, relative_weights):
+                exp_claimed = (supply_after - supply_before) * rw / 1e18 * frac
                 assert abs(claim - exp_claimed) <= max(max(claim, exp_claimed) / 1e6, 1)
 
     @rule(dt=dt)
