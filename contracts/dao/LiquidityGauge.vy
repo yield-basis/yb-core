@@ -6,6 +6,7 @@
 """
 from ethereum.ercs import IERC20
 from snekmate.extensions import erc4626
+from snekmate.utils import math
 
 
 initializes: erc4626
@@ -154,8 +155,11 @@ def _checkpoint(reward: IERC20, d_reward: uint256, user: address) -> RewardInteg
     if user != empty(address):
         r.user_rewards_integral = self.user_rewards_integral[user][reward]
         if block.timestamp > r.user_rewards_integral.t:
-            r.d_user_reward = (r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward]) *\
-                erc4626.erc20.balanceOf[user] // 10**18
+            r.d_user_reward = math._mul_div(
+                r.reward_rate_integral.v - self.reward_rate_integral_4_user[user][reward],
+                erc4626.erc20.balanceOf[user],
+                10**36,
+                False)
             r.user_rewards_integral.v += r.d_user_reward
             r.user_rewards_integral.t = block.timestamp
 
