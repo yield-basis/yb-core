@@ -40,6 +40,8 @@ class StatefulYB(RuleBasedStateMachine):
         t0 = self.yb.last_minted()
         boa.env.time_travel(dt)
         t = boa.env.evm.patch.timestamp
+        if t0 == 0:
+            t0 = t
         if rate_factor > 10**18:
             with boa.reverts():
                 self.yb.preview_emissions(t, rate_factor)

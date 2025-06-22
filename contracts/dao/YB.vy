@@ -49,12 +49,16 @@ def __init__(reserve: uint256, max_rate: uint256):
 @view
 def _emissions(t: uint256, rate_factor: uint256) -> uint256:
     assert rate_factor <= 10**18
-    dt: int256 = convert(t - self.last_minted, int256)
-    rate_36: int256 = convert(max_mint_rate * rate_factor, int256)
-    reserve: int256 = convert(self.reserve, int256)
-    return convert(
-        reserve * (10**18 - math._wad_exp(-dt * rate_36 // 10**18)) // 10**18,
-        uint256)
+    last_minted: uint256 = self.last_minted
+    if last_minted == 0:
+        return 0
+    else:
+        dt: int256 = convert(t - last_minted, int256)
+        rate_36: int256 = convert(max_mint_rate * rate_factor, int256)
+        reserve: int256 = convert(self.reserve, int256)
+        return convert(
+            reserve * (10**18 - math._wad_exp(-dt * rate_36 // 10**18)) // 10**18,
+            uint256)
 
 
 @external
