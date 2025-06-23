@@ -318,7 +318,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
 
 @external
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
-    assert assets <= erc4626._max_withdraw(receiver), "erc4626: withdraw more than maximum"
+    assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
