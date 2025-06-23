@@ -298,7 +298,7 @@ def increase_amount(_value: uint256, _for: address = msg.sender):
     @param _value Amount of tokens to deposit and add to the lock
     @param _for Lock to increase for
     """
-    _locked: LockedBalance = self.locked[msg.sender]
+    _locked: LockedBalance = self.locked[_for]
 
     assert _value > 0  # dev: need non-zero value
     assert _locked.amount > 0, "No existing lock found"
