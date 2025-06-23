@@ -495,15 +495,11 @@ def _merge_positions(owner: address, to: address):
     new_locked.amount += locked.amount
     self.locked[to].amount = new_locked.amount
 
-    user_epoch: uint256 = self.user_point_epoch[owner]
-    pt: Point = self.user_point_history[owner][user_epoch]
-    user_epoch += 1
+    user_epoch: uint256 = self.user_point_epoch[owner] + 1
     self.user_point_epoch[owner] = user_epoch
     self.user_point_history[owner][user_epoch] = Point(bias=0, slope=0, ts=block.timestamp)
 
-    user_epoch = self.user_point_epoch[to]
-    to_pt: Point = self.user_point_history[to][user_epoch]
-    user_epoch += 1
+    user_epoch = self.user_point_epoch[to] + 1
     self.user_point_epoch[to] = user_epoch
     slope: int256 = new_locked.amount // MAXTIME
     self.user_point_history[to][user_epoch] = Point(
