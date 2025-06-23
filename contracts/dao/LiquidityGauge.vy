@@ -91,6 +91,7 @@ LP_TOKEN: public(immutable(IERC20))
 reward_count: public(uint256)
 reward_tokens: public(IERC20[MAX_REWARDS])
 rewards: public(HashMap[IERC20, Reward])
+processed_rewards: public(HashMap[IERC20, uint256])
 
 integral_inv_supply: public(Integral)
 integral_inv_supply_4_token: public(HashMap[IERC20, uint256])
@@ -171,7 +172,7 @@ def _get_vested_rewards(token: IERC20) -> uint256:
     assert self.rewards[token].distributor != empty(address), "No reward"
 
     last_reward_time: uint256 = self.reward_rate_integral[token].t
-    used_rewards: uint256 = self.reward_rate_integral[token].v
+    used_rewards: uint256 = self.processed_rewards[token]
     finish_time: uint256 = self.rewards[token].finish_time
     total: uint256 = self.rewards[token].total
     if finish_time > last_reward_time:
@@ -189,6 +190,7 @@ def _vest_rewards(reward: IERC20) -> uint256:
         d_reward = extcall GC.emit()
     else:
         d_reward = self._get_vested_rewards(reward)
+        self.processed_rewards[reward] += d_reward
     return d_reward
 
 
