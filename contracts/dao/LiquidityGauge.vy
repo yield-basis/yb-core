@@ -281,16 +281,16 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     self.integral_inv_supply_4_token[token] = ri.integral_inv_supply.v
     self.reward_rate_integral[token] = ri.reward_rate_integral
 
-    used_rewards: uint256 = ri.reward_rate_integral.v
+    unused_rewards: uint256 = r.total - self.processed_rewards[token]
 
-    if finish_time > 0:
+    if finish_time > 0 or unused_rewards == 0:
         # Change rate to meet new finish time
         assert finish_time > block.timestamp, "Finishes in the past"
         r.finish_time = finish_time
     else:
         # Keep the reward rate
         assert r.finish_time > block.timestamp, "Rate unknown"
-        r.finish_time = block.timestamp + (r.finish_time - block.timestamp) * (r.total + amount) // r.total
+        r.finish_time = block.timestamp + (r.finish_time - block.timestamp) * (unused_rewards + amount) // unused_rewards
     r.total += amount
 
     assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
