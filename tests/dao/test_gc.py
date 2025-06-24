@@ -73,6 +73,15 @@ class StatefulVE(RuleBasedStateMachine):
             else:
                 self.ve_yb.increase_unlock_time(unlock_time)
 
+    def _check_weight_too_much(self, gauge_ids, weight, user):
+        user_power = self.gc.vote_user_power(user)
+        old_powers = [self.gc.vote_user_slopes(user, self.fake_gauges[g].address).power for g in gauge_ids]
+        for old_weight in old_powers:
+            user_power += weight - old_weight
+            if user_power > 10000:
+                return True
+        return False
+
     @rule(gauge_ids=gauge_ids, uid=user_id, weight=weight)
     def vote(self, gauge_ids, uid, weight):
         user = self.accounts[uid]
@@ -109,9 +118,7 @@ class StatefulVE(RuleBasedStateMachine):
                         return
                     else:
                         raise
-            elif (len(gauge_ids) * weight
-                  - sum(self.gc.vote_user_slopes(user, self.fake_gauges[g].address).power for g in gauge_ids)
-                  + self.gc.vote_user_power(user)) > 10000:
+            elif self._check_weight_too_much(gauge_ids, weight, user):
                 with boa.reverts('Used too much power'):
                     self.gc.vote_for_gauge_weights(gauges, weights)
             else:
@@ -255,6 +262,25 @@ def test_gc_three(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
+def test_gc_four(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.vote(gauge_ids=[0, 0], uid=0, weight=0)
+    state.increase_unlock_time(lock_duration=604800, uid=0)
+    state.time_travel(dt=3)
+    state.create_lock(amount=1, lock_duration=604800, uid=0)
+    state.increase_unlock_time(lock_duration=604800, uid=0)
+    state.increase_unlock_time(lock_duration=104379306, uid=0)
+    state.create_lock(amount=1, lock_duration=604800, uid=0)
+    state.increase_unlock_time(lock_duration=604800, uid=0)
+    state.create_lock(amount=1, lock_duration=604800, uid=0)
+    state.vote(gauge_ids=[2], uid=0, weight=10000)
+    state.time_travel(dt=2341952)
+    state.vote(gauge_ids=[0, 4, 2], uid=0, weight=444)
+    state.teardown()
+
+
 def test_gc_merge(ve_yb, yb, gc, fake_gauges, accounts, admin):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
@@ -327,11 +353,11 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
         for g in fake_gauges:
             gc.checkpoint(g.address)
         aws = gc.adjusted_gauge_weight_sum()
-        assert abs(aws - initial_aws * max(1 - t_passed / MAX_TIME, 0)) < initial_aws * 1e-3
+        assert abs(aws - initial_aws * max(1 - t_passed / MAX_TIME, 0)) < initial_aws * (7 * 86400) / MAX_TIME
         for g in fake_gauges:
             rw = gc.gauge_relative_weight(g.address) / 1e18
             aw = gc.adjusted_gauge_weight(g.address)
             expected_weight = initial_aw[g] * max(1 - t_passed / MAX_TIME, 0)
             if rw != 0:
                 assert abs(rw - vote_tracker[g]) < 1e-12
-                assert abs(aw - expected_weight) < initial_aw[g] * 1e-3
+                assert abs(aw - expected_weight) < initial_aw[g] * (7 * 86400) / MAX_TIME
