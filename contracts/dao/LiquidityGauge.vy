@@ -246,6 +246,7 @@ def preview_claim(reward: IERC20, user: address) -> uint256:
 @external
 def add_reward(token: IERC20, distributor: address):
     assert token != YB, "YB"
+    assert token != LP_TOKEN, "LP_TOKEN"
     assert distributor != empty(address)
     assert self.rewards[token].distributor == empty(address), "Already added"
     erc4626.ownable._check_owner()
