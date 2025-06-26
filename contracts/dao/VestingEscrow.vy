@@ -14,7 +14,8 @@ initializes: ownable
 
 exports: (
     ownable.renounce_ownership,
-    ownable.transfer_ownership
+    ownable.transfer_ownership,
+    ownable.owner
 )
 
 

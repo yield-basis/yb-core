@@ -47,6 +47,8 @@ exports: (
     erc721.totalSupply,
     erc721.tokenByIndex,
     erc721.tokenOfOwnerByIndex,
+    erc721.tokenURI,
+    erc721.supportsInterface,
     ownable.transfer_ownership,
     ownable.owner
 )

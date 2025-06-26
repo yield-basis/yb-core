@@ -12,7 +12,8 @@ initializes: ownable
 
 
 exports: (
-    ownable.transfer_ownership
+    ownable.transfer_ownership,
+    ownable.owner
 )
 
 
