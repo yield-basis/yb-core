@@ -24,12 +24,12 @@ YB: public(immutable(IERC20))
 VE: public(immutable(VotingEscrow))
 
 UNLOCK_TIME: public(immutable(uint256))
-RECEPIENT: public(immutable(address))
+RECIPIENT: public(immutable(address))
 
 
 @deploy
 def __init__(token: IERC20, unlock_time: uint256, ve: VotingEscrow, gc: GaugeController, recepient: address):
-    RECEPIENT = recepient
+    RECIPIENT = recepient
     YB = token
     VE = ve
     GC = gc
@@ -40,7 +40,7 @@ def __init__(token: IERC20, unlock_time: uint256, ve: VotingEscrow, gc: GaugeCon
 
 @internal
 def _access():
-    assert msg.sender == RECEPIENT, "Not authorized"
+    assert msg.sender == RECIPIENT, "Not authorized"
 
 
 @internal
