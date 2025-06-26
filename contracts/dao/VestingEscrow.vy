@@ -90,6 +90,7 @@ def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100]):
     @param _amounts Amount of vested tokens for each address
     """
     ownable._check_owner()
+    assert len(_recipients) == len(_amounts), "Lengths mismatch"
 
     _total_amount: uint256 = 0
     for i: uint256 in range(100):
