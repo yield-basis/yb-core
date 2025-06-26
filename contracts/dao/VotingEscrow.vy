@@ -351,9 +351,9 @@ def withdraw(_for: address = msg.sender):
     # Both can have >= 0 amount
     self._checkpoint(msg.sender, old_locked, _locked)
 
-    assert extcall TOKEN.transfer(_for, value)
-
     erc721._burn(convert(msg.sender, uint256))
+
+    assert extcall TOKEN.transfer(_for, value)
 
     log Withdraw(_from=msg.sender, _for=_for, value=value, ts=block.timestamp)
     log Supply(prevSupply=supply_before, supply=new_supply)

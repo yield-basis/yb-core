@@ -294,8 +294,8 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
         r.finish_time = block.timestamp + (r.finish_time - block.timestamp) * (unused_rewards + amount) // unused_rewards
     r.total += amount
 
-    assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
     self.rewards[token] = r
+    assert extcall token.transferFrom(msg.sender, self, amount, default_return_value=True)
     log DepositRewards(token=token.address, distributor=msg.sender, amount=amount, finish_time=r.finish_time)
 
 
