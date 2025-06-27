@@ -1,4 +1,4 @@
-# @version 0.4.1
+# @version 0.4.3
 """
 @title VirtualPool
 @notice Virtual pool to swap LP in Yield Basis without touching the LP token

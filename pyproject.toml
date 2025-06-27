@@ -8,10 +8,9 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.11,<4"
-vyper = "0.4.1"
+vyper = "0.4.3"
 poetry = "^1"
-titanoboa = {git = "https://github.com/vyperlang/titanoboa.git", rev = "2a9600c7706696a85734a9c904a162fda34c0d70"}
-# titanoboa = "0.2.6"
+titanoboa = "0.2.7"
 hypothesis = "^6"
 pdbpp = "^0.11.6"
 jedi = "^0.19.1"
@@ -19,7 +18,7 @@ pytest-xdist = "^3.6"
 pytest-forked = "^1.6.0"
 ipython = "^9"
 # matplotlib = "^3"  # Only for graphs, otherwise not needed
-snekmate = "0.1.1"
+snekmate = "0.1.2"
 numpy = "^2"
 
 [build-system]

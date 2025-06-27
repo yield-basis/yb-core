@@ -1,4 +1,4 @@
-# @version 0.4.1
+# @version 0.4.3
 """
 OpenZeppelin's IVotes interface:
 https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/governance/utils/IVotes.sol
