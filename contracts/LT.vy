@@ -477,6 +477,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.staked = 0               # Same: nothing staked when supply is 0
         self.liquidity.total = shares + supply  # 1 share = 1 crypto at first deposit
         self.liquidity.admin = 0                # if we had admin fees - give them to the first depositor; simpler to handle
+        if self.balanceOf[staker] > 0:
+            log IERC20.Transfer(sender=staker, receiver=empty(address), value=self.balanceOf[staker])
         self.balanceOf[staker] = 0
 
     assert shares + supply >= MIN_SHARE_REMAINDER, "Remainder too small"
