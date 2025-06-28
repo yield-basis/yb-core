@@ -73,7 +73,7 @@ flag LockActions:
     INCREASE_TIME
 
 interface TransferClearanceChecker:
-    def ve_transfer_allowed(users: DynArray[address, 10]) -> bool: view
+    def ve_transfer_allowed(user: address) -> bool: view
 
 
 event Deposit:
@@ -477,7 +477,9 @@ def getPastTotalSupply(timepoint: uint256) -> uint256:
 def _ve_transfer_allowed(owner: address, to: address) -> bool:
     checker: TransferClearanceChecker = self.transfer_clearance_checker
     if checker.address != empty(address):
-        assert staticcall checker.ve_transfer_allowed([owner, to]), "Not allowed"
+        # The check is whether the source (owner) has 0 votes.
+        # Destination address can STILL have votes, that's fine
+        assert staticcall checker.ve_transfer_allowed(owner), "Not allowed"
     assert owner != to
 
     owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
@@ -562,6 +564,5 @@ def locked__end(_addr: address) -> uint256:
     return self.locked[_addr].end
 
 
-# TODO check that all votes are zero before transfers
 # TODO delegation
 # TODO autorelock to max

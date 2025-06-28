@@ -143,7 +143,7 @@ class StatefulVE(RuleBasedStateMachine):
             elif amount2 == 0:
                 with boa.reverts():
                     self.ve_yb.transferFrom(user1, user2, id1)
-            elif self.gc.vote_user_power(user1) != 0 or self.gc.vote_user_power(user2) != 0:
+            elif self.gc.vote_user_power(user1) != 0:
                 with boa.reverts("Not allowed"):
                     self.ve_yb.transferFrom(user1, user2, id1)
             elif t1 != max_time or t2 != max_time:

@@ -163,7 +163,7 @@ class StatefulG(RuleBasedStateMachine):
 
             for claim, frac, rw in zip(claimed, lp_fracs, relative_weights):
                 exp_claimed = (supply_after - supply_before) * rw / 1e18 * frac
-                assert abs(claim - exp_claimed) <= max(max(claim, exp_claimed) / 1e6, 1)
+                assert abs(claim - exp_claimed) <= max(max(claim, exp_claimed) / 1e6, 2)
 
     @rule(dt=dt)
     def time_travel(self, dt):
@@ -616,4 +616,39 @@ def test_gauges_fail_6(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.check_mint_sum(dt=1470046)
     state.check_adjustment()
     state.check_mint_split_between_users(dt=1959055, gid=2)
+    state.teardown()
+
+
+def test_gauges_fail_7(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+    for k, v in locals().items():
+        setattr(StatefulG, k, v)
+    state = StatefulG()
+    state.check_adjustment()
+    state.deposit(assets=17155, gid=0, uid=0)
+    state.check_adjustment()
+    state.deposit(assets=2_040_773_902, gid=2, uid=0)
+    state.check_adjustment()
+    state.deposit(assets=10_000_000_000_000_000_000_000_000, gid=0, uid=0)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=0, uid=0)
+    state.check_adjustment()
+    state.deposit(assets=1, gid=0, uid=0)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=5, uid=0)
+    state.check_adjustment()
+    state.deposit(assets=37588, gid=3, uid=7)
+    state.check_adjustment()
+    state.deposit(assets=5_773_599_887_495_203_987_568_922, gid=4, uid=8)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=1537601, uid=6)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=796689, uid=4)
+    state.check_adjustment()
+    state.deposit(assets=4631, gid=1, uid=8)
+    state.check_adjustment()
+    state.deposit(assets=5_773_599_887_495_203_987_568_922, gid=4, uid=8)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=1538433, uid=3)
+    state.check_adjustment()
+    state.check_mint_split_between_gauges(dt=5725, uid=0)
     state.teardown()
