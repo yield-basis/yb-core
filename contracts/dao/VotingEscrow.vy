@@ -30,8 +30,6 @@ from snekmate.auth import ownable
 from snekmate.tokens import erc721
 
 
-## implements: IVotes XXX
-
 initializes: ownable
 initializes: erc721[ownable := ownable]
 
@@ -602,6 +600,3 @@ def locked__end(_addr: address) -> uint256:
     @return Epoch time of the lock end
     """
     return self.locked[_addr].end
-
-
-# TODO delegation
