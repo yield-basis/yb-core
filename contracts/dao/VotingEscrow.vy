@@ -142,11 +142,19 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
         # Calculate slopes and biases
         # Kept at zero when they have to
         if old_locked.end > block.timestamp and old_locked.amount > 0:
-            u_old.slope = old_locked.amount // MAXTIME
-            u_old.bias = u_old.slope * convert(old_locked.end - block.timestamp, int256)
+            if old_locked.end == max_value(uint256):
+                u_old.slope = 0
+                u_old.bias = old_locked.amount
+            else:
+                u_old.slope = old_locked.amount // MAXTIME
+                u_old.bias = u_old.slope * convert(old_locked.end - block.timestamp, int256)
         if new_locked.end > block.timestamp and new_locked.amount > 0:
-            u_new.slope = new_locked.amount // MAXTIME
-            u_new.bias = u_new.slope * convert(new_locked.end - block.timestamp, int256)
+            if new_locked.end == max_value(uint256):
+                u_new.slope = 0
+                u_new.bias = new_locked.amount
+            else:
+                u_new.slope = new_locked.amount // MAXTIME
+                u_new.bias = u_new.slope * convert(new_locked.end - block.timestamp, int256)
 
         # Read values of scheduled changes in the slope
         # old_locked.end can be in the past and in the future
@@ -216,7 +224,7 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
             self.slope_changes[old_locked.end] = old_dslope
 
         if new_locked.end > block.timestamp:
-            if new_locked.end > old_locked.end:
+            if new_locked.end != old_locked.end:
                 new_dslope -= u_new.slope  # old slope disappeared at this point
                 self.slope_changes[new_locked.end] = new_dslope
             # else: we recorded it already in old_dslope
@@ -323,6 +331,30 @@ def increase_unlock_time(_unlock_time: uint256):
     assert _locked.amount > 0, "Nothing is locked"
     assert unlock_time > _locked.end, "Can only increase lock duration"
     assert unlock_time <= block.timestamp + UMAXTIME, "Voting lock can be 4 years max"
+
+    self._deposit_for(msg.sender, 0, unlock_time, _locked, LockActions.INCREASE_TIME)
+
+
+@external
+@nonreentrant
+def infinite_lock_toggle():
+    """
+    @notice Make ever-extending lock or cancel it
+    """
+    _locked: LockedBalance = self.locked[msg.sender]
+    assert _locked.end > block.timestamp, "Lock expired"
+    assert _locked.amount > 0, "Nothing is locked"
+    unlock_time: uint256 = 0
+
+    if _locked.end == max_value(uint256):
+        checker: TransferClearanceChecker = self.transfer_clearance_checker
+        if checker.address != empty(address):
+            # The check is whether the source (owner) has 0 votes.
+            # Destination address can STILL have votes, that's fine
+            assert staticcall checker.ve_transfer_allowed(msg.sender), "Not allowed"
+        unlock_time = ((block.timestamp + UMAXTIME) // WEEK) * WEEK
+    else:
+        unlock_time = max_value(uint256)
 
     self._deposit_for(msg.sender, 0, unlock_time, _locked, LockActions.INCREASE_TIME)
 
@@ -482,10 +514,18 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
         assert staticcall checker.ve_transfer_allowed(owner), "Not allowed"
     assert owner != to
 
-    owner_time: uint256 = self.locked[owner].end // WEEK * WEEK
-    to_time: uint256 = self.locked[to].end // WEEK * WEEK
+    sender_max: bool = False
+    receiver_max: bool = False
     max_time: uint256 = block.timestamp // WEEK * WEEK + UMAXTIME
-    return owner_time == max_time and to_time == max_time
+
+    owner_time: uint256 = self.locked[owner].end
+    if owner_time == max_value(uint256) or owner_time // WEEK * WEEK == max_time:
+        sender_max = True
+    to_time: uint256 = self.locked[to].end
+    if to_time == max_value(uint256) or to_time // WEEK * WEEK == max_time:
+        receiver_max = True
+
+    return sender_max and receiver_max
 
 
 @internal
@@ -565,4 +605,3 @@ def locked__end(_addr: address) -> uint256:
 
 
 # TODO delegation
-# TODO autorelock to max

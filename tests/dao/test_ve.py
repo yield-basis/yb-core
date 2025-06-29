@@ -104,7 +104,22 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.increase_unlock_time(unlock_time)
             else:
                 self.ve_mock.increase_unlock_time(unlock_time)
-                self.voting_balances[user]['unlock_time'] == self.ve_mock.locked(user).end
+                self.voting_balances[user]['unlock_time'] = self.ve_mock.locked(user).end
+
+    @rule(uid=user_id)
+    def infinite_lock_toggle(self, uid):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        with boa.env.prank(user):
+            if self.voting_balances[user]['unlock_time'] <= t:
+                with boa.reverts('Lock expired'):
+                    self.ve_mock.infinite_lock_toggle()
+            elif self.voting_balances[user]['value'] == 0:
+                with boa.reverts('Nothing is locked'):
+                    self.ve_mock.infinite_lock_toggle()
+            else:
+                self.ve_mock.infinite_lock_toggle()
+                self.voting_balances[user]['unlock_time'] = self.ve_mock.locked(user).end
 
     @rule(uid=user_id)
     def withdraw(self, uid):
@@ -140,7 +155,7 @@ class StatefulVE(RuleBasedStateMachine):
             elif self.voting_balances[user2]['value'] == 0:
                 with boa.reverts():
                     self.ve_mock.transferFrom(user1, user2, id1)
-            elif t1 != max_time or t2 != max_time:
+            elif (t1 != max_time and t1 != 2**256 - 1) or (t2 != max_time and t2 != 2**256 - 1):
                 with boa.reverts("Need max veLock"):
                     self.ve_mock.transferFrom(user1, user2, id1)
             else:
@@ -187,9 +202,12 @@ class StatefulVE(RuleBasedStateMachine):
         now = boa.env.evm.patch.timestamp
         for user in self.accounts:
             user_votes = self.ve_mock.getVotes(user)
-            expected_votes = max(
-                self.voting_balances[user]['value'] // MAX_TIME * (self.voting_balances[user]['unlock_time'] - now),
-                0)
+            if self.voting_balances[user]['unlock_time'] == 2**256 - 1:
+                expected_votes = self.voting_balances[user]['value']
+            else:
+                expected_votes = max(
+                    self.voting_balances[user]['value'] // MAX_TIME * (self.voting_balances[user]['unlock_time'] - now),
+                    0)
             assert abs(user_votes - expected_votes) <= 10
 
 
