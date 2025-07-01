@@ -136,6 +136,13 @@ if __name__ == '__main__':
         factory.add_market(pool.address, int(0.01 * 1e18), int(0.1 / (365 * 86400) * 1e18), 200_000 * 10**18)
         market = Market(*factory.markets(0))
 
+        yb.mint(demo_user_address, 10**6 * 10**18)
+        gc.add_gauge(market.staker)
+
+    with boa.env.prank(demo_user_address):
+        yb.approve(ve_yb, 2**256-1)
+        ve_yb.create_lock(10**5 * 10**18, boa.env.evm.patch.timestamp + 86400 * 4 * 365)
+
     print(f"Factory: {factory.address}")
     print(f"Pool:    {market.cryptopool}")
     print(f"AMM:     {market.amm}")
