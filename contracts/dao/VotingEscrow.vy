@@ -523,7 +523,8 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
     if to_time == max_value(uint256) or to_time // WEEK * WEEK == max_time:
         receiver_max = True
 
-    return sender_max and receiver_max
+    # the end slope should be the same, that's why the last condition is needed
+    return sender_max and receiver_max and (owner_time // WEEK * WEEK == to_time // WEEK * WEEK)
 
 
 @internal
@@ -543,9 +544,15 @@ def _merge_positions(owner: address, to: address):
 
     user_epoch = self.user_point_epoch[to] + 1
     self.user_point_epoch[to] = user_epoch
-    slope: int256 = new_locked.amount // MAXTIME
+    slope: int256 = 0
+    bias: int256 = 0
+    if new_locked.end == max_value(uint256):
+        bias = new_locked.amount
+    else:
+        slope = new_locked.amount // MAXTIME
+        bias = slope * convert(new_locked.end - block.timestamp, int256)
     self.user_point_history[to][user_epoch] = Point(
-        bias=slope * convert(new_locked.end - block.timestamp, int256),
+        bias=bias,
         slope=slope,
         ts=block.timestamp
     )

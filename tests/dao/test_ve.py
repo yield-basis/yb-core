@@ -155,7 +155,8 @@ class StatefulVE(RuleBasedStateMachine):
             elif self.voting_balances[user2]['value'] == 0:
                 with boa.reverts():
                     self.ve_mock.transferFrom(user1, user2, id1)
-            elif (t1 != max_time and t1 != 2**256 - 1) or (t2 != max_time and t2 != 2**256 - 1):
+            elif (t1 != max_time and t1 != 2**256 - 1) or (t2 != max_time and t2 != 2**256 - 1) or\
+                    (t1 // WEEK * WEEK != t2 // WEEK * WEEK):
                 with boa.reverts("Need max veLock"):
                     self.ve_mock.transferFrom(user1, user2, id1)
             else:
