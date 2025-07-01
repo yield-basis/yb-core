@@ -572,6 +572,7 @@ def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearance
 @payable
 def transferFrom(owner: address, to: address, token_id: uint256):
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
+    assert token_id == convert(owner, uint256), "Wrong token ID"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
     self._merge_positions(owner, to)
     erc721._burn(token_id)
@@ -581,6 +582,7 @@ def transferFrom(owner: address, to: address, token_id: uint256):
 @payable
 def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes[1_024] = b""):
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
+    assert token_id == convert(owner, uint256), "Wrong token ID"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
     self._merge_positions(owner, to)
     erc721._burn(token_id)
