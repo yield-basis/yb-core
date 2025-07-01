@@ -24,6 +24,9 @@ TEST_RESERVE = "0x2889302a794da87fbf1d6db415c1492194663d13"
 AGG = "0x18672b1b0c623a30089A280Ed9256379fb0E4E62"
 FLASH = "0xC9332fdCB1C491Dcc683bAe86Fe3cb70360738BC"
 
+RESERVE = 10**9 * 10**18
+RATE = 10**9 * 10**18 // (4 * 365 * 86400)
+
 
 if __name__ == '__main__':
     if '--hardhat' in sys.argv[1:]:
@@ -43,12 +46,25 @@ if __name__ == '__main__':
     boa.env._rpc.fetch("hardhat_impersonateAccount", [TEST_RESERVE])
     boa.env.add_account(ExternalAccount(_rpc=boa.env._rpc, address=TEST_RESERVE))
     boa.env._rpc.fetch("hardhat_setBalance", [TEST_RESERVE, "0x1000000000000000000"])
+
     with boa.env.prank(TEST_RESERVE):
         btc.transfer(demo_user_address, 10**18)
         usd.transfer(demo_user_address, 10**18)
         usd.transfer(admin, 200_000 * 10**18)
 
+    # Deploy YB
+    # Deploy veYB
+    # Deploy GC
+    # Deploy Factory
+    # Create a market with a gauge
+    # Lock YB tokens
+    # Vote for this market
+
     with boa.env.prank(admin):
+        yb = boa.load('contracts/dao/YB.vy', RESERVE, RATE)
+        ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'Yield Basis', 'YB', '')
+        gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
+
         amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
         math_impl = boa.load('contracts/testing/twocrypto/StableswapMath.vy')
@@ -87,7 +103,7 @@ if __name__ == '__main__':
         yb_lt_impl = lt_interface.deploy_as_blueprint()
         vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
         oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
-        gauge_impl = "0x0000000000000000000000000000000000000000"
+        gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
         # agg
         # flash
         fee_receiver = "0x0000000000000000000000000000000000000000"
@@ -103,6 +119,7 @@ if __name__ == '__main__':
             AGG,
             FLASH,
             fee_receiver,
+            gc.address,
             admin,
             admin)
 
@@ -125,6 +142,10 @@ if __name__ == '__main__':
     print(f"LT:      {market.lt}")
     print(f"VPool:   {market.virtual_pool}")
 
+    print(f"YB:      {yb.address}")
+    print(f"veYB:    {ve_yb.address}")
+    print(f"GaugeController:    {gc.address}")
+
     yb_amm = amm_interface.at(market.amm)
     yb_lt = lt_interface.at(market.lt)
 
@@ -139,6 +160,15 @@ if __name__ == '__main__':
 
     with open('lt_abi.json', 'w') as f:
         json.dump(yb_lt.abi, f)
+
+    with open('yb.json', 'w') as f:
+        json.dump(yb.abi, f)
+
+    with open('ve_yb.json', 'w') as f:
+        json.dump(ve_yb.abi, f)
+
+    with open('gc.json', 'w') as f:
+        json.dump(gc.abi, f)
 
     if '--deposit' in sys.argv[1:]:
         print('Simulating deposit')
