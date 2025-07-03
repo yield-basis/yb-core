@@ -73,6 +73,21 @@ class StatefulVE(RuleBasedStateMachine):
             else:
                 self.ve_yb.increase_unlock_time(unlock_time)
 
+    @rule(uid=user_id)
+    def infinite_lock_toggle(self, uid):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp
+        with boa.env.prank(user):
+            if self.voting_balances[user]['unlock_time'] <= t:
+                with boa.reverts('Lock expired'):
+                    self.ve_mock.infinite_lock_toggle()
+            elif self.voting_balances[user]['value'] == 0:
+                with boa.reverts('Nothing is locked'):
+                    self.ve_mock.infinite_lock_toggle()
+            else:
+                self.ve_mock.infinite_lock_toggle()
+                self.voting_balances[user]['unlock_time'] = self.ve_mock.locked(user).end
+
     def _check_weight_too_much(self, gauge_ids, weight, user):
         user_power = self.gc.vote_user_power(user)
         old_powers = [self.gc.vote_user_slopes(user, self.fake_gauges[g].address).power for g in gauge_ids]
