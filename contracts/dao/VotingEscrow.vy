@@ -60,6 +60,10 @@ struct Point:
     slope: int256  # - dweight / dt
     ts: uint256
 
+struct UntimedPoint:
+    bias: uint256
+    slope: uint256
+
 struct LockedBalance:
     amount: int256
     end: uint256
@@ -598,6 +602,20 @@ def get_last_user_slope(addr: address) -> int256:
     """
     uepoch: uint256 = self.user_point_epoch[addr]
     return self.user_point_history[addr][uepoch].slope
+
+
+@external
+@view
+def get_last_user_point(addr: address) -> UntimedPoint:
+    """
+    @notice Get the most recently recorded point of voting power decrease for `addr`
+    @param addr Address of the user wallet
+    """
+    uepoch: uint256 = self.user_point_epoch[addr]
+    return UntimedPoint(
+        bias=convert(self.user_point_history[addr][uepoch].bias, uint256),
+        slope=convert(self.user_point_history[addr][uepoch].slope, uint256)
+    )
 
 
 @external

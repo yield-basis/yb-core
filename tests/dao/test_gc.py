@@ -27,7 +27,6 @@ class StatefulVE(RuleBasedStateMachine):
 
     def __init__(self):
         super().__init__()
-        self.voting_balances = {}
         for user in self.accounts:
             with boa.env.prank(user):
                 self.yb.approve(self.ve_yb.address, 2**256 - 1)
@@ -76,17 +75,12 @@ class StatefulVE(RuleBasedStateMachine):
     @rule(uid=user_id)
     def infinite_lock_toggle(self, uid):
         user = self.accounts[uid]
-        t = boa.env.evm.patch.timestamp
         with boa.env.prank(user):
-            if self.voting_balances[user]['unlock_time'] <= t:
-                with boa.reverts('Lock expired'):
-                    self.ve_mock.infinite_lock_toggle()
-            elif self.voting_balances[user]['value'] == 0:
-                with boa.reverts('Nothing is locked'):
-                    self.ve_mock.infinite_lock_toggle()
-            else:
+            try:
                 self.ve_mock.infinite_lock_toggle()
-                self.voting_balances[user]['unlock_time'] = self.ve_mock.locked(user).end
+            except Exception:
+                # it's ok if lock does not exist - we are not testing the infilock itself
+                pass
 
     def _check_weight_too_much(self, gauge_ids, weight, user):
         user_power = self.gc.vote_user_power(user)

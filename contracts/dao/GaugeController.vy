@@ -30,12 +30,14 @@ struct Point:
 
 struct VotedSlope:
     slope: uint256
+    bias: uint256  # Only used if slope == 0
     power: uint256
     end: uint256
 
 
 interface VotingEscrow:
     def get_last_user_slope(addr: address) -> int256: view
+    def get_last_user_point(addr: address) -> Point: view
     def locked__end(addr: address) -> uint256: view
 
 interface Gauge:
@@ -143,7 +145,7 @@ def _get_weight(gauge: address) -> Point:
             else:
                 dt = (t + WEEK) // WEEK * WEEK - t
             t += dt
-            pt.bias -= min(pt.slope * dt, pt.bias)
+            pt.bias -= min(pt.slope * dt, pt.bias)  # Correctly handles even slope=0
             pt.slope -= min(self.changes_weight[gauge][t], pt.slope)  # Value from non-week-boundary is 0
             if pt.bias == 0:
                 pt.slope = 0
@@ -216,7 +218,9 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
     """
     n: uint256 = len(_gauge_addrs)
     assert len(_user_weights) == n, "Mismatch in lengths"
-    slope: uint256 = convert(staticcall VOTING_ESCROW.get_last_user_slope(msg.sender), uint256)
+    pt: Point = staticcall VOTING_ESCROW.get_last_user_point(msg.sender)
+    slope: uint256 = pt.slope
+    bias: uint256 = pt.bias  # <- we only use it if locked until max_value(uint256)
     lock_end: uint256 = staticcall VOTING_ESCROW.locked__end(msg.sender)
     assert lock_end > block.timestamp, "Expired"
 
@@ -233,15 +237,24 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
 
         # Prepare slopes and biases in memory
         old_slope: VotedSlope = self.vote_user_slopes[msg.sender][_gauge_addr]
-        old_dt: uint256 = max(old_slope.end, block.timestamp) - block.timestamp
-        old_bias: uint256 = old_slope.slope * old_dt
+        old_bias: uint256 = 0
+        if old_slope.end == max_value(uint256):
+            old_bias = old_slope.bias
+        else:
+            old_dt: uint256 = max(old_slope.end, block.timestamp) - block.timestamp
+            old_bias = old_slope.slope * old_dt
         new_slope: VotedSlope = VotedSlope(
             slope = slope * _user_weight // 10000,
+            bias = 0,
             power = _user_weight,
             end = lock_end
         )
-        new_dt: uint256 = lock_end - block.timestamp  # dev: raises when expired
-        new_bias: uint256 = new_slope.slope * new_dt
+        new_bias: uint256 = 0
+        if lock_end == max_value(uint256):
+            new_bias = bias
+        else:
+            new_bias = new_slope.slope * (lock_end - block.timestamp)  # dev: raises when expired
+        new_slope.bias = new_bias
 
         # Check and update powers (weights) used
         power_used: uint256 = self.vote_user_power[msg.sender]
@@ -249,7 +262,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         assert power_used <= 10000, 'Used too much power'
         self.vote_user_power[msg.sender] = power_used
 
-        pt: Point = self._checkpoint_gauge(_gauge_addr)  # Contains old_weight_bias and old_weight_slope
+        pt = self._checkpoint_gauge(_gauge_addr)  # Contains old_weight_bias and old_weight_slope
 
         ## Remove old and schedule new slope changes
         # Remove slope changes for old slopes
