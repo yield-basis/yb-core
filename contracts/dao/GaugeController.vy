@@ -205,6 +205,7 @@ def add_gauge(gauge: address):
     self.n_gauges = n + 1
     self.gauges[n] = gauge
     self.time_weight[gauge] = block.timestamp
+    self.specific_emissions_per_gauge[gauge] = self.specific_emissions
 
     log NewGauge(addr=gauge)
 

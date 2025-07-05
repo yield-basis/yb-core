@@ -14,6 +14,13 @@ MAX_TIME = 86400 * 365 * 4
 WEIGHT_VOTE_DELAY = 10 * 86400
 
 
+@pytest.fixture(scope="session")
+def fake_gauges(mock_gov_token, gc, admin):
+    gauge_deployer = boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
+    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(N_POOLS)]
+    return gauges
+
+
 class StatefulVE(RuleBasedStateMachine):
     USER_TOTAL = 10**40
     user_id = st.integers(min_value=0, max_value=9)
@@ -32,6 +39,21 @@ class StatefulVE(RuleBasedStateMachine):
                 self.yb.approve(self.ve_yb.address, 2**256 - 1)
             with boa.env.prank(self.admin):
                 self.yb.mint(user, self.USER_TOTAL)
+        self.added_gauges = []
+        self.addition_times = {}
+
+    @rule(gauge_id=gauge_id)
+    def add_gauge(self, gauge_id):
+        gauge = self.fake_gauges[gauge_id]
+
+        with boa.env.prank(self.admin):
+            if gauge in self.added_gauges:
+                with boa.reverts():
+                    self.gc.add_gauge(gauge.address)
+            else:
+                self.gc.add_gauge(gauge.address)
+                self.added_gauges.append(gauge)
+                self.addition_times[gauge] = boa.env.evm.patch.timestamp
 
     @rule(gauge_id=gauge_id, adj=adjustment)
     def set_adjustment(self, gauge_id, adj):
@@ -83,8 +105,9 @@ class StatefulVE(RuleBasedStateMachine):
                 pass
 
     def _check_weight_too_much(self, gauge_ids, weight, user):
+        gauge_ids = [g for g in gauge_ids if g < len(self.added_gauges)]
         user_power = self.gc.vote_user_power(user)
-        old_powers = [self.gc.vote_user_slopes(user, self.fake_gauges[g].address).power for g in gauge_ids]
+        old_powers = [self.gc.vote_user_slopes(user, self.added_gauges[g].address).power for g in gauge_ids]
         for old_weight in old_powers:
             user_power += weight - old_weight
             if user_power > 10000:
@@ -93,8 +116,9 @@ class StatefulVE(RuleBasedStateMachine):
 
     @rule(gauge_ids=gauge_ids, uid=user_id, weight=weight)
     def vote(self, gauge_ids, uid, weight):
+        gauge_ids = [g for g in gauge_ids if g < len(self.added_gauges)]
         user = self.accounts[uid]
-        gauges = [self.fake_gauges[gauge_id] for gauge_id in gauge_ids]
+        gauges = [self.added_gauges[gauge_id] for gauge_id in gauge_ids]
         weights = [weight] * len(gauges)
         t = boa.env.evm.patch.timestamp
         with boa.env.prank(user):
@@ -163,7 +187,8 @@ class StatefulVE(RuleBasedStateMachine):
 
     @rule(gauge_id=gauge_id)
     def checkpoint(self, gauge_id):
-        self.gc.checkpoint(self.fake_gauges[gauge_id])
+        if gauge_id < len(self.added_gauges):
+            self.gc.checkpoint(self.added_gauges[gauge_id])
 
     @rule(gauge_id=gauge_id)
     def emit(self, gauge_id):
@@ -172,7 +197,14 @@ class StatefulVE(RuleBasedStateMachine):
         expected_emissions = self.gc.preview_emissions(gauge, t)
         with boa.env.prank(gauge.address):
             before = self.yb.balanceOf(gauge.address)
-            self.gc.emit()
+            if gauge in self.added_gauges:
+                self.gc.emit()
+                if t == self.addition_times[gauge]:
+                    assert expected_emissions == 0
+            else:
+                with boa.reverts():
+                    self.gc.emit()
+                    return
             after = self.yb.balanceOf(gauge.address)
         assert after - before == expected_emissions
 
@@ -191,19 +223,19 @@ class StatefulVE(RuleBasedStateMachine):
         sum_adj_weight = self.gc.adjusted_gauge_weight_sum()
         uncertainty = 100 * N_POOLS / max(sum_adj_weight, 1e-10)
         if sum_adj_weight > 0:
-            sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.fake_gauges)
+            sum_votes = sum(self.gc.gauge_relative_weight(g.address) for g in self.added_gauges)
             assert sum_votes <= 10**18
             if sum_votes == 0:
-                assert uncertainty > 0.5 or sum(self.gc.adjusted_gauge_weight(g.address) for g in self.fake_gauges) == 0
+                assert uncertainty > 0.5 or sum(self.gc.adjusted_gauge_weight(g.address) for g in self.added_gauges) == 0
             else:
                 assert min(abs(log(sum_votes / 1e18)), 1) <= uncertainty
 
     def teardown(self):
         # Check that all votes go to zero after long enough time
         boa.env.time_travel(MAX_TIME)
-        for g in self.fake_gauges:
+        for g in self.added_gauges:
             self.gc.checkpoint(g.address)
-        for g in self.fake_gauges:
+        for g in self.added_gauges:
             assert self.gc.get_gauge_weight(g.address) == 0
         super().teardown()
 
@@ -330,7 +362,10 @@ def prepare_gauges(fake_gauges):
                 min_size=N_POOLS, max_size=N_POOLS),
             min_size=10, max_size=10)
 )
-def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges, vote_split):
+def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges, vote_split, admin):
+    with boa.env.prank(admin):
+        for gauge in fake_gauges:
+            gc.add_gauge(gauge.address)
     if sum(sum(v) for v in vote_split) == 0:
         return
     vote_tracker = {g: 0 for g in fake_gauges}

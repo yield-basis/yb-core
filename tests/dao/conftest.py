@@ -36,13 +36,3 @@ def gc(ve_yb, yb, admin):
         yb.set_minter(gc.address, True)
         ve_yb.set_transfer_clearance_checker(gc.address)
         return gc
-
-
-@pytest.fixture(scope="session")
-def fake_gauges(mock_gov_token, gc, admin):
-    gauge_deployer = boa.load_partial('contracts/testing/MockLiquidityGauge.vy')
-    gauges = [gauge_deployer.deploy(mock_gov_token.address) for i in range(N_POOLS)]
-    with boa.env.prank(admin):
-        for gauge in gauges:
-            gc.add_gauge(gauge.address)
-    return gauges
