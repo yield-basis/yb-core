@@ -405,3 +405,129 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
             if rw != 0:
                 assert abs(rw - vote_tracker[g]) < 1e-12
                 assert abs(aw - expected_weight) < initial_aw[g] * (7 * 86400) / MAX_TIME
+
+
+@pytest.mark.parametrize("use_flashloan", [False, True], ids=["no_flashloan", "with_flashloan"])
+def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_flashloan):
+    """
+    Test gauge controller behavior with total supply manipulation via flashloan-like operations.
+
+    Args:
+        use_flashloan: Whether to simulate flashloan operations (deposit/withdraw large amounts)
+    """
+    user = accounts[0]
+    user2 = accounts[1]
+
+    lp_token1 = token_mock.deploy('LP Token 1', 'LP1', 18)
+    lp_token2 = token_mock.deploy('LP Token 2', 'LP2', 18)
+
+    # Create DummyFactory for deploying real LiquidityGauge contracts
+    dummy_factory = boa.load('contracts/testing/DummyFactoryForGauge.vy', admin, gc.address)
+    gauge_factory = boa.load_partial('contracts/dao/LiquidityGauge.vy')
+
+    # Create two real LiquidityGauge contracts through Factory
+    with boa.env.prank(dummy_factory.address):
+        gauge1 = gauge_factory.deploy(lp_token1.address)
+        gauge2 = gauge_factory.deploy(lp_token2.address)
+
+    # Add gauges to GaugeController and mint tokens (from admin)
+    with boa.env.prank(admin):
+        gc.add_gauge(gauge1.address)
+        gc.add_gauge(gauge2.address)
+        yb.mint(user, 10**18)
+
+        # Initialize YB token emission
+        # Mint LP tokens to users for staking
+        lp_token1._mint_for_testing(user, 100 * 10**18)
+        lp_token1._mint_for_testing(user2, 100 * 10**18)
+        lp_token2._mint_for_testing(user, 100 * 10**18)
+        lp_token2._mint_for_testing(user2, 100 * 10**18)
+
+    # Create lock with MAX_TIME for user
+    end_lock = boa.env.evm.patch.timestamp + MAX_TIME
+    with boa.env.prank(user):
+        yb.approve(ve_yb.address, 2**256-1)
+        ve_yb.create_lock(10**18, end_lock)
+
+        # Stake LP tokens in both gauges to receive emissions
+        lp_token1.approve(gauge1.address, 2**256-1)
+        lp_token2.approve(gauge2.address, 2**256-1)
+        gauge1.deposit(90 * 10**18, user)  # Stake 90 LP1 tokens
+        gauge2.deposit(90 * 10**18, user)  # Stake 90 LP2 tokens
+
+    # Skip time 30 days
+    boa.env.time_travel(30 * 86400)
+
+    # Vote equally for both gauges (5000 each)
+    gauges = [gauge1.address, gauge2.address]
+    weights = [5000, 5000]
+
+    with boa.env.prank(user):
+        gc.vote_for_gauge_weights(gauges, weights)
+
+    # Check initial weights
+    initial_weight1 = gc.get_gauge_weight(gauge1.address)
+    initial_weight2 = gc.get_gauge_weight(gauge2.address)
+    print(f"Initial weights: gauge1={initial_weight1}, gauge2={initial_weight2}")
+    print(f"Initial adjusted weights: gauge1={gc.adjusted_gauge_weight(gauge1.address)}, gauge2={gc.adjusted_gauge_weight(gauge2.address)}")
+    print(f"Initial adjusted weights sum: {gc.adjusted_gauge_weight_sum()}")
+
+    # Check initial emissions
+    initial_emissions1 = gc.weighted_emissions_per_gauge(gauge1.address)
+    initial_emissions2 = gc.weighted_emissions_per_gauge(gauge2.address)
+    print(f"Initial emissions: gauge1={initial_emissions1}, gauge2={initial_emissions2}")
+
+    # Skip time 30 days
+    boa.env.time_travel(30 * 86400)
+
+    # Check weights after 30 days
+    weight1_after_30d = gc.get_gauge_weight(gauge1.address)
+    weight2_after_30d = gc.get_gauge_weight(gauge2.address)
+    print(f"Weights after 30 days: gauge1={weight1_after_30d}, gauge2={weight2_after_30d}")
+
+    # Simulate flashloan operations
+    if use_flashloan:
+        with boa.env.prank(user):
+            # Simulate large deposit (taken from flashloan)
+            lp_token1._mint_for_testing(user, 50000000 * 10**18)
+            print(gc.adjusted_gauge_weight(gauge1.address), gauge1.get_adjustment(), gc.gauge_weight(gauge1.address))
+            gauge1.deposit(50000000 * 10**18, user)
+            print(gc.adjusted_gauge_weight(gauge1.address), gauge1.get_adjustment(), gc.gauge_weight(gauge1.address))
+            # Return large deposit (taken from flashloan)
+            gauge1.withdraw(50000000 * 10**18, user, user)
+            print(gc.adjusted_gauge_weight(gauge1.address), gauge1.get_adjustment(), gc.gauge_weight(gauge1.address))
+            # lp_token1._burn_for_testing(user, 50000000 * 10**18)
+
+    else:
+        # Call checkpoints again
+        with boa.env.prank(admin):
+            gc.checkpoint(gauge1.address)
+            gc.checkpoint(gauge2.address)
+
+    # Check weights and emissions after vote change
+    mid_weight1 = gc.get_gauge_weight(gauge1.address)
+    mid_weight2 = gc.get_gauge_weight(gauge2.address)
+    mid_emissions1 = gc.weighted_emissions_per_gauge(gauge1.address)
+    mid_emissions2 = gc.weighted_emissions_per_gauge(gauge2.address)
+    print(f"Mid weights: gauge1={mid_weight1}, gauge2={mid_weight2}")
+    print(f"Mid adjusted weights: gauge1={gc.adjusted_gauge_weight(gauge1.address)}, gauge2={gc.adjusted_gauge_weight(gauge2.address)}")
+    print(f"Mid adjusted weights sum: {gc.adjusted_gauge_weight_sum()}")
+    print(f"Mid emissions: gauge1={mid_emissions1}, gauge2={mid_emissions2}")
+
+    # Skip time another 30 days
+    boa.env.time_travel(1 * 86400)
+
+    # Call checkpoints again
+    with boa.env.prank(admin):
+        gc.checkpoint(gauge1.address)
+        gc.checkpoint(gauge2.address)
+
+    # Check final weights and emissions
+    final_weight1 = gc.get_gauge_weight(gauge1.address)
+    final_weight2 = gc.get_gauge_weight(gauge2.address)
+    final_emissions1 = gc.weighted_emissions_per_gauge(gauge1.address)
+    final_emissions2 = gc.weighted_emissions_per_gauge(gauge2.address)
+    print(f"Final weights: gauge1={final_weight1}, gauge2={final_weight2}")
+    print(f"Final adjusted weights: gauge1={gc.adjusted_gauge_weight(gauge1.address)}, gauge2={gc.adjusted_gauge_weight(gauge2.address)}")
+    print(f"Final adjusted weights sum: {gc.adjusted_gauge_weight_sum()}")
+    print(f"Final emissions: gauge1={final_emissions1}, gauge2={final_emissions2}")
