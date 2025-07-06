@@ -223,6 +223,31 @@ def _price_oracle_w() -> uint256:
 
 
 @internal
+def _checkpoint_gauge():
+    """
+    @notice Checkpoint a gauge if any to prevent flash loan attacks on reward distribution, reverts are ignored
+    """
+    gauge: address = self.staker
+    if gauge != empty(address):
+        success: bool = False
+        res: Bytes[32] = empty(Bytes[32])
+        success, res = raw_call(
+            self.admin,
+            method_id("gauge_controller()"),
+            max_outsize=32,
+            is_static_call=True,
+            revert_on_failure=False)
+        if success:
+            gc: address = convert(res, address)
+            if gc != empty(address):
+                success = raw_call(
+                    gc,
+                    abi_encode(gauge, method_id=method_id("checkpoint(address)")),
+                    is_static_call=False,
+                    revert_on_failure=False)
+
+
+@internal
 @view
 def _min_admin_fee() -> uint256:
     admin: address = self.admin
@@ -485,6 +510,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     assert shares >= min_shares, "Slippage"
 
     self._mint(receiver, shares)
+    self._checkpoint_gauge()
     log Deposit(sender=msg.sender, owner=receiver, assets=assets, shares=shares)
     return shares
 
@@ -534,6 +560,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
     assert extcall STABLECOIN.transfer(amm.address, withdrawn.debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transfer(receiver, crypto_received, default_return_value=True)
 
+    self._checkpoint_gauge()
     log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
     return crypto_received
 

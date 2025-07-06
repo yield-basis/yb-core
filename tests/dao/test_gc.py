@@ -496,7 +496,7 @@ def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_f
             # Return large deposit (taken from flashloan)
             gauge1.withdraw(50000000 * 10**18, user, user)
             print(gc.adjusted_gauge_weight(gauge1.address), gauge1.get_adjustment(), gc.gauge_weight(gauge1.address))
-            # lp_token1._burn_for_testing(user, 50000000 * 10**18)
+            lp_token1._burn_for_testing(user, 50000000 * 10**18)
 
     else:
         # Call checkpoints again
