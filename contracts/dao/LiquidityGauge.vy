@@ -82,6 +82,7 @@ struct RewardIntegrals:
 
 VERSION: public(constant(String[8])) = "v1.0.0"
 
+MIN_SHARES: public(constant(uint256)) = 10**12
 MAX_REWARDS: constant(uint256) = 8
 GC: public(immutable(GaugeController))
 YB: public(immutable(IERC20))
@@ -114,6 +115,12 @@ def __init__(lp_token: IERC20):
     self.reward_tokens[0] = YB
     self.reward_count = 1
     log AddReward(token=YB.address, distributor=GC.address, id=0)
+
+
+@internal
+def _check_min_shares():
+    supply: uint256 = erc4626.erc20.totalSupply
+    assert supply >= MIN_SHARES or supply == 0, "Leave MIN_SHARES"
 
 
 @external
@@ -304,6 +311,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
     erc4626._deposit(msg.sender, receiver, assets, shares)
+    self._check_min_shares()
     self._checkpoint_user(receiver)
     return shares
 
@@ -313,6 +321,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
     erc4626._deposit(msg.sender, receiver, assets, shares)
+    self._check_min_shares()
     self._checkpoint_user(receiver)
     return assets
 
@@ -322,6 +331,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
+    self._check_min_shares()
     self._checkpoint_user(owner)
     return shares
 
@@ -331,6 +341,7 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
+    self._check_min_shares()
     self._checkpoint_user(owner)
     return assets
 

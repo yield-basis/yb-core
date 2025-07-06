@@ -53,14 +53,24 @@ class StatefulG(RuleBasedStateMachine):
     def deposit(self, uid, assets, gid):
         user = self.accounts[uid]
         with boa.env.prank(user):
-            self.gauges[gid].deposit(assets, user)
+            shares_after = self.gauges[gid].previewDeposit(assets) + self.gauges[gid].totalSupply()
+            if shares_after >= 10**12 or shares_after == 0:
+                self.gauges[gid].deposit(assets, user)
+            else:
+                with boa.reverts("Leave MIN_SHARES"):
+                    self.gauges[gid].deposit(assets, user)
 
     @rule(uid=user_id, shares=token_amount, gid=gauge_id)
     def withdraw(self, uid, shares, gid):
         user = self.accounts[uid]
         with boa.env.prank(user):
             if shares <= self.gauges[gid].balanceOf(user):
-                self.gauges[gid].redeem(shares, user, user)
+                remaints = self.gauges[gid].totalSupply() - shares
+                if remaints >= 10**12 or remaints == 0:
+                    self.gauges[gid].redeem(shares, user, user)
+                else:
+                    with boa.reverts("Leave MIN_SHARES"):
+                        self.gauges[gid].redeem(shares, user, user)
 
     @rule(from_uid=user_id, to_uid=user_id, amount=token_amount, gid=gauge_id)
     def transfer(self, from_uid, to_uid, amount, gid):
