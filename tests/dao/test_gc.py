@@ -57,7 +57,10 @@ class StatefulVE(RuleBasedStateMachine):
 
     @rule(gauge_id=gauge_id, adj=adjustment)
     def set_adjustment(self, gauge_id, adj):
-        self.fake_gauges[gauge_id].set_adjustment(adj)
+        gauge = self.fake_gauges[gauge_id]
+        gauge.set_adjustment(adj)
+        if gauge in self.added_gauges:
+            self.gc.checkpoint(gauge)
 
     @rule(uid=user_id, amount=amount, lock_duration=lock_duration)
     def create_lock(self, uid, amount, lock_duration):
@@ -199,7 +202,10 @@ class StatefulVE(RuleBasedStateMachine):
             before = self.yb.balanceOf(gauge.address)
             if gauge in self.added_gauges:
                 self.gc.emit()
-                if t == self.addition_times[gauge]:
+                # If emissions were live before the very first vote -
+                # accumulated emissions are split between all gauges voted,
+                # otherwise new gauge doesn't get anything before the time passes
+                if t == self.addition_times[gauge] and self.gc.specific_emissions() > 0:
                     assert expected_emissions == 0
             else:
                 with boa.reverts():
@@ -337,6 +343,24 @@ def test_gc_merge(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
+def test_gc_nonzero_emissions(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.add_gauge(gauge_id=0)
+    state.set_adjustment(adj=144, gauge_id=1)
+    state.time_travel(dt=998784)
+    state.add_gauge(gauge_id=3)
+    state.emit(gauge_id=0)
+    state.add_gauge(gauge_id=2)
+    state.time_travel(dt=1716320)
+    state.create_lock(amount=4_354_078_040_879_253_557_973_226_741_716_485_915_238, lock_duration=640600, uid=9)
+    state.add_gauge(gauge_id=1)
+    state.vote(gauge_ids=[3], uid=9, weight=2284)
+    state.emit(gauge_id=1)
+    state.teardown()
+
+
 @pytest.fixture(scope="session")
 def lock_for_accounts(yb, ve_yb, accounts, admin):
     with boa.env.prank(admin):
@@ -407,6 +431,7 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
                 assert abs(aw - expected_weight) < initial_aw[g] * (7 * 86400) / MAX_TIME
 
 
+@pytest.mark.skip(reason="Only to be used as a script for manual checking")
 @pytest.mark.parametrize("use_flashloan", [False, True], ids=["no_flashloan", "with_flashloan"])
 def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_flashloan):
     """

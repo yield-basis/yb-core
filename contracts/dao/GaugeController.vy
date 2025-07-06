@@ -337,6 +337,9 @@ def preview_emissions(gauge: address, at_time: uint256) -> uint256:
     if self.time_weight[gauge] == 0:
         return 0
 
+    if at_time <= self.time_weight[gauge]:
+        return 0
+
     w: uint256 = self.gauge_weight[gauge]
     aw: uint256 = self.adjusted_gauge_weight[gauge]
     w_sum: uint256 = self.gauge_weight_sum
