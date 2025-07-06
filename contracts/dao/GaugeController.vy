@@ -337,15 +337,14 @@ def preview_emissions(gauge: address, at_time: uint256) -> uint256:
     if self.time_weight[gauge] == 0:
         return 0
 
-    if at_time <= self.time_weight[gauge]:
-        return 0
-
     w: uint256 = self.gauge_weight[gauge]
     aw: uint256 = self.adjusted_gauge_weight[gauge]
     w_sum: uint256 = self.gauge_weight_sum
     aw_sum: uint256 = self.adjusted_gauge_weight_sum
 
-    d_emissions: uint256 = staticcall TOKEN.preview_emissions(at_time, unsafe_div(aw_sum * 10**18, w_sum))
+    d_emissions: uint256 = 0
+    if at_time > self.time_weight[gauge]:
+        d_emissions = staticcall TOKEN.preview_emissions(at_time, unsafe_div(aw_sum * 10**18, w_sum))
     specific_emissions: uint256 = self.specific_emissions + unsafe_div(d_emissions * 10**18, aw_sum)
     weighted_emissions_per_gauge: uint256 = self.weighted_emissions_per_gauge[gauge] + (specific_emissions - self.specific_emissions_per_gauge[gauge]) * aw // 10**18
 
