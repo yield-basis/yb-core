@@ -78,6 +78,9 @@ class StatefulTrader(RuleBasedStateMachine):
             except Exception:
                 if lt > user_lt:
                     return
+                new_supply = self.yb_staker.totalSupply() + self.yb_staker.previewDeposit(lt)
+                if new_supply < 10**12 and new_supply > 0:
+                    return
                 raise
 
     @rule(frac=withdraw_fraction, uid=user_id)
@@ -90,6 +93,9 @@ class StatefulTrader(RuleBasedStateMachine):
                 self.yb_staker.redeem(shares, user, user)
             except Exception:
                 if shares > user_shares:
+                    return
+                new_supply = self.yb_staker.totalSupply() - shares
+                if new_supply < 10**12 and new_supply > 0:
                     return
                 raise
 
