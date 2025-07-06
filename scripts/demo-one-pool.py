@@ -141,6 +141,8 @@ if __name__ == '__main__':
         # admin is STILL a minter
         gc.add_gauge(market.staker)
 
+    t1 = boa.env.evm.patch.timestamp
+
     with boa.env.prank(demo_user_address):
         yb.approve(ve_yb, 2**256-1)
         ve_yb.create_lock(10**5 * 10**18, boa.env.evm.patch.timestamp + 86400 * 4 * 365)
@@ -185,6 +187,11 @@ if __name__ == '__main__':
         btc.approve(yb_lt.address, 2**256-1)
         yb_lt.deposit(int(0.5e18), int(50_000e18), 0)
         print('Deposited')
+
+    t2 = boa.env.evm.patch.timestamp
+
+    # import IPython
+    # IPython.embed()
 
     if '--hardhat' in sys.argv[1:]:
         hardhat.wait()
