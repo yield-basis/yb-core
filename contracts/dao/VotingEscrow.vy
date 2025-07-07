@@ -414,8 +414,7 @@ def getVotes(account: address) -> uint256:
 @view
 def getPastVotes(account: address, timepoint: uint256) -> uint256:
     """
-    @dev Returns the amount of votes that `account` had at a specific moment in the past. If the `clock()` is
-    configured to use block numbers, this will return the value at the end of the corresponding block.
+    @dev Returns the amount of votes that `account` had at a specific moment in the past
     """
     # Binary search
     _min: uint256 = 0
