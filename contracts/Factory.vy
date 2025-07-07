@@ -208,8 +208,8 @@ def add_market(
         extcall LT(market.lt).set_staker(market.staker)
 
     i: uint256 = self.market_count
-    if i < MAX_MARKETS:
-        self.market_count = i + 1
+    assert i < MAX_MARKETS, "Too many markets"
+    self.market_count = i + 1
     self.markets[i] = market
 
     log MarketParameters(
