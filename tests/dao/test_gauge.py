@@ -662,3 +662,23 @@ def test_gauges_fail_7(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.check_adjustment()
     state.check_mint_split_between_gauges(dt=5725, uid=0)
     state.teardown()
+
+
+def test_gauges_not_enough_coins(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+    for k, v in locals().items():
+        setattr(StatefulG, k, v)
+    state = StatefulG()
+    state.check_mint_split_between_gauges(dt=1445133, uid=0)
+    state.check_mint_split_between_users(dt=1680134, gid=0)
+    state.deposit(assets=37309, gid=4, uid=9)
+    state.deposit(assets=141, gid=2, uid=7)
+    state.deposit(assets=7_331_516_103_625_971_442_419_827, gid=4, uid=6)
+    state.check_mint_split_between_gauges(dt=185007, uid=9)
+    state.check_mint_split_between_gauges(dt=185007, uid=9)
+    state.time_travel(dt=1732604)
+    state.deposit(assets=24808, gid=0, uid=6)
+    state.time_travel(dt=335921)
+    state.deposit(assets=88, gid=2, uid=8)
+    state.deposit(assets=7_331_516_103_625_971_442_419_827, gid=4, uid=6)
+    state.check_mint_split_between_gauges(dt=2592000, uid=6)
+    state.teardown()

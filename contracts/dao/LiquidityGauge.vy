@@ -191,10 +191,13 @@ def _get_vested_rewards(token: IERC20) -> uint256:
 
 
 @internal
-def _vest_rewards(reward: IERC20) -> uint256:
+def _vest_rewards(reward: IERC20, pre: bool) -> uint256:
     d_reward: uint256 = 0
     if reward == YB:
-        d_reward = extcall GC.emit()
+        if pre:
+            d_reward = staticcall GC.preview_emissions(self, block.timestamp)
+        else:
+            d_reward = extcall GC.emit()
     else:
         d_reward = self._get_vested_rewards(reward)
         self.processed_rewards[reward] += d_reward
@@ -208,7 +211,7 @@ def _checkpoint_user(user: address):
         if i == n:
             break
         reward: IERC20 = self.reward_tokens[i]
-        d_reward: uint256 = self._vest_rewards(reward)
+        d_reward: uint256 = self._vest_rewards(reward, True)
         r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
         if i == 0:
             self.integral_inv_supply = r.integral_inv_supply
@@ -221,7 +224,7 @@ def _checkpoint_user(user: address):
 @external
 @nonreentrant
 def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
-    d_reward: uint256 = self._vest_rewards(reward)
+    d_reward: uint256 = self._vest_rewards(reward, False)
     r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
 
     self.integral_inv_supply = r.integral_inv_supply
@@ -283,7 +286,7 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     if msg.sender != r.distributor:
         erc4626.ownable._check_owner()
 
-    d_reward: uint256 = self._vest_rewards(token)
+    d_reward: uint256 = self._vest_rewards(token, False)
     ri: RewardIntegrals = self._checkpoint(token, d_reward, empty(address))
     self.integral_inv_supply = ri.integral_inv_supply
     self.integral_inv_supply_4_token[token] = ri.integral_inv_supply.v
@@ -310,9 +313,10 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
 def deposit(assets: uint256, receiver: address) -> uint256:
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
+    self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
     self._check_min_shares()
-    self._checkpoint_user(receiver)
+    extcall GC.emit()
     return shares
 
 
@@ -320,9 +324,10 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 def mint(shares: uint256, receiver: address) -> uint256:
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
+    self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
     self._check_min_shares()
-    self._checkpoint_user(receiver)
+    extcall GC.emit()
     return assets
 
 
@@ -330,9 +335,10 @@ def mint(shares: uint256, receiver: address) -> uint256:
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
+    self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     self._check_min_shares()
-    self._checkpoint_user(owner)
+    extcall GC.emit()
     return shares
 
 
@@ -340,24 +346,27 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
+    self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     self._check_min_shares()
-    self._checkpoint_user(owner)
+    extcall GC.emit()
     return assets
 
 
 @external
 def transfer(to: address, amount: uint256) -> bool:
-    erc4626.erc20._transfer(msg.sender, to, amount)
     self._checkpoint_user(msg.sender)
     self._checkpoint_user(to)
+    erc4626.erc20._transfer(msg.sender, to, amount)
+    extcall GC.emit()
     return True
 
 
 @external
 def transferFrom(owner: address, to: address, amount: uint256) -> bool:
-    erc4626.erc20._spend_allowance(owner, msg.sender, amount)
-    erc4626.erc20._transfer(owner, to, amount)
     self._checkpoint_user(owner)
     self._checkpoint_user(to)
+    erc4626.erc20._spend_allowance(owner, msg.sender, amount)
+    erc4626.erc20._transfer(owner, to, amount)
+    extcall GC.emit()
     return True
