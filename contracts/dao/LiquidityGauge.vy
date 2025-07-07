@@ -254,6 +254,7 @@ def preview_claim(reward: IERC20, user: address) -> uint256:
 
 
 @external
+@nonreentrant
 def add_reward(token: IERC20, distributor: address):
     assert token != YB, "YB"
     assert token != LP_TOKEN, "LP_TOKEN"
@@ -278,6 +279,7 @@ def change_reward_distributor(token: IERC20, distributor: address):
 
 
 @external
+@nonreentrant
 def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
     assert token != YB, "YB"
     assert amount > 0, "No rewards"
@@ -310,6 +312,7 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
 
 
 @external
+@nonreentrant
 def deposit(assets: uint256, receiver: address) -> uint256:
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
@@ -321,6 +324,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 
 
 @external
+@nonreentrant
 def mint(shares: uint256, receiver: address) -> uint256:
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
@@ -332,6 +336,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
 
 
 @external
+@nonreentrant
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
@@ -343,6 +348,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 
 
 @external
+@nonreentrant
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
@@ -354,6 +360,7 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
 
 
 @external
+@nonreentrant
 def transfer(to: address, amount: uint256) -> bool:
     self._checkpoint_user(msg.sender)
     self._checkpoint_user(to)
@@ -363,6 +370,7 @@ def transfer(to: address, amount: uint256) -> bool:
 
 
 @external
+@nonreentrant
 def transferFrom(owner: address, to: address, amount: uint256) -> bool:
     self._checkpoint_user(owner)
     self._checkpoint_user(to)
