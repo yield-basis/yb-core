@@ -125,6 +125,8 @@ def __init__(
     assert stablecoin.address != empty(address)
     assert agg != empty(address)
     assert price_oracle_impl != empty(address)
+    assert amm_impl != empty(address)
+    assert lt_impl != empty(address)
 
     assert staticcall IERC20Detailed(stablecoin.address).decimals() == 18
 
