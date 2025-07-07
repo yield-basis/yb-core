@@ -335,7 +335,7 @@ def set_fee_receiver(new_fee_receiver: address):
 
 
 @external
-def set_gauge_cotroller(gc: address):
+def set_gauge_controller(gc: address):
     assert msg.sender == self.admin, "Access"
     assert gc == empty(address), "Already set"
     self.gauge_controller = gc
