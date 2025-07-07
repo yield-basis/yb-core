@@ -28,8 +28,8 @@ RECIPIENT: public(immutable(address))
 
 
 @deploy
-def __init__(token: IERC20, unlock_time: uint256, ve: VotingEscrow, gc: GaugeController, recepient: address):
-    RECIPIENT = recepient
+def __init__(token: IERC20, unlock_time: uint256, ve: VotingEscrow, gc: GaugeController, recipient: address):
+    RECIPIENT = recipient
     YB = token
     VE = ve
     GC = gc
