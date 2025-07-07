@@ -49,12 +49,6 @@ interface GovernanceToken:
     def transfer(_to: address, _amount: uint256) -> bool: nonpayable
 
 
-event NewGaugeWeight:
-    gauge_address: address
-    time: uint256
-    weight: uint256
-    total_weight: uint256
-
 event VoteForGauge:
     time: uint256
     user: address
