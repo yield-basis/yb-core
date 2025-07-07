@@ -62,8 +62,6 @@ event SetKilled:
     gauge: address
 
 
-admin: public(address)  # Can and will be a smart contract
-
 TOKEN: public(immutable(GovernanceToken))
 VOTING_ESCROW: public(immutable(VotingEscrow))
 
