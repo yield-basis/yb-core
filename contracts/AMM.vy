@@ -19,6 +19,9 @@ interface PriceOracle:
     def price_w() -> uint256: nonpayable
     def price() -> uint256: view
 
+interface LT:
+    def distribute_borrower_fees(): nonpayable
+
 
 struct AMMState:
     collateral: uint256
@@ -319,6 +322,10 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     log TokenExchange(buyer=msg.sender, sold_id=i, tokens_sold=in_amount,
                       bought_id=j, tokens_bought=out_amount, fee=fee, price_oracle=p_o)
 
+    if LT_CONTRACT != empty(address) and LT_CONTRACT.is_contract:
+        self._collect_fees()
+        extcall LT(LT_CONTRACT).distribute_borrower_fees()
+
     return out_amount
 
 
@@ -423,9 +430,8 @@ def accumulated_interest() -> uint256:
     return unsafe_sub(max(self._debt() + self.redeemed, minted), minted)
 
 
-@external
-@nonreentrant
-def collect_fees() -> uint256:
+@internal
+def _collect_fees() -> uint256:
     """
     @notice Collect the fees charged as interest.
     """
@@ -449,6 +455,15 @@ def collect_fees() -> uint256:
     else:
         log CollectFees(amount=0, new_supply=debt)
         return 0
+
+
+@external
+@nonreentrant
+def collect_fees() -> uint256:
+    """
+    @notice Collect the fees charged as interest.
+    """
+    return self._collect_fees()
 
 
 @external

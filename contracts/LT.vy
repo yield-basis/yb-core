@@ -512,6 +512,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     self._mint(receiver, shares)
     self._checkpoint_gauge()
     log Deposit(sender=msg.sender, owner=receiver, assets=assets, shares=shares)
+    self._distribute_borrower_fees(FEE_CLAIM_DISCOUNT)
     return shares
 
 
@@ -562,6 +563,7 @@ def withdraw(shares: uint256, min_assets: uint256, receiver: address = msg.sende
 
     self._checkpoint_gauge()
     log Withdraw(sender=msg.sender, receiver=receiver, owner=msg.sender, assets=crypto_received, shares=shares)
+    self._distribute_borrower_fees(FEE_CLAIM_DISCOUNT)
     return crypto_received
 
 
@@ -751,17 +753,25 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
     log AllocateStablecoins(allocator=allocator, stablecoin_allocation=allocation, stablecoin_allocated=allocated)
 
 
-@external
-@nonreentrant
-def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This will JUST donate to the crypto pool
+@internal
+def _distribute_borrower_fees(discount: uint256):
+    amm: LevAMM = self.amm
     if discount > FEE_CLAIM_DISCOUNT:
         self._check_admin()
-    extcall self.amm.collect_fees()
+    if msg.sender != amm.address:
+        extcall amm.collect_fees()
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
-    # We price to the stablecoin we use, not the aggregated USD here, and this is correct
-    min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
-    extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, empty(address), True)
-    log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
+    if amount > 0:
+        # We price to the stablecoin we use, not the aggregated USD here, and this is correct
+        min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
+        extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, empty(address), True)
+        log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
+
+
+@external
+@nonreentrant
+def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):
+    self._distribute_borrower_fees(discount)
 
 
 @external
