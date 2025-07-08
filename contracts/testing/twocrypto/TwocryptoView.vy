@@ -1,4 +1,4 @@
-# pragma version ~=0.4.3
+# pragma version 0.4.3
 """
 @title TwocryptoView
 @author Curve.Fi
@@ -15,13 +15,11 @@ interface Curve:
     def A() -> uint256: view
     def gamma() -> uint256: view
     def price_scale() -> uint256: view
-    def price_oracle() -> uint256: view
-    def get_virtual_price() -> uint256: view
     def balances(i: uint256) -> uint256: view
     def D() -> uint256: view
     def fee_calc(xp: uint256[N_COINS]) -> uint256: view
     def calc_token_fee(
-        amounts: uint256[N_COINS], xp: uint256[N_COINS]
+        amounts: uint256[N_COINS], xp: uint256[N_COINS], donation: bool = False, deposit: bool = False
     ) -> uint256: view
     def future_A_gamma_time() -> uint256: view
     def totalSupply() -> uint256: view
@@ -43,13 +41,6 @@ interface Math:
         D: uint256,
         i: uint256,
     ) -> uint256[2]: view
-    def newton_y(
-        ANN: uint256,
-        gamma: uint256,
-        x: uint256[N_COINS],
-        D: uint256,
-        i: uint256,
-    ) -> uint256: view
 
 
 N_COINS: constant(uint256) = 2
@@ -112,10 +103,9 @@ def calc_token_amount(
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
 
     d_token, amountsp, xp = self._calc_dtoken_nofee(amounts, deposit, swap)
-    if not donation:
-        d_token -= (
-            staticcall Curve(swap).calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
-        )
+    d_token -= (
+        staticcall Curve(swap).calc_token_fee(amounts, xp, donation, deposit) * d_token // 10**10 + 1
+    )
 
     return d_token
 
@@ -144,7 +134,7 @@ def calc_fee_withdraw_one_coin(
 @view
 @external
 def calc_fee_token_amount(
-    amounts: uint256[N_COINS], deposit: bool, swap: address
+    amounts: uint256[N_COINS], deposit: bool, swap: address, donation: bool = False
 ) -> uint256:
 
     d_token: uint256 = 0
@@ -152,7 +142,7 @@ def calc_fee_token_amount(
     xp: uint256[N_COINS] = empty(uint256[N_COINS])
     d_token, amountsp, xp = self._calc_dtoken_nofee(amounts, deposit, swap)
 
-    return (staticcall Curve(swap).calc_token_fee(amountsp, xp)) * d_token // 10**10 + 1
+    return (staticcall Curve(swap).calc_token_fee(amounts, xp, donation, deposit)) * d_token // 10**10 + 1
 
 
 @internal
@@ -361,13 +351,20 @@ def _fee(xp: uint256[N_COINS], swap: address) -> uint256:
 
     packed_fee_params: uint256 = staticcall Curve(swap).packed_fee_params()
     fee_params: uint256[3] = self._unpack_3(packed_fee_params)
-    f: uint256 = xp[0] + xp[1]
-    f = fee_params[2] * 10**18 // (
-        fee_params[2] + 10**18 -
-        (10**18 * N_COINS**N_COINS) * xp[0] // f * xp[1] // f
-    )
 
-    return (fee_params[0] * f + fee_params[1] * (10**18 - f)) // 10**18
+    # warm up variable with sum of balances
+    B: uint256 = xp[0] + xp[1]
+
+    # balance indicator that goes from 10**18 (perfect pool balance) to 0 (very imbalanced, 100:1 and worse)
+    # N^N * (xp[0] * xp[1]) / (xp[0] + xp[1])**2
+    B = PRECISION * N_COINS**N_COINS * xp[0] // B * xp[1] // B
+
+    # regulate slope using fee_gamma
+    # fee_gamma * balance_term / (fee_gamma * balance_term + 1 - balance_term)
+    B = fee_params[2] * B // (unsafe_div(fee_params[2] * B, 10**18) + 10**18 - B)
+
+    # mid_fee * B + out_fee * (1 - B)
+    return unsafe_div(fee_params[0] * B + fee_params[1] * (10**18 - B), 10**18)
 
 
 @internal
@@ -400,7 +397,7 @@ def _prep_calc(swap: address) -> (
 
 
 @internal
-@view
+@pure
 def _unpack_3(_packed: uint256) -> uint256[3]:
     """
     @notice Unpacks a uint256 into 3 integers (values must be <= 10**18)

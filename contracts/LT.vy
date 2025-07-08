@@ -760,7 +760,7 @@ def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):  # This wi
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     # We price to the stablecoin we use, not the aggregated USD here, and this is correct
     min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
-    extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, self, True)
+    extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, empty(address), True)
     log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
 
 

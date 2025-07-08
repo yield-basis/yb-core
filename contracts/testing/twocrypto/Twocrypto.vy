@@ -1,4 +1,4 @@
-# pragma version ~=0.4.3
+# pragma version 0.4.3
 """
 @title Twocrypto
 @author Curve.Fi
@@ -36,7 +36,6 @@ interface Math:
 interface Factory:
     def admin() -> address: view
     def fee_receiver() -> address: view
-    def views_implementation() -> address: view
 
 interface Views:
     def calc_token_amount(
@@ -51,6 +50,9 @@ interface Views:
 
 
 # ------------------------------- Events -------------------------------------
+
+event SetViews:
+    views: Views
 
 event Transfer:
     sender: indexed(address)
@@ -72,24 +74,20 @@ event TokenExchange:
     price_scale: uint256
 
 event AddLiquidity:
-    provider: indexed(address)
+    receiver: indexed(address)
     token_amounts: uint256[N_COINS]
     fee: uint256
     token_supply: uint256
     price_scale: uint256
 
+event Donation:
+    donor: indexed(address)
+    token_amounts: uint256[N_COINS]
+
 event RemoveLiquidity:
     provider: indexed(address)
     token_amounts: uint256[N_COINS]
     token_supply: uint256
-
-event RemoveLiquidityOne:
-    provider: indexed(address)
-    token_amount: uint256
-    coin_index: uint256
-    coin_amount: uint256
-    approx_fee: uint256
-    price_scale: uint256
 
 event RemoveLiquidityImbalance:
     provider: indexed(address)
@@ -126,8 +124,9 @@ event ClaimAdminFee:
 event SetDonationDuration:
     duration: uint256
 
-event SetMaxDonationRatio:
-    ratio: uint256
+event SetDonationProtection:
+    donation_protection_period: uint256
+    donation_protection_lp_threshold: uint256
 
 event SetAdminFee:
     admin_fee: uint256
@@ -142,11 +141,13 @@ MATH: public(immutable(Math))
 coins: public(immutable(address[N_COINS]))
 factory: public(immutable(Factory))
 
+view_contract: public(Views)
+
 cached_price_scale: uint256  # <------------------------ Internal price scale.
 cached_price_oracle: uint256  # <------- Price target given by moving average.
 
 last_prices: public(uint256)
-last_timestamp: public(uint256)    # idx 0 is for prices, idx 1 is for xcp.
+last_timestamp: public(uint256)
 
 initial_A_gamma: public(uint256)
 initial_A_gamma_time: public(uint256)
@@ -159,12 +160,16 @@ future_A_gamma_time: public(uint256)  # <------ Time when ramping is finished.
 #      (i.e. self.future_A_gamma_time < block.timestamp), the variable is left
 #                                                            and not set to 0.
 
-# Time constant which determines donation speed
-# TODO pack these three into one variable
-donation_duration: public(uint256)
-max_donation_ratio: public(uint256)
-last_donation_release_timestamp: public(uint256)
+# Donation shares balance
 donation_shares: public(uint256)
+# Donations release parameters:
+donation_duration: public(uint256)
+last_donation_release_ts: public(uint256)
+
+# Donation protection
+donation_protection_expiry_ts: public(uint256)
+donation_protection_period: public(uint256)
+donation_protection_lp_threshold: public(uint256)
 
 balances: public(uint256[N_COINS])
 D: public(uint256)
@@ -195,9 +200,12 @@ MIN_RAMP_TIME: constant(uint256) = 86400
 MIN_ADMIN_FEE_CLAIM_INTERVAL: constant(uint256) = 86400
 
 A_MULTIPLIER: constant(uint256) = 10000
-MIN_A: constant(uint256) = N_COINS**N_COINS * A_MULTIPLIER // 10
-MAX_A: constant(uint256) = N_COINS**N_COINS * A_MULTIPLIER * 1000
-MAX_A_CHANGE: constant(uint256) = 10
+# Note on pool internal logic:
+# A is scaled by N_COINS in context of StableswapMath.vy
+# So A := A_true * N_COINS
+MIN_A: constant(uint256) = N_COINS**(N_COINS-1) * A_MULTIPLIER // 10
+MAX_A: constant(uint256) = N_COINS**(N_COINS-0) * A_MULTIPLIER * 1000 #relax max constraint
+MAX_PARAM_CHANGE: constant(uint256) = 10
 MIN_GAMMA: constant(uint256) = 10**10
 MAX_GAMMA: constant(uint256) = 199 * 10**15 # 1.99 * 10**17
 
@@ -264,9 +272,12 @@ def __init__(
     self.xcp_profit_a = 10**18
 
     self.donation_duration = 7 * 86400
-    self.max_donation_ratio = PRECISION // 10  # (10%) of the total D.
 
     self.admin_fee = 5 * 10**9
+
+    self.donation_protection_expiry_ts = 0
+    self.donation_protection_period = 10 * 60   # 10 minutes
+    self.donation_protection_lp_threshold = 20 * PRECISION // 100  # 20%
 
     log Transfer(sender=empty(address), receiver=self, value=0)  # <------- Fire empty transfer from
     #                                       0x0 to self for indexers to catch.
@@ -443,22 +454,34 @@ def exchange_received(
     return out[0]
 
 
-@view
 @internal
-def _donation_shares() -> uint256:
+@view
+def _donation_shares(_donation_protection: bool = True) -> uint256:
+    """
+    @notice Calculates the amount of donation shares that are unlocked and not under protection.
+    @dev This function accounts for both time-based release and add_liquidity-based protection.
+    """
     donation_shares: uint256 = self.donation_shares
+    if donation_shares == 0:
+        return 0
 
-    # Time passed since the last donation absorption.
-    elapsed: uint256 = block.timestamp - self.last_donation_release_timestamp
+    # --- Time-based release of donation shares ---
+    elapsed: uint256 = block.timestamp - self.last_donation_release_ts
+    unlocked_shares: uint256 = min(donation_shares, donation_shares * elapsed // self.donation_duration)
 
-    # ===== absorption rate logic =====
-    # `elapsed > self.donation_duration` => release whatever is left in `self.donation_shares` to avoid underflow.
-    # `elapsed < self.donation_duration` => release at the current rate.
+    if not _donation_protection:
+        # if donation protection is disabled, return the total amount of unlocked donation shares
+        # this is needed to calculate new timestamp for overlapping donations in add_liquidity
+        # otherwise must always be called with donation_protection=True
+        return unlocked_shares
 
-    # ===== absorption edge cases =====
-    # `elapsed == 0` => multiple absorption attempts in the same block, return current value of `self.donation_shares` in storage.
-    # `donation_shares == 0` => no donation has been done, or all donations have been absorbed, return 0.
-    return min(donation_shares, donation_shares * elapsed // self.donation_duration)
+    # --- Donation protection damping factor ---
+    protection_factor: uint256 = 0
+    expiry: uint256 = self.donation_protection_expiry_ts
+    if expiry > block.timestamp:
+        protection_factor = min((expiry - block.timestamp) * PRECISION // self.donation_protection_period, PRECISION)
+
+    return unlocked_shares * (PRECISION - protection_factor) // PRECISION
 
 
 @external
@@ -474,7 +497,8 @@ def add_liquidity(
     @param amounts Amounts of each coin to add.
     @param min_mint_amount Minimum amount of LP to mint.
     @param receiver Address to send the LP tokens to. Default is msg.sender
-    @return uint256 Amount of LP tokens received by the `receiver
+    @param donation Whether the liquidity is a donation, if True receiver is ignored.
+    @return uint256 Amount of LP tokens issued (to receiver or donation buffer).
     """
 
 
@@ -504,11 +528,6 @@ def add_liquidity(
     xp: uint256[N_COINS] = self._xp(balances, price_scale)
     old_xp: uint256[N_COINS] = self._xp(old_balances, price_scale)
 
-    # amountsp (amounts * p) contains the scaled `amounts_received` of each coin.
-    amountsp: uint256[N_COINS] = empty(uint256[N_COINS])
-    for i: uint256 in range(N_COINS):
-        if amounts_received[i] > 0:
-            amountsp[i] = xp[i] - old_xp[i]
     # -------------------- Calculate LP tokens to mint -----------------------
 
     A_gamma: uint256[2] = self._A_gamma()
@@ -525,25 +544,55 @@ def add_liquidity(
 
     assert d_token > 0, "nothing minted"
 
+
     d_token_fee: uint256 = 0
     if old_D > 0:
-        if donation:
-            # if we donate, we don't explicitly mint lp tokens, but we add to the donation shares and total supply
-            # if we don't take any fees, it may happen that new_vp < old_vp due to numerical noise in D calculations
-            d_token_fee = d_token * NOISE_FEE // 10**10
-            d_token -= d_token_fee
-            token_supply += d_token
-            self.totalSupply += d_token
-            self.donation_shares += d_token
-            if self.last_donation_release_timestamp == 0:
-                self.last_donation_release_timestamp = block.timestamp
-        else:
-            d_token_fee = (
-                self._calc_token_fee(amountsp, xp) * d_token // 10**10 + 1
-            )
-            d_token -= d_token_fee
-            token_supply += d_token
+        d_token_fee = (
+            self._calc_token_fee(amounts_received, xp, donation, True) * d_token // 10**10 + 1
+        ) # for donations - we only take NOISE_FEE (check _calc_token_fee)
+        d_token -= d_token_fee
 
+        if donation:
+            assert receiver == empty(address), "nonzero receiver"
+            new_donation_shares: uint256 = self.donation_shares + d_token
+
+            # When adding donation, if the previous one hasn't been fully released we preserve
+            # the currently unlocked donation [given by `self._donation_shares()`] by updating
+            # `self.last_donation_release_ts` as if a single virtual donation of size `new_donation_shares`
+            # was made in past and linearly unlocked reaching `self._donation_shares()` at the current time.
+
+            # We want the following equality to hold:
+            # self._donation_shares() = new_donation_shares * (new_elapsed / self.donation_duration)
+            # We can rearrange this to find the new elapsed time (imitating one large virtual donation):
+            # => new_elapsed = self._donation_shares() * self.donation_duration / new_donation_shares
+            # edge case: if self.donation_shares = 0, then self._donation_shares() is 0
+            # and new_elapsed = 0, thus initializing last_donation_release_ts = block.timestamp
+            new_elapsed: uint256 = self._donation_shares(False) * self.donation_duration // new_donation_shares
+
+            # Additional observations:
+            # new_elapsed = (old_pool * old_elapsed / D) * D / new_pool = old_elapsed * (old_pool / new_pool)
+            # => new_elapsed is always smaller than old_elapsed
+            # and self.last_donation_release_ts is carried forward propotionally to new donation size.
+            self.last_donation_release_ts = block.timestamp - new_elapsed
+
+            # Credit donation: we don't explicitly mint lp tokens, but increase total supply
+            self.donation_shares = new_donation_shares
+            self.totalSupply += d_token
+            log Donation(donor=msg.sender, token_amounts=amounts_received)
+        else:
+            # --- Donation Protection & LP Spam Penalty ---
+            # Extend protection to shield against donation extraction via sandwich attacks.
+            # A penalty is applied for extending the protection to disincentivize spamming.
+            relative_lp_add: uint256 = d_token * PRECISION // (token_supply + d_token)
+            if relative_lp_add > 0 and self.donation_shares > 0:  # sub-precision additions are expensive to stack
+                # Extend protection period
+                protection_period: uint256 = self.donation_protection_period
+                extension_seconds: uint256 = min(relative_lp_add * protection_period // self.donation_protection_lp_threshold, protection_period)
+                current_expiry: uint256 = max(self.donation_protection_expiry_ts, block.timestamp)
+                new_expiry: uint256 = min(current_expiry + extension_seconds, block.timestamp + protection_period)
+                self.donation_protection_expiry_ts = new_expiry
+
+            # Regular liquidity addition
             self.mint(receiver, d_token)
 
         price_scale = self.tweak_price(A_gamma, xp, D)
@@ -563,10 +612,10 @@ def add_liquidity(
     # ---------------------------------------------- Log and claim admin fees.
 
     log AddLiquidity(
-        provider=receiver,
+        receiver=receiver,
         token_amounts=amounts_received,
         fee=d_token_fee,
-        token_supply=token_supply,
+        token_supply=token_supply+d_token,
         price_scale=price_scale
     )
 
@@ -642,7 +691,11 @@ def remove_liquidity(
     # tokens burnt is `amount`, regardless of the rounding error.
     log RemoveLiquidity(provider=msg.sender, token_amounts=withdraw_amounts, token_supply=total_supply - amount)
 
+    # Take care of leftover donations (only if all LP left)
+    self._withdraw_leftover_donations()
+
     return withdraw_amounts
+
 
 @external
 @nonreentrant
@@ -745,11 +798,46 @@ def _remove_liquidity_fixed_out(
         provider=msg.sender,
         lp_token_amount=token_amount,
         token_amounts=token_amounts,
-        approx_fee=approx_fee * token_amount // PRECISION,
+        approx_fee=approx_fee * token_amount // 10**10 + 1,
         price_scale=price_scale
     )
 
+    # Take care of leftover donations (only if all LP left)
+    self._withdraw_leftover_donations()
+
     return dy
+
+
+@internal
+def _withdraw_leftover_donations():
+    """
+    @notice Withdraws leftover donations from the pool.
+    This is called when the pool has no other liquidity than donation shares,
+    and must be emptied.
+    @dev donations go to the factory fees receiver, if not set, to the admin.
+    """
+
+    if self.donation_shares != self.totalSupply:
+        return
+
+    # Pool has no other LP than donation shares, must be emptied
+    receiver: address = staticcall factory.fee_receiver()
+    if receiver == empty(address):
+        receiver = staticcall factory.admin()
+
+    # empty the pool
+    withdraw_amounts: uint256[N_COINS] = self.balances
+
+    for i: uint256 in range(N_COINS):
+        # updates self.balances here
+        self._transfer_out(i, withdraw_amounts[i], receiver)
+
+    # Update state
+    self.donation_shares = 0
+    self.totalSupply = 0
+    self.D = 0
+    self.donation_protection_expiry_ts = 0
+    log RemoveLiquidity(provider=receiver, token_amounts=withdraw_amounts, token_supply=0)
 
 
 # -------------------------- Packing functions -------------------------------
@@ -876,7 +964,8 @@ def tweak_price(
     @dev Contains main liquidity rebalancing logic, by tweaking `price_scale`.
     @param A_gamma Array of A and gamma parameters.
     @param _xp Array of current balances.
-    @param new_D New D value.
+    @param D New D value.
+    @return uint256 The new price_scale.
     """
 
     # ---------------------------- Read storage ------------------------------
@@ -936,32 +1025,29 @@ def tweak_price(
 
     # ---------- Update profit numbers without price adjustment first --------
 
-    xcp_profit: uint256 = 10**18
-    virtual_price: uint256 = 10**18
-
-
     # `totalSupply` might change during this function call.
     total_supply: uint256 = self.totalSupply
+
+    # ===== donation shares (time release + add_liquidity throttling) =====
     donation_shares: uint256 = self._donation_shares()
+
     # locked_supply contains LP shares and unreleased donations
     locked_supply: uint256 = total_supply - donation_shares
 
     old_virtual_price: uint256 = self.virtual_price
     xcp: uint256 = self._xcp(D, price_scale)
-    if old_virtual_price > 0:
-        virtual_price = 10**18 * xcp // total_supply
-        # Virtual price can decrease only if A and gamma are being ramped.
-        # This does not imply that the virtual price will have increased at the
-        # end of this function: it can still decrease if the pool rebalances.
-        if virtual_price < old_virtual_price:
-            # If A and gamma are being ramped, we allow the virtual price to decrease,
-            # as changing the shape of the bonding curve causes losses in the pool.
-            assert self._is_ramping(), "virtual price decreased"
 
-        # xcp_profit follows growth of virtual price (and goes down on ramping)
-        xcp_profit = self.xcp_profit + virtual_price - old_virtual_price
-        # old way, here for reference
-        # xcp_profit = unsafe_div(old_xcp_profit * virtual_price, old_virtual_price)
+    virtual_price: uint256 = 10**18 * xcp // total_supply
+    # Virtual price can decrease only if A and gamma are being ramped.
+    # This does not imply that the virtual price will have increased at the
+    # end of this function: it can still decrease if the pool rebalances.
+    if virtual_price < old_virtual_price:
+        # If A and gamma are being ramped, we allow the virtual price to decrease,
+        # as changing the shape of the bonding curve causes losses in the pool.
+        assert self._is_ramping(), "virtual price decreased"
+
+    # xcp_profit follows growth of virtual price (and goes down on ramping)
+    xcp_profit: uint256 = self.xcp_profit + virtual_price - old_virtual_price
     self.xcp_profit = xcp_profit
 
     # ------------ Rebalance liquidity if there's enough profits to adjust it:
@@ -984,7 +1070,7 @@ def tweak_price(
     vp_boosted: uint256 = 10**18 * xcp // locked_supply
     assert vp_boosted >= virtual_price, "negative donation"
     if vp_boosted  > threshold_vp + rebalancing_params[0]:
-        #                          allowed_extra_profit --------^
+        #             allowed_extra_profit --------^
         norm: uint256 = unsafe_div(
             unsafe_mul(price_oracle, 10**18), price_scale
         )
@@ -1022,31 +1108,35 @@ def tweak_price(
             new_virtual_price: uint256 = 10**18 * new_xcp // total_supply
 
             donation_shares_to_burn: uint256 = 0
-            if new_virtual_price < threshold_vp:
-                # new_virtual_price is not high enough, rebalance will not happen
+            # burn donations to get to old vp, but not below threshold_vp
+            goal_vp: uint256 = max(threshold_vp, virtual_price)
+            if new_virtual_price < goal_vp:
+                # new_virtual_price is lower than virtual_price.
                 # We attempt to boost virtual_price by burning some donation shares
+                # This will result in more frequent rebalances.
                 #
                 #   vp(0)      = xcp /  total_supply          # no burn  -> lowest vp
                 #   vp(B)      = xcp / (total_supply – B)     # burn B   -> higher vp
                 #
                 # Goal: find the *smallest* B such that
-                #        vp(B) >= threshold_vp
+                #        vp(B) -> virtual_price (pre-rebalance value)
                 #          B   <= donation_shares
 
-                # what would be total supply with threshold_vp and new_xcp
-                threshold_supply: uint256 = 10**18 * new_xcp // threshold_vp
-                assert threshold_supply < total_supply, "threshold supply must shrink"
+                # what would be total supply with (old) virtual_price and new_xcp
+                tweaked_supply: uint256 = 10**18 * new_xcp // goal_vp
+                assert tweaked_supply < total_supply, "tweaked supply must shrink"
                 donation_shares_to_burn = min(
-                    unsafe_sub(total_supply, threshold_supply), # burn the difference between supplies
+                    unsafe_sub(total_supply, tweaked_supply), # burn the difference between supplies
                     donation_shares # but not more than we can burn (lp shares donation)
                 )
                 # update virtual price with the tweaked total supply
                 new_virtual_price = 10**18 * new_xcp // (total_supply - donation_shares_to_burn)
-
+                # we thus burn some donation shares to compensate for virtual price drop
 
             if (
                 new_virtual_price > 10**18 and
                 new_virtual_price >= threshold_vp
+                # only rebalance when pool preserves half of the profits
             ):
                 self.D = new_D
                 self.virtual_price = new_virtual_price
@@ -1055,7 +1145,7 @@ def tweak_price(
                     # we burned some donation shares, update related state
                     self.donation_shares -= donation_shares_to_burn
                     self.totalSupply -= donation_shares_to_burn
-                    self.last_donation_release_timestamp = block.timestamp
+                    self.last_donation_release_ts = block.timestamp
                 return p_new
 
     # If we end up here price_scale was not adjusted. So we update the state
@@ -1140,6 +1230,10 @@ def _claim_admin_fees():
         # Thus, to maintain the condition vp' - 1 > (xcp_profit' - 1)/2:
         #     xcp_profit' := xcp_profit - 2 * f
         xcp_profit -= fees * 2
+        # Another way to look at it - we either track admin_claimed_xcp (=sum(fees)),
+        # and always use it to calculate admin+LP reserve, or just -=2*fees in xcp_profit.
+        # xcp_profit as raw value is thus should't be used in integrations!
+
     # ------------------- Recalculate virtual_price following admin fee claim.
     total_supply_including_admin_share: uint256 = (
         current_lp_token_supply + admin_share
@@ -1197,6 +1291,15 @@ def _xp(
         unsafe_div(balances[1] * PRECISIONS[1] * price_scale, PRECISION)
     ]
 
+@external
+@view
+def user_supply() -> uint256:
+    """
+    @notice Returns the amount of LP tokens that are not locked in donations.
+    @return uint256 Amount of LP tokens that are not locked in donations.
+    """
+    return self.totalSupply - self.donation_shares
+
 @internal
 @view
 def _is_ramping() -> bool:
@@ -1207,11 +1310,12 @@ def _is_ramping() -> bool:
     return self.future_A_gamma_time > block.timestamp
 
 @internal
+@view
 def _check_admin():
     assert msg.sender == staticcall factory.admin(), "only owner"
 
-@view
 @internal
+@view
 def _A_gamma() -> uint256[2]:
     t1: uint256 = self.future_A_gamma_time
 
@@ -1256,14 +1360,6 @@ def _fee(xp: uint256[N_COINS]) -> uint256:
 
     # mid_fee * B + out_fee * (1 - B)
     return unsafe_div(fee_params[0] * B + fee_params[1] * (10**18 - B), 10**18)
-
-
-@internal
-@pure
-def _D_from_xcp(xcp: uint256, price_scale: uint256) -> uint256:
-    # For N_COINS=2 xcp equals to D // (N_COINS * √price_scale), this is just
-    # the inverse of the formula used in `_xcp`.
-    return xcp * N_COINS * isqrt(price_scale * PRECISION) // PRECISION
 
 
 @internal
@@ -1315,10 +1411,34 @@ def _xcp(D: uint256, price_scale: uint256) -> uint256:
     return D * PRECISION // N_COINS // isqrt(PRECISION * price_scale)
 
 
-@view
 @internal
-def _calc_token_fee(amounts: uint256[N_COINS], xp: uint256[N_COINS]) -> uint256:
+@view
+def _calc_token_fee(amounts: uint256[N_COINS],
+                    xp: uint256[N_COINS],
+                    donation: bool = False,
+                    deposit: bool = False,
+                    from_view: bool = False) -> uint256:
+
+    if donation:
+        # Donation fees are 0, but NOISE_FEE is required for numerical stability
+        return NOISE_FEE
+
+    surplus_amounts: uint256[N_COINS] = amounts
+    if from_view:
+        # When calling from the view contract no liquidity has been
+        # added to the balances.
+        surplus_amounts = [0, 0]
+
+    # the ratio of the balances before the liquidity operation
+    # balances[0] / balances[1] (adjusted for fixed precisions)
+    balances_ratio: uint256 = (self.balances[0] - surplus_amounts[0]) * PRECISIONS[0] * PRECISION // ((self.balances[1] - surplus_amounts[1]) * PRECISIONS[1])
+    # We calculate the fee based on the impact on the spot balances.
+    # For this reason here (AND ONLY HERE) we use the balances ratio and not
+    # the price_scale in self._xp().
+    amounts = self._xp(amounts, balances_ratio)
+
     # fee = sum(amounts_i - avg(amounts)) * fee' / sum(amounts)
+    # fee' = _fee(xp) * N_COINS / (4 * (N_COINS - 1)) = _fee(xp)/2 (for N_COINS=2)
     fee: uint256 = unsafe_div(
         unsafe_mul(self._fee(xp), N_COINS),
         unsafe_mul(4, unsafe_sub(N_COINS, 1))
@@ -1337,7 +1457,16 @@ def _calc_token_fee(amounts: uint256[N_COINS], xp: uint256[N_COINS]) -> uint256:
         else:
             Sdiff += unsafe_sub(avg, _x)
 
-    return fee * Sdiff // S + NOISE_FEE
+    lp_spam_penalty_fee: uint256 = 0
+    if deposit:
+        # Penalty fee for spamming add_liquidity into the pool
+        current_expiry: uint256 = self.donation_protection_expiry_ts
+        if current_expiry > block.timestamp:
+            # The penalty is proportional to the remaining protection time and the current pool fee.
+            protection_factor: uint256 = min((current_expiry - block.timestamp) * PRECISION // self.donation_protection_period, PRECISION)
+            lp_spam_penalty_fee = protection_factor * fee // PRECISION
+
+    return fee * Sdiff // S + NOISE_FEE + lp_spam_penalty_fee
 
 @view
 @external
@@ -1427,9 +1556,17 @@ def _calc_withdraw_fixed_out(
     amountsp[j] = xp[j] - y
     xp_new[j] = y
 
+    # _calc_token_fee expects unscaled amounts and without decimals
+    # adjustments.
+    amounts: uint256[N_COINS] = empty(uint256[N_COINS])
+    amounts[i] = amount_i
+    if i == 0:
+        amounts[1] = amountsp[1] // PRECISIONS[1] * PRECISION // price_scale
+    else:
+        amounts[0] = amountsp[0] // PRECISIONS[0]
     # The only way to compute the fees is to simulate a withdrawal as we have done
     # above and then rewind and apply the fees.
-    approx_fee: uint256 = self._calc_token_fee(amountsp, xp_new)
+    approx_fee: uint256 = self._calc_token_fee(amounts, xp_new)
     dD -= dD * approx_fee // 10**10 + 1
 
     # Same reasoning as before except now we're charging fees.
@@ -1607,8 +1744,7 @@ def calc_token_amount(amounts: uint256[N_COINS], deposit: bool) -> uint256:
     @param deposit True if it is a deposit action, False if withdrawn.
     @return uint256 Amount of LP tokens deposited or withdrawn.
     """
-    view_contract: address = staticcall factory.views_implementation()
-    return staticcall Views(view_contract).calc_token_amount(amounts, deposit, self)
+    return staticcall self.view_contract.calc_token_amount(amounts, deposit, self)
 
 
 @external
@@ -1622,8 +1758,7 @@ def get_dy(i: uint256, j: uint256, dx: uint256) -> uint256:
     @param dx amount of input coin[i] tokens
     @return uint256 Exact amount of output j tokens for dx amount of i input tokens.
     """
-    view_contract: address = staticcall factory.views_implementation()
-    return staticcall Views(view_contract).get_dy(i, j, dx, self)
+    return staticcall self.view_contract.get_dy(i, j, dx, self)
 
 
 @external
@@ -1640,8 +1775,7 @@ def get_dx(i: uint256, j: uint256, dy: uint256) -> uint256:
     @param dy amount of input coin[j] tokens received
     @return uint256 Approximate amount of input i tokens to get dy amount of j tokens.
     """
-    view_contract: address = staticcall factory.views_implementation()
-    return staticcall Views(view_contract).get_dx(i, j, dy, self)
+    return staticcall self.view_contract.get_dx(i, j, dy, self)
 
 
 @external
@@ -1717,15 +1851,18 @@ def fee() -> uint256:
 @external
 @view
 def calc_token_fee(
-    amounts: uint256[N_COINS], xp: uint256[N_COINS]
+    amounts: uint256[N_COINS], xp: uint256[N_COINS], donation: bool = False, deposit: bool = False
 ) -> uint256:
     """
     @notice Returns the fee charged on the given amounts for add_liquidity.
-    @param amounts The amounts of coins being added to the pool.
+    @param amounts The amounts of coins being added to the pool (unscaled).
     @param xp The current balances of the pool multiplied by coin precisions.
+    @param donation Whether the liquidity is a donation, if True only NOISE_FEE is charged.
+    @param deposit Whether the liquidity is a deposit.
     @return uint256 Fee charged.
     """
-    return self._calc_token_fee(amounts, xp)
+    # last True is for from_view
+    return self._calc_token_fee(amounts, xp, donation, deposit, True)
 
 
 @view
@@ -1859,12 +1996,12 @@ def ramp_A_gamma(
     assert future_gamma < MAX_GAMMA + 1, "gamme>max"
 
     ratio: uint256 = 10**18 * future_A // A_gamma[0]
-    assert ratio < 10**18 * MAX_A_CHANGE + 1, "A change too high"
-    assert ratio > 10**18 // MAX_A_CHANGE - 1, "A change too low"
+    assert ratio < 10**18 * MAX_PARAM_CHANGE + 1, "A change too high"
+    assert ratio > 10**18 // MAX_PARAM_CHANGE - 1, "A change too low"
 
     ratio = 10**18 * future_gamma // A_gamma[1]
-    assert ratio < 10**18 * MAX_A_CHANGE + 1, "gamma change too high"
-    assert ratio > 10**18 // MAX_A_CHANGE - 1, "gamma change too low"
+    assert ratio < 10**18 * MAX_PARAM_CHANGE + 1, "gamma change too high"
+    assert ratio > 10**18 // MAX_PARAM_CHANGE - 1, "gamma change too low"
 
     self.initial_A_gamma = initial_A_gamma
     self.initial_A_gamma_time = block.timestamp
@@ -1985,19 +2122,39 @@ def apply_new_parameters(
         ma_time=new_ma_time
     )
 
+
 @external
 def set_donation_duration(duration: uint256):
+    """
+    @notice Set the donation duration.
+    @param duration The new donation duration.
+    @dev The time required for donations to fully release from locked state.
+    """
     self._check_admin()
-
+    assert duration > 0, "duration must be positive"
     self.donation_duration = duration
     log SetDonationDuration(duration=duration)
 
-@external
-def set_max_donation_ratio(ratio: uint256):
-    self._check_admin()
 
-    self.max_donation_ratio = ratio
-    log SetMaxDonationRatio(ratio=ratio)
+@external
+def set_donation_protection_params(
+    _period: uint256,
+    _threshold: uint256,
+):
+    """
+    @notice Set donation protection parameters.
+    @param _period The new donation protection period in seconds.
+    @param _threshold The new donation protection threshold with 10**18 precision.
+    @dev _threshold = 30 * 10**18//100 means 30%
+    """
+
+    self._check_admin()
+    assert _period > 0, "period must be positive"
+    assert _threshold > 0, "threshold must be positive"
+    self.donation_protection_period = _period
+    self.donation_protection_lp_threshold = _threshold
+    log SetDonationProtection(donation_protection_period=_period, donation_protection_lp_threshold=_threshold)
+
 
 @external
 def set_admin_fee(admin_fee: uint256):
@@ -2013,3 +2170,16 @@ def set_admin_fee(admin_fee: uint256):
 
     self.admin_fee = admin_fee
     log SetAdminFee(admin_fee=admin_fee)
+
+@external
+def set_views(views: Views):
+    """
+    @notice Set the view contract.
+    @param views The new view contract.
+    @dev This function is used to set the view contract that will be used
+         to calculate the prices and fees.
+    """
+    self._check_admin()
+    assert views != empty(Views), "views cannot be empty"
+    self.view_contract = views
+    log SetViews(views=views)
