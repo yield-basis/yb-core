@@ -23,56 +23,68 @@ GC: public(immutable(GaugeController))
 YB: public(immutable(IERC20))
 VE: public(immutable(VotingEscrow))
 
-UNLOCK_TIME: public(immutable(uint256))
-RECIPIENT: public(immutable(address))
+unlock_time: public(uint256)
+recipient: public(address)
 
 
 @deploy
-def __init__(token: IERC20, unlock_time: uint256, ve: VotingEscrow, gc: GaugeController, recipient: address):
-    RECIPIENT = recipient
+def __init__(token: IERC20, ve: VotingEscrow, gc: GaugeController):
     YB = token
     VE = ve
     GC = gc
+    self.recipient = self
+
+
+@external
+def initialize(recipient: address, unlock_time: uint256) -> bool:
+    assert self.recipient == empty(address), "Already initialized"
     assert unlock_time > block.timestamp
-    UNLOCK_TIME = unlock_time
-    extcall token.approve(ve.address, max_value(uint256))
+    self.recipient = recipient
+    self.unlock_time = unlock_time
+    extcall YB.approve(VE.address, max_value(uint256))
+    return True
 
 
 @internal
 def _access():
-    assert msg.sender == RECIPIENT, "Not authorized"
+    assert msg.sender == self.recipient, "Not authorized"
 
 
 @internal
 def _cliff():
-    assert block.timestamp >= UNLOCK_TIME, "Cliff still applies"
+    assert block.timestamp >= self.unlock_time, "Cliff still applies"
 
 
 @external
+@nonreentrant
 def create_lock(_value: uint256, _unlock_time: uint256):
     self._access()
     extcall VE.create_lock(_value, _unlock_time)
 
 
 @external
+@nonreentrant
 def increase_amount(_value: uint256):
     self._access()
     extcall VE.increase_amount(_value)
 
 
 @external
+@nonreentrant
 def increase_unlock_time(_unlock_time: uint256):
     self._access()
     extcall VE.increase_unlock_time(_unlock_time)
 
 
 @external
+@nonreentrant
 def withdraw():
     self._access()
     extcall VE.withdraw()
 
 
 @external
+@nonreentrant
 def transferFrom(owner: address, to: address, token_id: uint256):
     self._access()
     self._cliff()
@@ -80,12 +92,14 @@ def transferFrom(owner: address, to: address, token_id: uint256):
 
 
 @external
+@nonreentrant
 def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]):
     self._access()
     extcall GC.vote_for_gauge_weights(_gauge_addrs, _user_weights)
 
 
 @external
+@nonreentrant
 def transfer(to: address, amount: uint256):
     self._access()
     self._cliff()
@@ -93,6 +107,7 @@ def transfer(to: address, amount: uint256):
 
 
 @external
+@nonreentrant
 def approve(_for: address, amount: uint256):
     self._access()
     self._cliff()
@@ -100,6 +115,7 @@ def approve(_for: address, amount: uint256):
 
 
 @external
+@nonreentrant
 def recover_token(token: IERC20, to: address, amount: uint256):
     self._access()
     assert token != YB, "Cannot recover YB"

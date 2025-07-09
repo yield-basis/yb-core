@@ -32,11 +32,17 @@ event ToggleDisable:
     disabled: bool
 
 
+interface CliffEscrow:
+    def initialize(recipient: address, unlock_time: uint256)-> bool: nonpayable
+
+
+CLIFF_ESCROW: public(immutable(address))
 TOKEN: public(immutable(IERC20))
 START_TIME: public(immutable(uint256))
 END_TIME: public(immutable(uint256))
 initial_locked: public(HashMap[address, uint256])
 total_claimed: public(HashMap[address, uint256])
+recipient_to_cliff: public(HashMap[address, CliffEscrow])
 
 initial_locked_supply: public(uint256)
 unallocated_supply: public(uint256)
@@ -50,7 +56,8 @@ def __init__(
     _token: IERC20,
     _start_time: uint256,
     _end_time: uint256,
-    _can_disable: bool
+    _can_disable: bool,
+    cliff_escrow_impl: address
 ):
     """
     @param _token Address of the ERC20 token being distributed
@@ -58,6 +65,7 @@ def __init__(
         the future, so that we have enough time to VoteLock everyone
     @param _end_time Time until everything should be vested
     @param _can_disable Whether admin can disable accounts in this deployment
+    @param cliff_escrow_impl Implementation for CliffEscrow
     """
     ownable.__init__()
 
@@ -67,6 +75,7 @@ def __init__(
     TOKEN = _token
     START_TIME = _start_time
     END_TIME = _end_time
+    CLIFF_ESCROW = cliff_escrow_impl
     self.can_disable = _can_disable
 
 
@@ -83,7 +92,7 @@ def add_tokens(_amount: uint256):
 
 
 @external
-def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100]):
+def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100], cliff_time: uint256):
     """
     @notice Vest tokens for multiple recipients
     @param _recipients List of addresses to fund
@@ -98,6 +107,13 @@ def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100]):
             break
         amount: uint256 = _amounts[i]
         recipient: address = _recipients[i]
+
+        if cliff_time > block.timestamp:
+            cliff_escrow: CliffEscrow = CliffEscrow(create_minimal_proxy_to(CLIFF_ESCROW))
+            extcall cliff_escrow.initialize(recipient, cliff_time)
+            self.recipient_to_cliff[recipient] = cliff_escrow
+            recipient = cliff_escrow.address
+
         _total_amount += amount
         self.initial_locked[recipient] += amount
         log Fund(recipient=recipient, amount=amount)
