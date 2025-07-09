@@ -76,4 +76,6 @@ def amm(amm_deployer, admin, stablecoin, collateral_token, price_oracle, account
 @pytest.fixture(scope="session")
 def yb(admin):
     with boa.env.prank(admin):
-        return boa.load('contracts/dao/YB.vy', RESERVE, RATE)
+        yb = boa.load('contracts/dao/YB.vy', RESERVE, RATE)
+        yb.start_emissions()
+        return yb

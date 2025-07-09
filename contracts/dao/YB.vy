@@ -19,7 +19,6 @@ exports: (
     erc20.IERC20,
     erc20.IERC20Detailed,
     erc20.mint,
-    erc20.renounce_ownership,
     erc20.is_minter,
     erc20.set_minter
 )
@@ -68,6 +67,24 @@ def preview_emissions(t: uint256, rate_factor: uint256) -> uint256:
 
 
 @external
+def start_emissions():
+    ownable._check_owner()
+    if self.last_minted == 0:
+        self.last_minted = block.timestamp
+
+
+@external
+def renounce_ownership():
+    ownable._check_owner()
+    # Force-strt emissions when renouncing ownership
+    if self.last_minted == 0:
+        self.last_minted = block.timestamp
+    erc20.is_minter[msg.sender] = False
+    log erc20.RoleMinterChanged(minter=msg.sender, status=False)
+    ownable._transfer_ownership(empty(address))
+
+
+@external
 def emit(owner: address, rate_factor: uint256) -> uint256:
     """
     @dev Creates `amount` tokens and assigns them to `owner`.
@@ -78,10 +95,12 @@ def emit(owner: address, rate_factor: uint256) -> uint256:
     """
     assert erc20.is_minter[msg.sender], "erc20: access is denied"
 
-    amount: uint256 = self._emissions(block.timestamp, rate_factor)
-    self.reserve -= amount
-    self.last_minted = block.timestamp
+    amount: uint256 = 0
 
-    erc20._mint(owner, amount)
+    if self.last_minted > 0:
+        amount = self._emissions(block.timestamp, rate_factor)
+        self.reserve -= amount
+        self.last_minted = block.timestamp
+        erc20._mint(owner, amount)
 
     return amount
