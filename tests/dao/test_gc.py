@@ -164,7 +164,7 @@ class StatefulVE(RuleBasedStateMachine):
     def merge(self, uid1, uid2):
         user1 = self.accounts[uid1]
         user2 = self.accounts[uid2]
-        max_time = boa.env.evm.patch.timestamp // WEEK * WEEK + MAX_TIME
+        max_time = (boa.env.evm.patch.timestamp + MAX_TIME) // WEEK * WEEK
         amount1, t1 = self.ve_yb.locked(user1)
         amount2, t2 = self.ve_yb.locked(user2)
         if amount1 == 0:

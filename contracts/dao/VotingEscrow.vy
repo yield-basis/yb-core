@@ -517,7 +517,7 @@ def _ve_transfer_allowed(owner: address, to: address) -> bool:
 
     sender_max: bool = False
     receiver_max: bool = False
-    max_time: uint256 = block.timestamp // WEEK * WEEK + UMAXTIME
+    max_time: uint256 = (block.timestamp + UMAXTIME) // WEEK * WEEK
 
     owner_time: uint256 = self.locked[owner].end
     if owner_time == max_value(uint256) or owner_time // WEEK * WEEK == max_time:
