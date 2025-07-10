@@ -14,6 +14,7 @@ interface VotingEscrow:
     def increase_unlock_time(_unlock_time: uint256): nonpayable
     def withdraw(): nonpayable
     def transferFrom(owner: address, to: address, token_id: uint256): nonpayable
+    def infinite_lock_toggle(): nonpayable
 
 interface GaugeController:
     def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]): nonpayable
@@ -96,6 +97,13 @@ def transferFrom(owner: address, to: address, token_id: uint256):
 def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]):
     self._access()
     extcall GC.vote_for_gauge_weights(_gauge_addrs, _user_weights)
+
+
+@external
+@nonreentrant
+def infinite_lock_toggle():
+    self._access()
+    extcall VE.infinite_lock_toggle()
 
 
 @external
