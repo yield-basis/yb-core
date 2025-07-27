@@ -5,8 +5,8 @@
 @license MIT
 """
 from ethereum.ercs import IERC20
-from snekmate.extensions import erc4626
 from snekmate.utils import math
+import erc4626
 
 
 initializes: erc4626
@@ -31,7 +31,8 @@ exports: (
     erc4626.previewRedeem,
     erc4626.asset,
     erc4626.ownable.transfer_ownership,
-    erc4626.ownable.owner
+    erc4626.ownable.owner,
+    erc4626.MIN_SHARES
 )
 
 
@@ -82,8 +83,8 @@ struct RewardIntegrals:
 
 VERSION: public(constant(String[8])) = "v1.0.0"
 
-MIN_SHARES: public(constant(uint256)) = 10**12
 MAX_REWARDS: constant(uint256) = 8
+MIN_SHARES_DECIMALS: constant(uint8) = 12
 GC: public(immutable(GaugeController))
 YB: public(immutable(IERC20))
 LP_TOKEN: public(immutable(IERC20))
@@ -106,7 +107,7 @@ claimed_rewards: public(HashMap[address, HashMap[IERC20, uint256]])
 
 @deploy
 def __init__(lp_token: IERC20):
-    erc4626.__init__("YB Gauge: ..", "g(..)", lp_token, 0, "Just say no", "to EIP712")
+    erc4626.__init__("YB Gauge: ..", "g(..)", lp_token, MIN_SHARES_DECIMALS, "Just say no", "to EIP712")
     LP_TOKEN = lp_token
     GC = staticcall Factory(msg.sender).gauge_controller()
     YB = staticcall GC.TOKEN()
@@ -115,12 +116,6 @@ def __init__(lp_token: IERC20):
     self.reward_tokens[0] = YB
     self.reward_count = 1
     log AddReward(token=YB.address, distributor=GC.address, id=0)
-
-
-@internal
-def _check_min_shares():
-    supply: uint256 = erc4626.erc20.totalSupply
-    assert supply >= MIN_SHARES or supply == 0, "Leave MIN_SHARES"
 
 
 @external
@@ -318,7 +313,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
     shares: uint256 = erc4626._preview_deposit(assets)
     self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
-    self._check_min_shares()
+    erc4626._check_min_shares()
     extcall GC.emit()
     return shares
 
@@ -330,7 +325,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
     assets: uint256 = erc4626._preview_mint(shares)
     self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
-    self._check_min_shares()
+    erc4626._check_min_shares()
     extcall GC.emit()
     return assets
 
@@ -342,7 +337,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
-    self._check_min_shares()
+    erc4626._check_min_shares()
     extcall GC.emit()
     return shares
 
@@ -354,7 +349,7 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assets: uint256 = erc4626._preview_redeem(shares)
     self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
-    self._check_min_shares()
+    erc4626._check_min_shares()
     extcall GC.emit()
     return assets
 

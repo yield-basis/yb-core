@@ -57,7 +57,7 @@ class StatefulG(RuleBasedStateMachine):
             if shares_after >= 10**12 or shares_after == 0:
                 self.gauges[gid].deposit(assets, user)
             else:
-                with boa.reverts("Leave MIN_SHARES"):
+                with boa.reverts("erc4626: leave MIN_SHARES"):
                     self.gauges[gid].deposit(assets, user)
 
     @rule(uid=user_id, shares=token_amount, gid=gauge_id)
@@ -69,7 +69,7 @@ class StatefulG(RuleBasedStateMachine):
                 if remaints >= 10**12 or remaints == 0:
                     self.gauges[gid].redeem(shares, user, user)
                 else:
-                    with boa.reverts("Leave MIN_SHARES"):
+                    with boa.reverts("erc4626: leave MIN_SHARES"):
                         self.gauges[gid].redeem(shares, user, user)
 
     @rule(from_uid=user_id, to_uid=user_id, amount=token_amount, gid=gauge_id)
