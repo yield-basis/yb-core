@@ -333,8 +333,8 @@ def increase_unlock_time(_unlock_time: uint256):
     _locked: LockedBalance = self.locked[msg.sender]
     unlock_time: uint256 = (_unlock_time // WEEK) * WEEK  # Locktime is rounded down to weeks
 
-    assert _locked.end > block.timestamp, "Lock expired"
     assert _locked.amount > 0, "Nothing is locked"
+    assert _locked.end > block.timestamp, "Lock expired"
     assert unlock_time > _locked.end, "Can only increase lock duration"
     assert unlock_time <= block.timestamp + UMAXTIME, "Voting lock can be 4 years max"
 
