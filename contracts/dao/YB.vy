@@ -20,7 +20,8 @@ exports: (
     erc20.IERC20Detailed,
     erc20.mint,
     erc20.is_minter,
-    erc20.set_minter
+    erc20.set_minter,
+    ownable.owner
 )
 
 
