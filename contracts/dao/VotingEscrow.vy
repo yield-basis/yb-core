@@ -22,7 +22,6 @@
 # 0 +--------+------> time
 #       maxtime (4 years)
 
-from interfaces import IVotes
 from ethereum.ercs import IERC20
 from ethereum.ercs import IERC721
 
