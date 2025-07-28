@@ -96,6 +96,10 @@ event Supply:
     supply: uint256
 
 
+event SetTransferClearanceChecker:
+    clearance_checker: address
+
+
 WEEK: constant(uint256) = 7 * 86400  # all future times are rounded by week
 MAXTIME: constant(int256) = 4 * 365 * 86400  # 4 years
 UMAXTIME: constant(uint256) = 4 * 365 * 86400  # 4 years
@@ -569,6 +573,7 @@ def _merge_positions(owner: address, to: address):
 def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearanceChecker):
     ownable._check_owner()
     self.transfer_clearance_checker = transfer_clearance_checker
+    log SetTransferClearanceChecker(clearance_checker=transfer_clearance_checker.address)
 
 
 @external
