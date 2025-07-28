@@ -68,7 +68,7 @@ class StatefulVE(RuleBasedStateMachine):
         t = boa.env.evm.patch.timestamp
         unlock_time = t + lock_duration
         with boa.env.prank(user):
-            if self.ve_yb.locked(user).amount > 0 or amount > self.yb.balanceOf(user):
+            if self.ve_yb.locked(user).amount > 0 or amount > self.yb.balanceOf(user) or amount < MAX_TIME:
                 return
             else:
                 self.ve_yb.create_lock(amount, unlock_time)
@@ -78,7 +78,8 @@ class StatefulVE(RuleBasedStateMachine):
         user = self.accounts[uid]
         t = boa.env.evm.patch.timestamp
         with boa.env.prank(user):
-            if self.ve_yb.locked(user).amount == 0 or self.ve_yb.locked(user).end <= t or amount > self.yb.balanceOf(user):
+            if self.ve_yb.locked(user).amount == 0 or self.ve_yb.locked(user).end <= t or\
+                    amount > self.yb.balanceOf(user) or amount < MAX_TIME:
                 return
             else:
                 self.ve_yb.increase_amount(amount)

@@ -259,11 +259,12 @@ def _deposit_for(_addr: address, _value: uint256, unlock_time: uint256, locked_b
     _locked: LockedBalance = locked_balance
     supply_before: uint256 = self.supply
 
-    new_supply: uint256 = supply_before + _value
+    new_supply: uint256 = (supply_before + _value) // UMAXTIME * UMAXTIME
+    rounded_value: uint256 = new_supply - supply_before
     self.supply = new_supply
     old_locked: LockedBalance = _locked
     # Adding to existing lock, or if a lock is expired - creating a new one
-    _locked.amount += convert(_value, int256)
+    _locked.amount += convert(rounded_value, int256)
     if unlock_time != 0:
         _locked.end = unlock_time
     self.locked[_addr] = _locked
@@ -274,10 +275,10 @@ def _deposit_for(_addr: address, _value: uint256, unlock_time: uint256, locked_b
     # _locked.end > block.timestamp (always)
     self._checkpoint(_addr, old_locked, _locked)
 
-    if _value != 0:
-        assert extcall TOKEN.transferFrom(msg.sender, self, _value)
+    if rounded_value != 0:
+        assert extcall TOKEN.transferFrom(msg.sender, self, rounded_value)
 
-    log Deposit(_from=msg.sender, _for=_addr, value=_value, locktime=_locked.end, type=type, ts=block.timestamp)
+    log Deposit(_from=msg.sender, _for=_addr, value=rounded_value, locktime=_locked.end, type=type, ts=block.timestamp)
     log Supply(prevSupply=supply_before, supply=new_supply)
 
 
@@ -292,7 +293,7 @@ def create_lock(_value: uint256, _unlock_time: uint256):
     unlock_time: uint256 = (_unlock_time // WEEK) * WEEK  # Locktime is rounded down to weeks
     _locked: LockedBalance = self.locked[msg.sender]
 
-    assert _value > 0  # dev: need non-zero value
+    assert _value >= UMAXTIME, "Min value"
     assert _locked.amount == 0, "Withdraw old tokens first"
     assert unlock_time > block.timestamp, "Can only lock until time in the future"
     assert unlock_time <= block.timestamp + UMAXTIME, "Voting lock can be 4 years max"
@@ -312,7 +313,7 @@ def increase_amount(_value: uint256, _for: address = msg.sender):
     """
     _locked: LockedBalance = self.locked[_for]
 
-    assert _value > 0  # dev: need non-zero value
+    assert _value >= UMAXTIME  # dev: need non-zero value
     assert _locked.amount > 0, "No existing lock found"
     assert _locked.end > block.timestamp, "Cannot add to expired lock. Withdraw"
 

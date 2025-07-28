@@ -40,7 +40,7 @@ class StatefulVE(RuleBasedStateMachine):
         unlock_time = min(t + lock_duration, 2**256 - 1)
         unlock_time_round = unlock_time // WEEK * WEEK
         with boa.env.prank(user):
-            if amount == 0:
+            if amount < MAX_TIME:
                 with boa.reverts():
                     self.ve_mock.create_lock(amount, unlock_time)
             elif self.voting_balances[user]['value'] > 0:
@@ -57,9 +57,9 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.create_lock(amount, unlock_time)
             else:
                 self.ve_mock.create_lock(amount, unlock_time)
-                self.voting_balances[user] = {'value': amount, 'unlock_time': unlock_time_round}
+                self.voting_balances[user] = {'value': amount // MAX_TIME * MAX_TIME, 'unlock_time': unlock_time_round}
                 st_amount, st_time = self.ve_mock.locked(user)
-                assert st_amount == amount
+                assert st_amount == amount // MAX_TIME * MAX_TIME
                 assert st_time == unlock_time_round
 
     @rule(uid=user_id, amount=amount)
@@ -67,7 +67,7 @@ class StatefulVE(RuleBasedStateMachine):
         user = self.accounts[uid]
         t = boa.env.evm.patch.timestamp
         with boa.env.prank(user):
-            if amount == 0:
+            if amount < MAX_TIME:
                 with boa.reverts():
                     self.ve_mock.increase_amount(amount)
             elif self.voting_balances[user]['value'] == 0:
@@ -81,7 +81,7 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.increase_amount(amount)
             else:
                 self.ve_mock.increase_amount(amount)
-                self.voting_balances[user]['value'] += amount
+                self.voting_balances[user]['value'] += amount // MAX_TIME * MAX_TIME
 
     @rule(uid=user_id, lock_duration=lock_duration)
     def increase_unlock_time(self, uid, lock_duration):
@@ -217,3 +217,87 @@ def test_ve(ve_mock, mock_gov_token, accounts):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
+
+
+def test_merge_votes(yb, ve_yb, accounts, admin):
+    user1 = accounts[0]
+    user2 = accounts[1]
+
+    amount1 = 1 * 10**18
+    print(f"amount1: {amount1}")
+
+    amount2 = 2 * 10**18
+    print(f"amount2: {amount2}")
+
+    lock_time = boa.env.evm.patch.timestamp + 4 * 365 * 86400
+
+    with boa.env.prank(admin):
+        yb.mint(user1, amount1)
+        yb.mint(user2, amount2)
+
+    with boa.env.prank(user1):
+        yb.approve(ve_yb.address, amount1)
+        ve_yb.create_lock(amount1, lock_time)
+
+    with boa.env.prank(user2):
+        yb.approve(ve_yb.address, amount2)
+        ve_yb.create_lock(amount2, lock_time)
+
+    votes1 = ve_yb.getVotes(user1)
+    votes2 = ve_yb.getVotes(user2)
+    total_votes = ve_yb.totalVotes()
+
+    slope1 = ve_yb.get_last_user_point(user1)[1]
+    slope2 = ve_yb.get_last_user_point(user2)[1]
+    global_slope = ve_yb.point_history(ve_yb.epoch())[1]
+
+    print("votes1", votes1)
+    print("votes2", votes2)
+    print("total_votes", total_votes)
+
+    print("slope1", slope1)
+    print("slope2", slope2)
+    print("global_slope", global_slope)
+
+    assert votes1 > 0
+    assert votes2 > 0
+    assert total_votes == votes1 + votes2
+
+    # Merge votes: user1 transfers to user2
+    print("\nMERGE\n")
+    token_id = ve_yb.tokenOfOwnerByIndex(user1, 0)
+
+    with boa.env.prank(user1):
+        ve_yb.transferFrom(user1, user2, token_id)
+
+    votes1_merged = ve_yb.getVotes(user1)
+    votes2_merged = ve_yb.getVotes(user2)
+    total_votes_merged = ve_yb.totalVotes()
+
+    slope1_merged = ve_yb.get_last_user_point(user1)[1]
+    slope2_merged = ve_yb.get_last_user_point(user2)[1]
+    global_slope_merged = ve_yb.point_history(ve_yb.epoch())[1]
+
+    print("slope1_merged", slope1_merged)
+    print("slope2_merged", slope2_merged)
+    print("global_slope_merged", global_slope_merged)
+
+    print("votes1_merged", votes1_merged)
+    print("votes2_merged", votes2_merged)
+    print("total_votes_merged", total_votes_merged)
+
+    assert votes1_merged == 0
+    assert votes2_merged == votes1 + votes2  # assert 2988928724211579825 == (996309574653407625 + 1992619149432493725)
+    assert votes2_merged == total_votes_merged
+    assert total_votes_merged == total_votes
+
+    # weigth_of_user <= total_weight
+
+    # Problem
+    # (a + b) // MAXTIME != (a // MAXTIME) + (b // MAXTIME)
+    #    ^                   ^                ^
+    #    |                   |                |
+    # slope2_merged        slope1           slope2
+
+    # => condition for such situation:
+    # (amount1 % MAXTIME) + (amount2 % MAXTIME) >= MAXTIME
