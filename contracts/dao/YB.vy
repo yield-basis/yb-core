@@ -50,7 +50,7 @@ def __init__(reserve: uint256, max_rate: uint256):
 def _emissions(t: uint256, rate_factor: uint256) -> uint256:
     assert rate_factor <= 10**18
     last_minted: uint256 = self.last_minted
-    if last_minted == 0:
+    if last_minted == 0 or t < last_minted:
         return 0
     else:
         dt: int256 = convert(t - last_minted, int256)
