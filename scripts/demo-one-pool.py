@@ -161,25 +161,25 @@ if __name__ == '__main__':
     yb_amm = amm_interface.at(market.amm)
     yb_lt = lt_interface.at(market.lt)
 
-    with open('factory_abi.json', 'w') as f:
+    with open('abi/factory.json', 'w') as f:
         json.dump(factory.abi, f)
 
-    with open('pool_abi.json', 'w') as f:
+    with open('abi/pool.json', 'w') as f:
         json.dump(pool.abi, f)
 
-    with open('amm_abi.json', 'w') as f:
+    with open('abi/amm.json', 'w') as f:
         json.dump(yb_amm.abi, f)
 
-    with open('lt_abi.json', 'w') as f:
+    with open('abi/lt.json', 'w') as f:
         json.dump(yb_lt.abi, f)
 
-    with open('yb.json', 'w') as f:
+    with open('abi/yb.json', 'w') as f:
         json.dump(yb.abi, f)
 
-    with open('ve_yb.json', 'w') as f:
+    with open('abi/ve_yb.json', 'w') as f:
         json.dump(ve_yb.abi, f)
 
-    with open('gc.json', 'w') as f:
+    with open('abi/gc.json', 'w') as f:
         json.dump(gc.abi, f)
 
     if '--deposit' in sys.argv[1:]:
@@ -190,8 +190,6 @@ if __name__ == '__main__':
 
     t2 = boa.env.evm.patch.timestamp
 
-    # import IPython
-    # IPython.embed()
 
     if '--hardhat' in sys.argv[1:]:
         hardhat.wait()
