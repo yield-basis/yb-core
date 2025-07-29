@@ -91,8 +91,12 @@ class StatefulVE(RuleBasedStateMachine):
         unlock_time_round = unlock_time // WEEK * WEEK
         with boa.env.prank(user):
             if self.voting_balances[user]['unlock_time'] <= t:
-                with boa.reverts('Lock expired'):
-                    self.ve_mock.increase_unlock_time(unlock_time)
+                if self.voting_balances[user]['unlock_time'] == 0:
+                    with boa.reverts():
+                        self.ve_mock.increase_unlock_time(unlock_time)
+                else:
+                    with boa.reverts('Lock expired'):
+                        self.ve_mock.increase_unlock_time(unlock_time)
             elif self.voting_balances[user]['value'] == 0:
                 with boa.reverts('Nothing is locked'):
                     self.ve_mock.increase_unlock_time(unlock_time)
@@ -217,6 +221,18 @@ def test_ve(ve_mock, mock_gov_token, accounts):
     for k, v in locals().items():
         setattr(StatefulVE, k, v)
     run_state_machine_as_test(StatefulVE)
+
+
+def test_nothing_is_locked(ve_mock, mock_gov_token, accounts):
+    StatefulVE.TestCase.settings = settings(max_examples=200, stateful_step_count=100)  # 2000, 100
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.check_vote_decay()
+    state.escrow_current_votes()
+    state.token_balances()
+    state.increase_unlock_time(lock_duration=0, uid=0)
+    state.teardown()
 
 
 def test_merge_votes(yb, ve_yb, accounts, admin):

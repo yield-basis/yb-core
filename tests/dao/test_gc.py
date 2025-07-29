@@ -362,6 +362,22 @@ def test_gc_nonzero_emissions(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
+def test_emit_expected_emissions(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.add_gauge(gauge_id=4)  # 0
+    state.add_gauge(gauge_id=1)
+    state.time_travel(dt=991258)
+    state.set_adjustment(adj=10**18, gauge_id=0)  # matters!!
+    state.add_gauge(gauge_id=3)
+    state.add_gauge(gauge_id=0)  # 3
+    state.create_lock(amount=2_425_115_004_361_743_762, lock_duration=112685815, uid=0)
+    state.vote(gauge_ids=[3, 0], uid=0, weight=5000)
+    state.emit(gauge_id=0)
+    state.teardown()
+
+
 @pytest.fixture(scope="session")
 def lock_for_accounts(yb, ve_yb, accounts, admin):
     with boa.env.prank(admin):
