@@ -140,6 +140,7 @@ if __name__ == '__main__':
         yb.set_minter(gc.address, True)
         # admin is STILL a minter
         gc.add_gauge(market.staker)
+        yb.start_emissions()
 
     t1 = boa.env.evm.patch.timestamp
 
