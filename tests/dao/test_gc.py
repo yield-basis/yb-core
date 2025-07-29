@@ -369,7 +369,7 @@ def test_emit_expected_emissions(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.add_gauge(gauge_id=4)  # 0
     state.add_gauge(gauge_id=1)
     state.time_travel(dt=991258)
-    state.set_adjustment(adj=10**18, gauge_id=0)  # matters!!
+    fake_gauges[0].set_adjustment(10**18)
     state.add_gauge(gauge_id=3)
     state.add_gauge(gauge_id=0)  # 3
     state.create_lock(amount=2_425_115_004_361_743_762, lock_duration=112685815, uid=0)
