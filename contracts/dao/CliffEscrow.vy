@@ -20,6 +20,12 @@ interface GaugeController:
     def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]): nonpayable
 
 
+event TokenRecovered:
+    token: indexed(address)
+    to: address
+    amount: uint256
+
+
 GC: public(immutable(GaugeController))
 YB: public(immutable(IERC20))
 VE: public(immutable(VotingEscrow))
@@ -128,3 +134,5 @@ def recover_token(token: IERC20, to: address, amount: uint256):
     self._access()
     assert token != YB, "Cannot recover YB"
     assert extcall token.transfer(to, amount, default_return_value=True)
+    log TokenRecovered(token=token.address, to=to, amount=amount)
+
