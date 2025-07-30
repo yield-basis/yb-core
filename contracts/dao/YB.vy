@@ -38,8 +38,7 @@ def __init__(reserve: uint256, max_rate: uint256):
     # The setup includes:
     # * Minting preallocations
     # * set_minter(GaugeController, True)
-    # * set_minter(deployer, False)
-    # * renounce_ownership(deployer)
+    # * renounce_ownership(deployer) - will also unset the minter
 
     self.reserve = reserve
     max_mint_rate = max_rate * 10**18 // reserve
