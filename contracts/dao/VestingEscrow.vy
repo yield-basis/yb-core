@@ -134,13 +134,13 @@ def toggle_disable(_recipient: address):
     ownable._check_owner()
     assert self.can_disable, "Cannot disable"
 
-    is_disabled: bool = self.disabled_at[_recipient] == 0
-    if is_disabled:
+    is_enabled: bool = self.disabled_at[_recipient] == 0
+    if is_enabled:
         self.disabled_at[_recipient] = block.timestamp
     else:
         self.disabled_at[_recipient] = 0
 
-    log ToggleDisable(recipient=_recipient, disabled=is_disabled)
+    log ToggleDisable(recipient=_recipient, disabled=is_enabled)
 
 
 @external
