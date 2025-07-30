@@ -39,6 +39,7 @@ interface VotingEscrow:
     def get_last_user_slope(addr: address) -> int256: view
     def get_last_user_point(addr: address) -> Point: view
     def locked__end(addr: address) -> uint256: view
+    def transfer_clearance_checker() -> address: view
 
 interface Gauge:
     def get_adjustment() -> uint256: view
@@ -207,6 +208,9 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
     @param _gauge_addrs Gauges which `msg.sender` votes for
     @param _user_weights Weights for a gauge in bps (units of 0.01%). Minimal is 0.01%. Ignored if 0
     """
+    # Check if transfer_clearance_checker is set to GC
+    assert staticcall VOTING_ESCROW.transfer_clearance_checker() == self, "Vote checker not set"
+
     n: uint256 = len(_gauge_addrs)
     assert len(_user_weights) == n, "Mismatch in lengths"
     pt: Point = staticcall VOTING_ESCROW.get_last_user_point(msg.sender)
