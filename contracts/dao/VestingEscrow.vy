@@ -154,7 +154,7 @@ def disable_can_disable():
 
 @internal
 @view
-def _total_vested_of(_recipient: address, _time: uint256 = block.timestamp) -> uint256:
+def _total_vested_of(_recipient: address, _time: uint256) -> uint256:
     locked: uint256 = self.initial_locked[_recipient]
     if _time < START_TIME:
         return 0
@@ -197,7 +197,10 @@ def vestedOf(_recipient: address) -> uint256:
     @notice Get the number of tokens which have vested for a given address
     @param _recipient address to check
     """
-    return self._total_vested_of(_recipient)
+    t: uint256 = self.disabled_at[_recipient]
+    if t == 0:
+        t = block.timestamp
+    return self._total_vested_of(_recipient, t)
 
 
 @external
@@ -207,7 +210,10 @@ def balanceOf(_recipient: address) -> uint256:
     @notice Get the number of unclaimed, vested tokens for a given address
     @param _recipient address to check
     """
-    return self._total_vested_of(_recipient) - self.total_claimed[_recipient]
+    t: uint256 = self.disabled_at[_recipient]
+    if t == 0:
+        t = block.timestamp
+    return self._total_vested_of(_recipient, t) - self.total_claimed[_recipient]
 
 
 @external
@@ -217,7 +223,10 @@ def lockedOf(_recipient: address) -> uint256:
     @notice Get the number of locked tokens for a given address
     @param _recipient address to check
     """
-    return self.initial_locked[_recipient] - self._total_vested_of(_recipient)
+    t: uint256 = self.disabled_at[_recipient]
+    if t == 0:
+        t = block.timestamp
+    return self.initial_locked[_recipient] - self._total_vested_of(_recipient, t)
 
 
 @external
