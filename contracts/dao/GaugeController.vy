@@ -246,7 +246,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         )
         new_bias: uint256 = 0
         if lock_end == max_value(uint256):
-            new_bias = bias
+            new_bias = bias * _user_weight // 10000
         else:
             new_bias = new_slope.slope * (lock_end - block.timestamp)  # dev: raises when expired
         new_slope.bias = new_bias
