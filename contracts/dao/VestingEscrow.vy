@@ -23,6 +23,11 @@ event Fund:
     recipient: indexed(address)
     amount: uint256
 
+event Defund:
+    recipient: indexed(address)
+    refund_recipient: address
+    amount: uint256
+
 event Claim:
     recipient: indexed(address)
     claimed: uint256
@@ -141,6 +146,24 @@ def toggle_disable(_recipient: address):
         self.disabled_at[_recipient] = 0
 
     log ToggleDisable(recipient=_recipient, disabled=is_enabled)
+
+
+@external
+def rug_disabled(_recipient: address, _to: address):
+    """
+    @notice Reclaim tokens from a disabled account
+    """
+    ownable._check_owner()
+    disabled_at: uint256 = self.disabled_at[_recipient]
+    assert disabled_at != 0, "Not disabled"
+
+    locked: uint256 = self.initial_locked[_recipient]
+    remainder: uint256 = locked - self.total_claimed[_recipient]
+    if remainder > 0:
+        assert extcall TOKEN.transfer(_to, remainder, default_return_value=True)
+        self.initial_locked[_recipient] = locked - remainder
+        # If the recipient is unkilled - now his claim will revert
+        log Defund(recipient=_recipient, refund_recipient=_to, amount=remainder)
 
 
 @external
