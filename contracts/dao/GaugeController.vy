@@ -219,6 +219,8 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
     lock_end: uint256 = staticcall VOTING_ESCROW.locked__end(msg.sender)
     assert lock_end > block.timestamp, "Expired"
 
+    power_used: uint256 = self.vote_user_power[msg.sender]
+
     for i: uint256 in range(50):
         if i >= n:
             break
@@ -251,11 +253,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
             new_bias = new_slope.slope * (lock_end - block.timestamp)  # dev: raises when expired
         new_slope.bias = new_bias
 
-        # Check and update powers (weights) used
-        power_used: uint256 = self.vote_user_power[msg.sender]
         power_used = power_used + new_slope.power - old_slope.power
-        assert power_used <= 10000, 'Used too much power'
-        self.vote_user_power[msg.sender] = power_used
 
         pt = self._checkpoint_gauge(_gauge_addr)  # Contains old_weight_bias and old_weight_slope
 
@@ -282,6 +280,10 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
         self.last_user_vote[msg.sender][_gauge_addr] = block.timestamp
 
         log VoteForGauge(time=block.timestamp, user=msg.sender, gauge_addr=_gauge_addr, weight=_user_weight)
+
+    # Check and update powers (weights) used
+    assert power_used <= 10000, 'Used too much power'
+    self.vote_user_power[msg.sender] = power_used
 
 
 @external
