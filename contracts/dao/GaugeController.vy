@@ -61,6 +61,7 @@ event NewGauge:
 
 event SetKilled:
     gauge: address
+    is_killed: bool
 
 
 TOKEN: public(immutable(GovernanceToken))
@@ -363,4 +364,4 @@ def set_killed(gauge: address, is_killed: bool):
     ownable._check_owner()
     assert self.time_weight[gauge] > 0, "Gauge not added"
     self.is_killed[gauge] = is_killed
-    log SetKilled(gauge=gauge)
+    log SetKilled(gauge=gauge, is_killed=is_killed)
