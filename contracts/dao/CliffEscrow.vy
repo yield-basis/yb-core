@@ -44,6 +44,7 @@ def __init__(token: IERC20, ve: VotingEscrow, gc: GaugeController):
 
 @external
 def initialize(recipient: address, unlock_time: uint256) -> bool:
+    assert recipient != empty(address), "Empty recipient"
     assert self.recipient == empty(address), "Already initialized"
     assert unlock_time > block.timestamp
     self.recipient = recipient
