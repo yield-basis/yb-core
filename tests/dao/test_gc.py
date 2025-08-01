@@ -219,7 +219,11 @@ class StatefulVE(RuleBasedStateMachine):
     def kill_toggle(self, gauge_id):
         gauge = self.fake_gauges[gauge_id]
         with boa.env.prank(self.admin):
-            self.gc.set_killed(gauge.address, not self.gc.is_killed(gauge.address))
+            if gauge in self.added_gauges:
+                self.gc.set_killed(gauge.address, not self.gc.is_killed(gauge.address))
+            else:
+                with boa.reverts("Gauge not added"):
+                    self.gc.set_killed(gauge.address, not self.gc.is_killed(gauge.address))
 
     @rule(dt=dt)
     def time_travel(self, dt):
