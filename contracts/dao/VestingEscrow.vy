@@ -114,6 +114,7 @@ def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100], 
         recipient: address = _recipients[i]
 
         if cliff_time > block.timestamp:
+            assert self.recipient_to_cliff[recipient] == empty(CliffEscrow)
             cliff_escrow: CliffEscrow = CliffEscrow(create_minimal_proxy_to(CLIFF_ESCROW))
             extcall cliff_escrow.initialize(recipient, cliff_time)
             self.recipient_to_cliff[recipient] = cliff_escrow
