@@ -6,4 +6,5 @@ __pycache__
 *.pyc
 /.venv
 /scripts/keys.py
+/scripts/networks.py
 /abi
