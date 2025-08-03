@@ -157,6 +157,13 @@ def delegates(account: address) -> address:
     return account
 
 
+@external
+@view
+def decimals() -> uint8:
+    # Compatibility method: it's actually an NFT, so decimals make no sense
+    return 18
+
+
 @internal
 def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBalance):
     """
