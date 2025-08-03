@@ -150,6 +150,13 @@ def supportsInterface(interface_id: bytes4) -> bool:
     return interface_id in _SUPPORTED_INTERFACES
 
 
+@external
+@view
+def delegates(account: address) -> address:
+    # Compatibility method: delegations are not actually supported
+    return account
+
+
 @internal
 def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBalance):
     """
