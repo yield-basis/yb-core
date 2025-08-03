@@ -45,7 +45,6 @@ exports: (
     erc721.tokenByIndex,
     erc721.tokenOfOwnerByIndex,
     erc721.tokenURI,
-    erc721.supportsInterface,
     ownable.transfer_ownership,
     ownable.owner
 )
@@ -116,7 +115,16 @@ user_point_epoch: public(HashMap[address, uint256])
 slope_changes: public(HashMap[uint256, int256])  # time -> signed slope change
 
 transfer_clearance_checker: public(TransferClearanceChecker)
-###
+
+
+_SUPPORTED_INTERFACES: constant(bytes4[6]) = [
+    0x01FFC9A7, # The ERC-165 identifier for ERC-165.
+    0x80AC58CD, # The ERC-165 identifier for ERC-721.
+    0x5B5E139F, # The ERC-165 identifier for the ERC-721 metadata extension.
+    0x780E9D63, # The ERC-165 identifier for the ERC-721 enumeration extension.
+    0x49064906, # The ERC-165 identifier for ERC-4906.
+    0xE90FB3F6  # IVotes
+]
 
 
 @deploy
@@ -127,6 +135,19 @@ def __init__(token: IERC20, name: String[25], symbol: String[5], base_uri: Strin
     TOKEN = token
 
     self.point_history[0].ts = block.timestamp
+
+
+@external
+@view
+def supportsInterface(interface_id: bytes4) -> bool:
+    """
+    @dev Returns `True` if this contract implements the
+         interface defined by `interface_id`.
+    @param interface_id The 4-byte interface identifier.
+    @return bool The verification whether the contract
+            implements the interface or not.
+    """
+    return interface_id in _SUPPORTED_INTERFACES
 
 
 @internal
