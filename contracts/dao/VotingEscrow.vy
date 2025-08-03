@@ -116,7 +116,6 @@ slope_changes: public(HashMap[uint256, int256])  # time -> signed slope change
 
 transfer_clearance_checker: public(TransferClearanceChecker)
 
-
 _SUPPORTED_INTERFACES: constant(bytes4[6]) = [
     0x01FFC9A7, # The ERC-165 identifier for ERC-165.
     0x80AC58CD, # The ERC-165 identifier for ERC-721.
@@ -148,20 +147,6 @@ def supportsInterface(interface_id: bytes4) -> bool:
             implements the interface or not.
     """
     return interface_id in _SUPPORTED_INTERFACES
-
-
-@external
-@view
-def delegates(account: address) -> address:
-    # Compatibility method: delegations are not actually supported
-    return account
-
-
-@external
-@view
-def decimals() -> uint8:
-    # Compatibility method: it's actually an NFT, so decimals make no sense
-    return 18
 
 
 @internal
@@ -458,6 +443,10 @@ def getPastVotes(account: address, timepoint: uint256) -> uint256:
     # Binary search
     _min: uint256 = 0
     _max: uint256 = self.user_point_epoch[account]
+
+    if timepoint < self.user_point_history[account][0].ts:
+        return 0
+
     for i: uint256 in range(128):  # Will be always enough for 128-bit numbers
         if _min >= _max:
             break
@@ -483,6 +472,9 @@ def total_supply_at(timepoint: uint256) -> uint256:
     if _epoch == 0:
         return 0
     else:
+        if timepoint < self.point_history[0].ts:
+            return 0
+
         # Past total supply binary search
         _min: uint256 = 0
         for i: uint256 in range(128):  # Will be always enough for 128-bit numbers
