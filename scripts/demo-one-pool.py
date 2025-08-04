@@ -64,6 +64,7 @@ if __name__ == '__main__':
         yb = boa.load('contracts/dao/YB.vy', RESERVE, RATE)
         ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'Yield Basis', 'YB', '')
         gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
+        ve_yb.set_transfer_clearance_checker(gc.address)
 
         amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
@@ -96,6 +97,7 @@ if __name__ == '__main__':
                 100_000 * 10**18            # initial_price: uint256  XXX
             ))
         pool.set_admin_fee(0)
+        pool.set_views(views_impl)
 
         amm_interface = boa.load_partial('contracts/AMM.vy')
         yb_amm_impl = amm_interface.deploy_as_blueprint()
