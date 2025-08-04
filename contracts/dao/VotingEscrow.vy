@@ -125,6 +125,8 @@ _SUPPORTED_INTERFACES: constant(bytes4[6]) = [
     0xE90FB3F6  # IVotes
 ]
 
+CLOCK_MODE: public(constant(String[14])) = "mode=timestamp"
+
 
 @deploy
 def __init__(token: IERC20, name: String[25], symbol: String[5], base_uri: String[80]):
@@ -147,6 +149,15 @@ def supportsInterface(interface_id: bytes4) -> bool:
             implements the interface or not.
     """
     return interface_id in _SUPPORTED_INTERFACES
+
+
+@external
+@view
+def clock() -> uint48:
+    """
+    EIP-6372 clock
+    """
+    return convert(block.timestamp, uint48)
 
 
 @internal
