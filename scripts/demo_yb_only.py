@@ -38,6 +38,8 @@ if __name__ == '__main__':
     verify(yb, arbiscan, wait=False)
     ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'Yield Basis', 'YB', '')
     verify(ve_yb, arbiscan, wait=False)
+    vpc = boa.load('contracts/dao/VotingPowerCondition.vy', ve_yb.address, 2_500 * 10**18)
+    verify(vpc, arbiscan, wait=False)
 
     print(f"YB:      {yb.address}")
     print(f"veYB:    {ve_yb.address}")
