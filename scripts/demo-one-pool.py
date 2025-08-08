@@ -106,6 +106,7 @@ if __name__ == '__main__':
         vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
         oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
         gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
+        stake_zap = boa.load('contracts/dao/StakeZap.vy')
         # agg
         # flash
         fee_receiver = "0x0000000000000000000000000000000000000000"
@@ -160,6 +161,7 @@ if __name__ == '__main__':
     print(f"YB:      {yb.address}")
     print(f"veYB:    {ve_yb.address}")
     print(f"GaugeController:    {gc.address}")
+    print(f"StakeZap: {stake_zap.address}")
 
     yb_amm = amm_interface.at(market.amm)
     yb_lt = lt_interface.at(market.lt)
@@ -185,6 +187,8 @@ if __name__ == '__main__':
     with open('abi/gc.json', 'w') as f:
         json.dump(gc.abi, f)
 
+    with open('abi/stake_zap.json', 'w') as f:
+        json.dump(stake_zap.abi, f)
     if '--deposit' in sys.argv[1:]:
         print('Simulating deposit')
         btc.approve(yb_lt.address, 2**256-1)
