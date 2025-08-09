@@ -54,6 +54,9 @@ unallocated_supply: public(uint256)
 
 can_disable: public(bool)
 disabled_at: public(HashMap[address, uint256])
+disabled_amounts: public(HashMap[address, uint256])
+disabled_total: public(uint256)
+disabled_rugged: public(HashMap[address, bool])
 
 
 @deploy
@@ -139,12 +142,19 @@ def toggle_disable(_recipient: address):
     """
     ownable._check_owner()
     assert self.can_disable, "Cannot disable"
+    assert not self.disabled_rugged[_recipient], "Rugged"
 
     is_enabled: bool = self.disabled_at[_recipient] == 0
     if is_enabled:
         self.disabled_at[_recipient] = block.timestamp
+        disabled_amount: uint256 = self.initial_locked[_recipient] - self._total_vested_of(_recipient, block.timestamp)
+        self.disabled_amounts[_recipient] = disabled_amount
+        self.disabled_total += disabled_amount
+
     else:
         self.disabled_at[_recipient] = 0
+        self.disabled_total -= self.disabled_amounts[_recipient]
+        self.disabled_amounts[_recipient] = 0
 
     log ToggleDisable(recipient=_recipient, disabled=is_enabled)
 
@@ -157,13 +167,12 @@ def rug_disabled(_recipient: address, _to: address):
     ownable._check_owner()
     disabled_at: uint256 = self.disabled_at[_recipient]
     assert disabled_at != 0, "Not disabled"
+    assert not self.disabled_rugged[_recipient], "Rugged"
 
-    locked: uint256 = self.initial_locked[_recipient]
-    remainder: uint256 = locked - self.total_claimed[_recipient]
+    remainder: uint256 = self.disabled_amounts[_recipient]
     if remainder > 0:
         assert extcall TOKEN.transfer(_to, remainder, default_return_value=True)
-        self.initial_locked[_recipient] = locked - remainder
-        # If the recipient is unkilled - now his claim will revert
+        self.disabled_rugged[_recipient] = True
         log Defund(recipient=_recipient, refund_recipient=_to, amount=remainder)
 
 
@@ -200,6 +209,8 @@ def vestedSupply() -> uint256:
     """
     @notice Get the total number of tokens which have vested, that are held
             by this contract
+    @dev    This method will not work correctly with "rugged" tokens (e.g.
+            disabled and claimed back by the owner
     """
     return self._total_vested()
 
@@ -210,6 +221,8 @@ def lockedSupply() -> uint256:
     """
     @notice Get the total number of tokens which are still locked
             (have not yet vested)
+    @dev    This method will not work correctly with "rugged" tokens (e.g.
+            disabled and claimed back by the owner
     """
     return self.initial_locked_supply - self._total_vested()
 
