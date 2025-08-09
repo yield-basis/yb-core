@@ -15,34 +15,34 @@ interface YBToken:
     def transfer(_to: address, _amount: uint256) -> bool: nonpayable
 
 event NewRecepient:
-    recepient: address
-    old_recepient: address
+    recipient: address
+    old_recipient: address
 
 event Start:
     timestamp: uint256
     amount: uint256
 
 event Claim:
-    recepient: address
+    recipient: address
     claimed: uint256
 
 
 owner: public(immutable(address))
 YB: public(immutable(YBToken))
 INITIAL_YB_RESERVE: public(immutable(uint256))
-recepient: public(address)
+recipient: public(address)
 claimed: public(uint256)
 
 initial_vest_reserve: public(uint256)
 
 
 @deploy
-def __init__(yb: YBToken, recepient: address, admin: address):
+def __init__(yb: YBToken, recipient: address, admin: address):
     assert admin != empty(address)
     owner = admin
     YB = yb
     INITIAL_YB_RESERVE = staticcall YB.reserve()
-    self.recepient = recepient
+    self.recipient = recipient
 
 
 @external
@@ -55,10 +55,10 @@ def start():
 
 
 @external
-def set_recepient(new_recepient: address):
+def set_recipient(new_recipient: address):
     assert msg.sender == owner, "Admin required"
-    log NewRecepient(recepient=new_recepient, old_recepient=self.recepient)
-    self.recepient = new_recepient
+    log NewRecepient(recipient=new_recipient, old_recipient=self.recipient)
+    self.recipient = new_recipient
 
 
 @internal
@@ -78,7 +78,7 @@ def claimable() -> uint256:
 @external
 def claim() -> uint256:
     claimable: uint256 = self._claimable()
-    recepient: address = self.recepient
-    extcall YB.transfer(recepient, claimable)
-    log Claim(recepient=recepient, claimed=claimable)
+    recipient: address = self.recipient
+    extcall YB.transfer(recipient, claimable)
+    log Claim(recipient=recipient, claimed=claimable)
     return claimable
