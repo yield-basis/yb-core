@@ -28,6 +28,10 @@ from ethereum.ercs import IERC721
 from snekmate.auth import ownable
 from snekmate.tokens import erc721
 
+from interfaces import IVotes
+
+
+implements: IVotes
 
 initializes: ownable
 initializes: erc721[ownable := ownable]
@@ -149,6 +153,31 @@ def supportsInterface(interface_id: bytes4) -> bool:
             implements the interface or not.
     """
     return interface_id in _SUPPORTED_INTERFACES
+
+
+@external
+@view
+def delegates(account: address) -> address:
+    """
+    @dev Returns the delegate that `account` has chosen (it's a stub because this value cannot be changed)
+    """
+    return account
+
+
+@external
+def delegate(delegatee: address):
+    """
+    @dev Delegates votes from the sender to `delegatee`. This reverts because functionality is not supported
+    """
+    raise "Not supported"
+
+
+@external
+def delegateBySig(delegatee: address, nonce: uint256, expiry: uint256, v: uint8, r: bytes32, s: bytes32):
+    """
+    @dev Delegates votes from signer to `delegatee`. This reverts because functionality is not supported
+    """
+    raise "Not supported"
 
 
 @external
