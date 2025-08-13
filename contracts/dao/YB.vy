@@ -2,7 +2,7 @@
 """
 @title YBToken
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 @notice YB Token
 """
 

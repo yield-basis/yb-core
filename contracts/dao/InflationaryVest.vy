@@ -2,7 +2,7 @@
 """
 @title InflationaryVest
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 @notice Vests YB token for one address which can be changed by governance (admin),
         proportional to inflation.
 """

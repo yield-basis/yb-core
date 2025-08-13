@@ -2,7 +2,7 @@
 """
 @title Voting Escrow
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 @notice Votes have a weight depending on time, so that users are
         committed to the future of (whatever they are voting for)
 @dev Vote weight decays linearly over time. Lock time cannot be

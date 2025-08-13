@@ -2,7 +2,7 @@
 """
 @title StakeZap
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 """
 from ethereum.ercs import IERC20
 

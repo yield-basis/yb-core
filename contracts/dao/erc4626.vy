@@ -3,7 +3,7 @@
 """
 @title ERC4626
 @author Yield Basis
-@license GNU Affero General Public License v3.0 only
+@license GNU Affero General Public License v3.0
 @notice Library implementing ERC4626 standard derived from snekmate implenmentation.
         Unlike snekmate, however, it does not use offset and instead has a limit on minimal deposit allowed
 """

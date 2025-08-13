@@ -2,7 +2,8 @@
 """
 @title Liquidity Gauge
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
+@notice Liquidity Gauge to measure who deposited LP tokens for how long
 """
 from ethereum.ercs import IERC20
 from snekmate.utils import math

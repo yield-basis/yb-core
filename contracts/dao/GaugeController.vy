@@ -2,7 +2,7 @@
 """
 @title Gauge Controller
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 @notice Controls liquidity gauges and the issuance of coins through the gauges
 """
 from snekmate.auth import ownable

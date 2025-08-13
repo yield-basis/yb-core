@@ -2,7 +2,7 @@
 """
 @title Vesting Escrow
 @author Yield Basis
-@license MIT
+@license GNU Affero General Public License v3.0
 @notice Vests `ERC20` tokens for multiple addresses over multiple vesting periods
 """
 from ethereum.ercs import IERC20
