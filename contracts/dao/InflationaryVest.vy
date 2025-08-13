@@ -9,6 +9,13 @@
 from snekmate.auth import ownable
 
 
+initializes: ownable
+
+exports: (
+    ownable.transfer_ownership,
+    ownable.owner
+)
+
 interface YBToken:
     def reserve() -> uint256: view
     def balanceOf(user: address) -> uint256: view
@@ -27,7 +34,6 @@ event Claim:
     claimed: uint256
 
 
-owner: public(immutable(address))
 YB: public(immutable(YBToken))
 INITIAL_YB_RESERVE: public(immutable(uint256))
 recipient: public(address)
@@ -39,7 +45,8 @@ initial_vest_reserve: public(uint256)
 @deploy
 def __init__(yb: YBToken, recipient: address, admin: address):
     assert admin != empty(address)
-    owner = admin
+    ownable.__init__()
+    ownable.owner = admin
     YB = yb
     INITIAL_YB_RESERVE = staticcall YB.reserve()
     self.recipient = recipient
@@ -47,7 +54,7 @@ def __init__(yb: YBToken, recipient: address, admin: address):
 
 @external
 def start():
-    assert msg.sender == owner, "Admin required"
+    assert msg.sender == ownable.owner, "Admin required"
     assert self.initial_vest_reserve == 0, "Already started"
     vest_reserve: uint256 = staticcall YB.balanceOf(self)
     self.initial_vest_reserve = vest_reserve
@@ -56,7 +63,7 @@ def start():
 
 @external
 def set_recipient(new_recipient: address):
-    assert msg.sender == owner, "Admin required"
+    assert msg.sender == ownable.owner, "Admin required"
     log NewRecepient(recipient=new_recipient, old_recipient=self.recipient)
     self.recipient = new_recipient
 
