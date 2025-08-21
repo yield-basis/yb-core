@@ -1,0 +1,27 @@
+"For now, this is just an example file (actual distributions are different)"
+"String not starting with a number is a comment"
+
+Type, Address, Amount, Comment (who)
+
+Types:
+0 - inflation
+1 - 2 year vest with 6 months cliff
+2 - no vest and no cliff
+3 - inflationary vest
+
+Inflation for ybToken LPs
+0, 0x0000000000000000000000000000000000000000, 300000000, "Inflation which LPs are farming"
+
+Curve allocation
+3, 0x40907540d8a6c65c637785e8f8b742ae6b0b9968, 75000000, "Curve inflationary allocation (to veCRV DAO)"
+
+Allocation to farm YB/crvUSD pair
+3, 0x9fC3dc011b461664c835F2527fffb1169b3C213e, 1250000, "YB token DEX farm (NO this is not the actual address)"
+
+
+Insiders
+1, 0x7a16fF8270133F063aAb6C9977183D9e72835428, 1000000, "Michael Egorov"
+1, 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045, 1000001, "Vitalik Buterin (warning: that's a joke, not alpha)"
+
+Unlocked allocations (for testing now)
+2, 0x94845333028B1204Fbe14E1278Fd4Adde46B22ce, 1000000, "Don't even think to check who that is"
