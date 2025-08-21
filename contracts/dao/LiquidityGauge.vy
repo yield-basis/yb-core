@@ -38,7 +38,6 @@ exports: (
 
 
 interface GaugeController:
-    def is_killed(gauge: address) -> bool: view
     def emit() -> uint256: nonpayable
     def preview_emissions(gauge: address, at_time: uint256) -> uint256: view
     def TOKEN() -> IERC20: view
@@ -46,9 +45,13 @@ interface GaugeController:
 interface Factory:
     def gauge_controller() -> GaugeController: view
     def admin() -> address: view
+    def emergency_admin() -> address: view
 
 interface IERC20Slice:
     def symbol() -> String[29]: view
+
+interface LT:
+    def is_killed() -> bool: view
 
 
 event AddReward:
@@ -89,6 +92,7 @@ MIN_SHARES_DECIMALS: constant(uint8) = 12
 GC: public(immutable(GaugeController))
 YB: public(immutable(IERC20))
 LP_TOKEN: public(immutable(IERC20))
+FACTORY: public(immutable(Factory))
 
 
 reward_count: public(uint256)
@@ -112,6 +116,7 @@ def __init__(lp_token: IERC20):
     LP_TOKEN = lp_token
     GC = staticcall Factory(msg.sender).gauge_controller()
     YB = staticcall GC.TOKEN()
+    FACTORY = Factory(msg.sender)
     erc4626.ownable.owner = staticcall Factory(msg.sender).admin()
     self.rewards[YB].distributor = GC.address
     self.reward_tokens[0] = YB
@@ -347,9 +352,18 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 @nonreentrant
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
+
+    # Handle killing so that eadmin can withdraw anyone's shares to their own wallet
+    sender: address = msg.sender
+    if staticcall LT(LP_TOKEN.address).is_killed():
+        if msg.sender == staticcall FACTORY.emergency_admin():
+            # Only emergency admin is allowed to withdraw for others, but then only transfer to themselves
+            assert receiver == owner, "receiver"
+            sender = owner  # Tell _withdraw() to bypass checks who can do it
+
     assets: uint256 = erc4626._preview_redeem(shares)
     self._checkpoint_user(owner)
-    erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
+    erc4626._withdraw(sender, receiver, owner, assets, shares)
     erc4626._check_min_shares()
     extcall GC.emit()
     return assets

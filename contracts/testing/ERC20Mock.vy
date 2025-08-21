@@ -20,6 +20,8 @@ balanceOf: public(HashMap[address, uint256])
 allowances: HashMap[address, HashMap[address, uint256]]
 total_supply: uint256
 
+is_killed: public(constant(bool)) = False
+
 
 @deploy
 def __init__(_name: String[64], _symbol: String[32], _decimals: uint256):

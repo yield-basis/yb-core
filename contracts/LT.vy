@@ -606,7 +606,7 @@ def preview_emergency_withdraw(shares: uint256) -> (uint256, int256):
 
 @external
 @nonreentrant
-def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint256, int256):
+def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: address = msg.sender) -> (uint256, int256):
     """
     @notice Method to repay the debt from the wallet and withdraw what is in the AMM. Does not use heavy math but
             does not necessarily work as single asset withdrawal. Minimal output is not specified: convexity of
@@ -616,7 +616,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     @return (unsigned asset, signed stables). If stables < 0 - we need to bring them
     """
     staker: address = self.staker
-    assert staker not in [msg.sender, receiver], "Withdraw to/from staker"
+    assert staker not in [owner, receiver], "Withdraw to/from staker"
 
     supply: uint256 = 0
     lv: LiquidityValuesOut = empty(LiquidityValuesOut)
@@ -624,8 +624,29 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     killed: bool = staticcall amm.is_killed()
 
     if killed:
+        # If killed:
+        admin: address = self.admin
+        if admin.is_contract:
+            if msg.sender == staticcall Factory(admin).emergency_admin():
+                # Only emergency admin is allowed to withdraw for others, but then only transfer to themselves
+                assert receiver == owner, "receiver"
+            else:
+                # If sender is a different smart contract - it must be the owner
+                assert owner == msg.sender, "owner"
+        else:
+            if msg.sender == admin:
+                # If admin is EOA - it can withdraw for receivers when killed, but only send to themselves
+                assert receiver == owner, "receiver"
+            else:
+                # If EOA caller is not admin - it must be the owner
+                assert owner == msg.sender, "owner"
+
         supply = self.totalSupply
+
     else:
+        # If not killed - only owner is allowed to work with their LP
+        assert owner == msg.sender, "Not killed"
+
         lv = self._calculate_values(self._price_oracle_w())
         supply = lv.supply_tokens
         self.liquidity.admin = lv.admin
@@ -648,7 +669,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender) -> (uint
     withdrawn_cswap: uint256[2] = extcall CRYPTOPOOL.remove_liquidity(withdrawn_levamm.collateral, [0, 0])
     stables_to_return: int256 = convert(withdrawn_cswap[0], int256) - convert(withdrawn_levamm.debt, int256)
 
-    self._burn(msg.sender, shares)
+    self._burn(owner, shares)
 
     self.liquidity.total = self.liquidity.total * (supply - shares) // supply
     if self.liquidity.admin < 0 or killed:
@@ -963,3 +984,9 @@ def approve(_spender: address, _value: uint256) -> bool:
     """
     self._approve(msg.sender, _spender, _value)
     return True
+
+
+@external
+@view
+def is_killed() -> bool:
+    return staticcall self.amm.is_killed()
