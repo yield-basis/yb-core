@@ -105,9 +105,14 @@ if __name__ == '__main__':
     for address, amount, comment in vests[2]:
         yb.mint(address, int(amount * 10**18))
 
-    # Inflation-like vest(s) (3)
-
     print(f"YB:      {yb.address}")
     print(f"veYB:    {ve_yb.address}")
     print(f"GC:      {gc.address}")
     print(f"CE:      {cliff_impl.address}")
+
+    # Inflation-like vest(s) (3)
+    for address, amount, comment in vests[3]:
+        ivest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, address, admin)
+        yb.mint(ivest.address, int(amount * 10**18))
+        ivest.start()
+        print(f"IVest:   {ivest.address} for {address}")
