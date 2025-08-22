@@ -100,6 +100,13 @@ if __name__ == '__main__':
     vesting.add_tokens(total)
     vesting.fund(recipients, amounts, t0 + 365 * 86400 // 2)
 
+    # No vesting no cliff allocations (2)
+
+    for address, amount, comment in vests[2]:
+        yb.mint(address, int(amount * 10**18))
+
+    # Inflation-like vest(s) (3)
+
     print(f"YB:      {yb.address}")
     print(f"veYB:    {ve_yb.address}")
     print(f"GC:      {gc.address}")
