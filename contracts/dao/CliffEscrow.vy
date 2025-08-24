@@ -112,6 +112,7 @@ def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: D
 @external
 @nonreentrant
 def aragon_vote(dao: AragonDAO, proposal_id: uint256, vote_option: uint8, early_execution: bool):
+    self._access()
     extcall dao.vote(proposal_id, vote_option, early_execution)
 
 
