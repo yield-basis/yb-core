@@ -19,6 +19,9 @@ interface VotingEscrow:
 interface GaugeController:
     def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]): nonpayable
 
+interface AragonDAO:
+    def vote(_proposalId: uint256, _voteOption: uint8, _tryEarlyExecution: bool): nonpayable
+
 
 event TokenRecovered:
     token: indexed(address)
@@ -104,6 +107,12 @@ def transferFrom(owner: address, to: address, token_id: uint256):
 def vote_for_gauge_weights(_gauge_addrs: DynArray[address, 50], _user_weights: DynArray[uint256, 50]):
     self._access()
     extcall GC.vote_for_gauge_weights(_gauge_addrs, _user_weights)
+
+
+@external
+@nonreentrant
+def aragon_vote(dao: AragonDAO, proposal_id: uint256, vote_option: uint8, early_execution: bool):
+    extcall dao.vote(proposal_id, vote_option, early_execution)
 
 
 @external
