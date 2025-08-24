@@ -4,21 +4,24 @@
 
 import boa
 import json
+import requests
 import os
 import csv
 from time import time
 from boa.explorer import Etherscan
 from boa.verifiers import verify
+from collections import namedtuple
 from eth_account import account
 from getpass import getpass
 from collections import defaultdict
 
-from networks import ARBITRUM as NETWORK
-from networks import ARBISCAN_API_KEY as ETHERSCAN_API_KEY
+from networks import NETWORK
+from networks import ETHERSCAN_API_KEY
+from networks import PINATA_TOKEN
 
 
 FORK = True
-ETHERSCAN_URL = "https://api.arbiscan.io/api"
+ETHERSCAN_URL = "https://api.etherscan.io/api"
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -31,6 +34,47 @@ VEST_TYPES = {
 }
 
 vests = defaultdict(list)
+
+
+VotingSettings = namedtuple('VotingSettings', ['votingMode', 'supportThreshold', 'minParticipation', 'minDuration',
+                                               'minProposerVotingPower'])
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+DAO_SUBDOMAIN = ""  # ?
+DAO_URI = ""  # ?
+VOTE_SETTINGS = VotingSettings(
+    votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
+    supportThreshold=int(0.55e6),   # 1e6 base
+    minParticipation=int(0.3e6),    # 1e6 base
+    minDuration=7 * 86400,          # s
+    minProposerVotingPower=1        # with NFTs 1 = has position, 0 = has no position
+)
+TARGET_CONFIG = (ZERO_ADDRESS, 0)  # ??
+MIN_APPROVALS = 1  # ?
+EXCLUDED_ACCOUNTS = []
+DAO_DESCRIPTION = {
+    'name': 'Test YB DAO',
+    'description': '',
+    'links': []
+}
+PLUGIN_DESCRIPTION = {
+    'name': 'Yield Basis Proposal',
+    'description': 'Temporary voting plugin before the one with decay is applied',
+    'links': [],
+    'processKey': 'YBP'
+}
+
+TOKEN_VOTING_FACTORY = "0x348082AA6Ee298158a3e54b99A77dD8F0b884b94"
+DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
+
+
+TV_FACTORY_ABI = """
+[
+{"inputs":[{"components":[{"internalType":"string","name":"daoSubdomain","type":"string"},{"internalType":"bytes","name":"daoMetadata","type":"bytes"},{"internalType":"string","name":"daoURI","type":"string"},{"internalType":"address","name":"token","type":"address"},{"components":[{"internalType":"enum MajorityVotingBase.VotingMode","name":"votingMode","type":"uint8"},{"internalType":"uint32","name":"supportThreshold","type":"uint32"},{"internalType":"uint32","name":"minParticipation","type":"uint32"},{"internalType":"uint64","name":"minDuration","type":"uint64"},{"internalType":"uint256","name":"minProposerVotingPower","type":"uint256"}],"internalType":"struct MajorityVotingBase.VotingSettings","name":"votingSettings","type":"tuple"},{"components":[{"internalType":"address","name":"target","type":"address"},{"internalType":"enum IPlugin.Operation","name":"operation","type":"uint8"}],"internalType":"struct IPlugin.TargetConfig","name":"targetConfig","type":"tuple"},{"internalType":"uint256","name":"minApprovals","type":"uint256"},{"internalType":"bytes","name":"pluginMetadata","type":"bytes"},{"internalType":"address[]","name":"excludedAccounts","type":"address[]"}],"internalType":"struct TokenVotingFactory.DeploymentSettings","name":"settings","type":"tuple"}],"name":"deployDAOWithTokenVoting","outputs":[{"components":[{"internalType":"contract DAO","name":"dao","type":"address"},{"internalType":"contract TokenVoting","name":"plugin","type":"address"},{"internalType":"address","name":"token","type":"address"},{"internalType":"contract VotingPowerCondition","name":"condition","type":"address"}],"internalType":"struct TokenVotingFactory.Deployment","name":"deployment","type":"tuple"}],"stateMutability":"nonpayable","type":"function"},
+{"inputs":[{"internalType":"uint256","name":"_proposalId","type":"uint256"},{"internalType":"enum IMajorityVoting.VoteOption","name":"_voteOption","type":"uint8"},{"internalType":"bool","name":"_tryEarlyExecution","type":"bool"}],"name":"vote","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]
+"""
 
 
 def read_data():
@@ -50,6 +94,24 @@ def account_load(fname):
         return account.Account.from_key(pkey)
 
 
+def pin_to_ipfs(content: dict):
+    url = "https://api.pinata.cloud/pinning/pinJSONToIPFS"
+    headers = {
+        "Authorization": f"Bearer {PINATA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "pinataContent": content,
+        "pinataMetadata": {"name": "pinnie.json"},
+        "pinataOptions": {"cidVersion": 1},
+    }
+
+    response = requests.request("POST", url, json=payload, headers=headers)
+    assert 200 <= response.status_code < 400
+
+    return 'ipfs://' + response.json()["IpfsHash"]
+
+
 if __name__ == '__main__':
     for data_type, addr, amount, comment in read_data():
         vests[data_type].append((addr, amount, comment))
@@ -61,7 +123,7 @@ if __name__ == '__main__':
         etherscan = Etherscan(ETHERSCAN_URL, ETHERSCAN_API_KEY)
 
     if FORK:
-        admin = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
+        admin = DEPLOYER
         boa.env.eoa = admin
     else:
         admin = account_load('yb-deployer')
@@ -116,3 +178,19 @@ if __name__ == '__main__':
         yb.mint(ivest.address, int(amount * 10**18))
         ivest.start()
         print(f"IVest:   {ivest.address} for {address}")
+
+    # Aragon
+
+    factory = boa.loads_abi(TV_FACTORY_ABI, name="TVFactory").at(TOKEN_VOTING_FACTORY)
+    out = factory.deployDAOWithTokenVoting((
+        DAO_SUBDOMAIN,
+        pin_to_ipfs(DAO_DESCRIPTION).encode(),
+        DAO_URI,
+        ve_yb.address,
+        VOTE_SETTINGS,
+        TARGET_CONFIG,
+        MIN_APPROVALS,
+        pin_to_ipfs(PLUGIN_DESCRIPTION).encode(),
+        []
+    ))
+    print(out)
