@@ -26,6 +26,7 @@ FORK = True
 RATE = 1 / (4 * 365 * 86400)
 
 
+VESTING_SHIFT = 5 * 60  # s
 VEST_TYPES = {
         0: 'inflation itself',
         1: '2 year vest with 6 months cliff',
@@ -76,6 +77,8 @@ TV_FACTORY_ABI = """
 """
 
 ETHERSCAN_URL = "https://api.etherscan.io/api"
+
+EXTRA_TIMEOUT = 30
 
 
 def read_data():
@@ -132,32 +135,32 @@ if __name__ == '__main__':
 
     yb = boa.load('contracts/dao/YB.vy', int(vests[0][0][1] * 10**18), int(RATE * vests[0][0][1] * 10**18))
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(yb, etherscan, wait=False)
     ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'Yield Basis', 'YB', '')
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(ve_yb, etherscan, wait=False)
     vpc = boa.load('contracts/dao/VotingPowerCondition.vy', ve_yb.address, 2_500 * 10**18)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(vpc, etherscan, wait=False)
     gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(gc, etherscan, wait=False)
 
     # Vests with cliff (1)
 
     cliff_impl = boa.load('contracts/dao/CliffEscrow.vy', yb.address, ve_yb.address, gc.address)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(cliff_impl, etherscan, wait=False)
-    t0 = int(time())
-    t1 = t0 + 2 * 365 * 86400
+    t0 = int(time()) + VESTING_SHIFT
+    t1 = t0 + 2 * 365 * 86400 + VESTING_SHIFT
     vesting = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
         verify(vesting, etherscan, wait=False)
 
     recipients = [row[0] for row in vests[1]]
@@ -166,40 +169,41 @@ if __name__ == '__main__':
 
     yb.approve(vesting.address, 2**256 - 1)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
     yb.mint(admin, total)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
     vesting.add_tokens(total)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
     vesting.fund(recipients, amounts, t0 + 365 * 86400 // 2)
     if not FORK:
-        sleep(30)
+        sleep(EXTRA_TIMEOUT)
 
     # No vesting no cliff allocations (2)
 
     for address, amount, comment in vests[2]:
         yb.mint(address, int(amount * 10**18))
         if not FORK:
-            sleep(30)
+            sleep(EXTRA_TIMEOUT)
 
     print(f"YB:      {yb.address}")
     print(f"veYB:    {ve_yb.address}")
     print(f"GC:      {gc.address}")
     print(f"CE:      {cliff_impl.address}")
+    print(f"Vest:    {vesting.address}")
 
     # Inflation-like vest(s) (3)
     for address, amount, comment in vests[3]:
         ivest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, address, admin)
         if not FORK:
-            sleep(30)
+            sleep(EXTRA_TIMEOUT)
         yb.mint(ivest.address, int(amount * 10**18))
         if not FORK:
-            sleep(30)
+            sleep(EXTRA_TIMEOUT)
         ivest.start()
         if not FORK:
-            sleep(30)
+            sleep(EXTRA_TIMEOUT)
         print(f"IVest:   {ivest.address} for {address}")
 
     # Aragon
@@ -216,5 +220,7 @@ if __name__ == '__main__':
         pin_to_ipfs(PLUGIN_DESCRIPTION).encode()
     ))
     if not FORK:
-        sleep(30)
-    # has dao, plugin, token and condition addributes
+        sleep(EXTRA_TIMEOUT)
+    print(f"DAO:    {deployed_dao.dao}")
+    print(f"Plugin: {deployed_dao.plugin}")
+    print(f"Cond:   {deployed_dao.condition}")
