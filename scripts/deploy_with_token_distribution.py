@@ -52,7 +52,6 @@ VOTE_SETTINGS = VotingSettings(
 )
 TARGET_CONFIG = (ZERO_ADDRESS, 0)  # ??
 MIN_APPROVALS = 1  # ?
-EXCLUDED_ACCOUNTS = []
 DAO_DESCRIPTION = {
     'name': 'Test YB DAO',
     'description': '',
@@ -65,13 +64,13 @@ PLUGIN_DESCRIPTION = {
     'processKey': 'YBP'
 }
 
-TOKEN_VOTING_FACTORY = "0x348082AA6Ee298158a3e54b99A77dD8F0b884b94"
+TOKEN_VOTING_FACTORY = "0x076E298405b75a02C222D3860d703E4C92FB9E20"
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 
 
 TV_FACTORY_ABI = """
 [
-{"inputs":[{"components":[{"internalType":"string","name":"daoSubdomain","type":"string"},{"internalType":"bytes","name":"daoMetadata","type":"bytes"},{"internalType":"string","name":"daoURI","type":"string"},{"internalType":"address","name":"token","type":"address"},{"components":[{"internalType":"enum MajorityVotingBase.VotingMode","name":"votingMode","type":"uint8"},{"internalType":"uint32","name":"supportThreshold","type":"uint32"},{"internalType":"uint32","name":"minParticipation","type":"uint32"},{"internalType":"uint64","name":"minDuration","type":"uint64"},{"internalType":"uint256","name":"minProposerVotingPower","type":"uint256"}],"internalType":"struct MajorityVotingBase.VotingSettings","name":"votingSettings","type":"tuple"},{"components":[{"internalType":"address","name":"target","type":"address"},{"internalType":"enum IPlugin.Operation","name":"operation","type":"uint8"}],"internalType":"struct IPlugin.TargetConfig","name":"targetConfig","type":"tuple"},{"internalType":"uint256","name":"minApprovals","type":"uint256"},{"internalType":"bytes","name":"pluginMetadata","type":"bytes"},{"internalType":"address[]","name":"excludedAccounts","type":"address[]"}],"internalType":"struct TokenVotingFactory.DeploymentSettings","name":"settings","type":"tuple"}],"name":"deployDAOWithTokenVoting","outputs":[{"components":[{"internalType":"contract DAO","name":"dao","type":"address"},{"internalType":"contract TokenVoting","name":"plugin","type":"address"},{"internalType":"address","name":"token","type":"address"},{"internalType":"contract VotingPowerCondition","name":"condition","type":"address"}],"internalType":"struct TokenVotingFactory.Deployment","name":"deployment","type":"tuple"}],"stateMutability":"nonpayable","type":"function"},
+{"inputs":[{"components":[{"internalType":"string","name":"daoSubdomain","type":"string"},{"internalType":"bytes","name":"daoMetadata","type":"bytes"},{"internalType":"string","name":"daoURI","type":"string"},{"internalType":"address","name":"token","type":"address"},{"components":[{"internalType":"enum MajorityVotingBase.VotingMode","name":"votingMode","type":"uint8"},{"internalType":"uint32","name":"supportThreshold","type":"uint32"},{"internalType":"uint32","name":"minParticipation","type":"uint32"},{"internalType":"uint64","name":"minDuration","type":"uint64"},{"internalType":"uint256","name":"minProposerVotingPower","type":"uint256"}],"internalType":"struct MajorityVotingBase.VotingSettings","name":"votingSettings","type":"tuple"},{"components":[{"internalType":"address","name":"target","type":"address"},{"internalType":"enum IPlugin.Operation","name":"operation","type":"uint8"}],"internalType":"struct IPlugin.TargetConfig","name":"targetConfig","type":"tuple"},{"internalType":"uint256","name":"minApprovals","type":"uint256"},{"internalType":"bytes","name":"pluginMetadata","type":"bytes"}],"internalType":"struct TokenVotingFactory.DeploymentSettings","name":"settings","type":"tuple"}],"name":"deployDAOWithTokenVoting","outputs":[{"components":[{"internalType":"contract DAO","name":"dao","type":"address"},{"internalType":"contract TokenVoting","name":"plugin","type":"address"},{"internalType":"address","name":"token","type":"address"},{"internalType":"contract VotingPowerCondition","name":"condition","type":"address"}],"internalType":"struct TokenVotingFactory.Deployment","name":"deployment","type":"tuple"}],"stateMutability":"nonpayable","type":"function"},
 {"inputs":[{"internalType":"uint256","name":"_proposalId","type":"uint256"},{"internalType":"enum IMajorityVoting.VoteOption","name":"_voteOption","type":"uint8"},{"internalType":"bool","name":"_tryEarlyExecution","type":"bool"}],"name":"vote","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]
 """
@@ -190,7 +189,6 @@ if __name__ == '__main__':
         VOTE_SETTINGS,
         TARGET_CONFIG,
         MIN_APPROVALS,
-        pin_to_ipfs(PLUGIN_DESCRIPTION).encode(),
-        []
+        pin_to_ipfs(PLUGIN_DESCRIPTION).encode()
     ))
     print(out)
