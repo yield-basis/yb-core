@@ -181,7 +181,7 @@ if __name__ == '__main__':
     # Aragon
 
     factory = boa.loads_abi(TV_FACTORY_ABI, name="TVFactory").at(TOKEN_VOTING_FACTORY)
-    out = factory.deployDAOWithTokenVoting((
+    deployed_dao = factory.deployDAOWithTokenVoting((
         DAO_SUBDOMAIN,
         pin_to_ipfs(DAO_DESCRIPTION).encode(),
         DAO_URI,
@@ -191,4 +191,4 @@ if __name__ == '__main__':
         MIN_APPROVALS,
         pin_to_ipfs(PLUGIN_DESCRIPTION).encode()
     ))
-    print(out)
+    # has dao, plugin, token and condition addributes
