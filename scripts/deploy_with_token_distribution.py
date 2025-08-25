@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = True
+FORK = False
 
 RATE = 1 / (4 * 365 * 86400)
 

@@ -13,7 +13,7 @@ from networks import PINATA_TOKEN
 
 
 FORK = True
-VOTING_PLUGIN = "0x13Be0B2E4CbD19F92259b2718A06ed4C026AA6df"
+VOTING_PLUGIN = "0xD4f8EaCE89891e89FA46eE60B02a48D3d0FD137C"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
@@ -59,7 +59,7 @@ if __name__ == '__main__':
 
     yb = boa.load_abi(os.path.dirname(__file__) + '/erc20.abi.json', name="YB").at("0x766b660f3f3D5F97831FdF2F873235BbE100Cb30")
 
-    voting.createProposal(*Proposal(
+    proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({'title': 'Transfer', 'summary': 'send 1 yb', 'resources': []}).encode(),
         actions=[
             Action(to=voting.dao(), value=0,
@@ -71,6 +71,4 @@ if __name__ == '__main__':
         voteOption=1,
         tryEarlyExecution=True
     ))
-
-    import IPython
-    IPython.embed()
+    print(proposal_id)
