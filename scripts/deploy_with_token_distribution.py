@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = False
+FORK = True
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -67,6 +67,12 @@ PLUGIN_DESCRIPTION = {
 
 TOKEN_VOTING_FACTORY = "0x331499d6a58Dea87222B5935588A7b3ff6D83c44"
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
+
+USD_TOKEN = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"  # crvUSD
+AGG = "0x18672b1b0c623a30089A280Ed9256379fb0E4E62"  # crvUSD aggregator
+FLASH = "0x26dE7861e213A5351F6ED767d00e0839930e9eE1"
+FEE_RECEIVER = "0x0000000000000000000000000000000000000000"  # XXX
+EMERGENCY_ADMIN = "0x467947EE34aF926cF1DCac093870f613C96B1E0c"
 
 ETHERSCAN_URL = "https://api.etherscan.io/api"
 
@@ -179,12 +185,6 @@ if __name__ == '__main__':
         if not FORK:
             sleep(EXTRA_TIMEOUT)
 
-    print(f"YB:      {yb.address}")
-    print(f"veYB:    {ve_yb.address}")
-    print(f"GC:      {gc.address}")
-    print(f"CE:      {cliff_impl.address}")
-    print(f"Vest:    {vesting.address}")
-
     # Inflation-like vest(s) (3)
     for address, amount, comment in vests[3]:
         ivest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, address, admin)
@@ -214,6 +214,73 @@ if __name__ == '__main__':
     ))
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+
+    # Deploy AMM, LT, vpool, lp oracle, gauge impl, stake zap, factory with dao as an admin
+    amm_interface = boa.load_partial('contracts/AMM.vy')
+    yb_amm_impl = amm_interface.deploy_as_blueprint()
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(yb_amm_impl, etherscan, wait=False)
+    lt_interface = boa.load_partial('contracts/LT.vy')
+    yb_lt_impl = lt_interface.deploy_as_blueprint()
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(yb_lt_impl, etherscan, wait=False)
+    vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(vpool_impl, etherscan, wait=False)
+    oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(oracle_impl, etherscan, wait=False)
+    gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(gauge_impl, etherscan, wait=False)
+    stake_zap = boa.load('contracts/dao/StakeZap.vy')
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(stake_zap, etherscan, wait=False)
+
+    yb_factory = boa.load(
+        'contracts/Factory.vy',
+        USD_TOKEN,
+        yb_amm_impl,
+        yb_lt_impl,
+        vpool_impl,
+        oracle_impl,
+        gauge_impl,
+        AGG,
+        FLASH,
+        FEE_RECEIVER,
+        gc.address,
+        deployed_dao.dao,
+        EMERGENCY_ADMIN)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(yb_factory, etherscan, wait=False)
+
+    # Transfer to Aragon:
+    # gc
+    gc.transfer_ownership(deployed_dao.dao)
+
+    # Transfer to YB co
+    vesting.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
+
+    # YB set minter to GC
+
+    # YB STILL has deployer as an admin, it needs to start emissions and renounce ownership later
+
+    print(f"YB:      {yb.address}")
+    print(f"veYB:    {ve_yb.address}")
+    print(f"GC:      {gc.address}")
+    print(f"CE:      {cliff_impl.address}")
+    print(f"Vest:    {vesting.address}")
+    print()
     print(f"DAO:    {deployed_dao.dao}")
     print(f"Plugin: {deployed_dao.plugin}")
     print(f"Cond:   {deployed_dao.condition}")
+    print()
+    print(f"Factory: {yb_factory.address}")
+    print(f"StakeZap: {stake_zap.address}")
