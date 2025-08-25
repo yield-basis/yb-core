@@ -12,7 +12,7 @@ from networks import NETWORK
 from networks import PINATA_TOKEN
 
 
-FORK = True
+FORK = False
 VOTING_PLUGIN = "0xD4f8EaCE89891e89FA46eE60B02a48D3d0FD137C"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
@@ -62,13 +62,13 @@ if __name__ == '__main__':
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({'title': 'Transfer', 'summary': 'send 1 yb', 'resources': []}).encode(),
         actions=[
-            Action(to=voting.dao(), value=0,
+            Action(to=yb.address, value=0,
                    data=yb.transfer.prepare_calldata("0x7a16fF8270133F063aAb6C9977183D9e72835428", 10**18))
         ],
         allowFailureMap=0,
         startDate=0,
         endDate=0,
-        voteOption=1,
+        voteOption=0,
         tryEarlyExecution=True
     ))
     print(proposal_id)
