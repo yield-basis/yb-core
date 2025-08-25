@@ -1,0 +1,287 @@
+[
+        {
+            "type": "constructor",
+            "inputs": [
+                {
+                    "name": "_daoFactory",
+                    "type": "address",
+                    "internalType": "contract DAOFactory"
+                },
+                {
+                    "name": "_tokenVotingBase",
+                    "type": "address",
+                    "internalType": "address"
+                }
+            ],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "daoFactory",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "contract DAOFactory"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "deployDAOWithTokenVoting",
+            "inputs": [
+                {
+                    "name": "settings",
+                    "type": "tuple",
+                    "internalType": "struct TokenVotingFactory.DeploymentSettings",
+                    "components": [
+                        {
+                            "name": "daoSubdomain",
+                            "type": "string",
+                            "internalType": "string"
+                        },
+                        {
+                            "name": "daoMetadata",
+                            "type": "bytes",
+                            "internalType": "bytes"
+                        },
+                        {
+                            "name": "daoURI",
+                            "type": "string",
+                            "internalType": "string"
+                        },
+                        {
+                            "name": "token",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "votingSettings",
+                            "type": "tuple",
+                            "internalType": "struct MajorityVotingBase.VotingSettings",
+                            "components": [
+                                {
+                                    "name": "votingMode",
+                                    "type": "uint8",
+                                    "internalType": "enum MajorityVotingBase.VotingMode"
+                                },
+                                {
+                                    "name": "supportThreshold",
+                                    "type": "uint32",
+                                    "internalType": "uint32"
+                                },
+                                {
+                                    "name": "minParticipation",
+                                    "type": "uint32",
+                                    "internalType": "uint32"
+                                },
+                                {
+                                    "name": "minDuration",
+                                    "type": "uint64",
+                                    "internalType": "uint64"
+                                },
+                                {
+                                    "name": "minProposerVotingPower",
+                                    "type": "uint256",
+                                    "internalType": "uint256"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "targetConfig",
+                            "type": "tuple",
+                            "internalType": "struct IPlugin.TargetConfig",
+                            "components": [
+                                {
+                                    "name": "target",
+                                    "type": "address",
+                                    "internalType": "address"
+                                },
+                                {
+                                    "name": "operation",
+                                    "type": "uint8",
+                                    "internalType": "enum IPlugin.Operation"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "minApprovals",
+                            "type": "uint256",
+                            "internalType": "uint256"
+                        },
+                        {
+                            "name": "pluginMetadata",
+                            "type": "bytes",
+                            "internalType": "bytes"
+                        },
+                        {
+                            "name": "excludedAccounts",
+                            "type": "address[]",
+                            "internalType": "address[]"
+                        }
+                    ]
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "deployment",
+                    "type": "tuple",
+                    "internalType": "struct TokenVotingFactory.Deployment",
+                    "components": [
+                        {
+                            "name": "dao",
+                            "type": "address",
+                            "internalType": "contract DAO"
+                        },
+                        {
+                            "name": "plugin",
+                            "type": "address",
+                            "internalType": "contract TokenVoting"
+                        },
+                        {
+                            "name": "token",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "condition",
+                            "type": "address",
+                            "internalType": "contract VotingPowerCondition"
+                        }
+                    ]
+                }
+            ],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "getDefaultExcludedAccounts",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address[]",
+                    "internalType": "address[]"
+                }
+            ],
+            "stateMutability": "pure"
+        },
+        {
+            "type": "function",
+            "name": "getDefaultMinApprovals",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                }
+            ],
+            "stateMutability": "pure"
+        },
+        {
+            "type": "function",
+            "name": "getDefaultTargetConfig",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "tuple",
+                    "internalType": "struct IPlugin.TargetConfig",
+                    "components": [
+                        {
+                            "name": "target",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "operation",
+                            "type": "uint8",
+                            "internalType": "enum IPlugin.Operation"
+                        }
+                    ]
+                }
+            ],
+            "stateMutability": "pure"
+        },
+        {
+            "type": "function",
+            "name": "getDefaultVotingSettings",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "tuple",
+                    "internalType": "struct MajorityVotingBase.VotingSettings",
+                    "components": [
+                        {
+                            "name": "votingMode",
+                            "type": "uint8",
+                            "internalType": "enum MajorityVotingBase.VotingMode"
+                        },
+                        {
+                            "name": "supportThreshold",
+                            "type": "uint32",
+                            "internalType": "uint32"
+                        },
+                        {
+                            "name": "minParticipation",
+                            "type": "uint32",
+                            "internalType": "uint32"
+                        },
+                        {
+                            "name": "minDuration",
+                            "type": "uint64",
+                            "internalType": "uint64"
+                        },
+                        {
+                            "name": "minProposerVotingPower",
+                            "type": "uint256",
+                            "internalType": "uint256"
+                        }
+                    ]
+                }
+            ],
+            "stateMutability": "pure"
+        },
+        {
+            "type": "function",
+            "name": "tokenVotingBase",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "event",
+            "name": "DAOWithTokenVotingCreated",
+            "inputs": [
+                {
+                    "name": "dao",
+                    "type": "address",
+                    "indexed": true,
+                    "internalType": "address"
+                },
+                {
+                    "name": "plugin",
+                    "type": "address",
+                    "indexed": true,
+                    "internalType": "address"
+                },
+                {
+                    "name": "token",
+                    "type": "address",
+                    "indexed": true,
+                    "internalType": "address"
+                }
+            ],
+            "anonymous": false
+        }
+]
