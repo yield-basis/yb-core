@@ -65,7 +65,7 @@ if __name__ == '__main__':
             Action(to=voting.dao(), value=0,
                    data=yb.transfer.prepare_calldata("0x7a16fF8270133F063aAb6C9977183D9e72835428", 10**18))
         ],
-        allowFailureMap=False,
+        allowFailureMap=0,
         startDate=0,
         endDate=0,
         voteOption=1,
