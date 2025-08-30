@@ -123,6 +123,8 @@ def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100], 
             self.recipient_to_cliff[recipient] = cliff_escrow
             recipient = cliff_escrow.address
 
+        assert not self.disabled_rugged[recipient], "Rugged"
+
         _total_amount += amount
         self.initial_locked[recipient] += amount
         log Fund(recipient=recipient, amount=amount)
