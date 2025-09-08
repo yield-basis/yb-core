@@ -86,6 +86,7 @@ def claimable() -> uint256:
 def claim() -> uint256:
     claimable: uint256 = self._claimable()
     recipient: address = self.recipient
+    self.claimed += claimable
     extcall YB.transfer(recipient, claimable)
     log Claim(recipient=recipient, claimed=claimable)
     return claimable
