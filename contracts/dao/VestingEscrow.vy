@@ -124,6 +124,7 @@ def fund(_recipients: DynArray[address, 100], _amounts: DynArray[uint256, 100], 
             recipient = cliff_escrow.address
 
         assert not self.disabled_rugged[recipient], "Rugged"
+        assert self.disabled_at[recipient] == 0, "Disabled"
 
         _total_amount += amount
         self.initial_locked[recipient] += amount
