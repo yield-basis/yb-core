@@ -126,7 +126,9 @@ def infinite_lock_toggle():
 @external
 @nonreentrant
 def transfer(to: address, amount: uint256):
-    self._access()
+    assert self.recipient in [msg.sender, to], "Not authorized"
+    # If msg.sender is recipient - they can transfer anywhere
+    # If msg.sender is NOT recipient - they can transfer only to recipient
     self._cliff()
     extcall YB.transfer(to, amount)
 
