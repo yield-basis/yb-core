@@ -900,7 +900,8 @@ def _transfer(_from: address, _to: address, _value: uint256):
     killed: bool = staticcall self.amm.is_killed()
 
     staker: address = self.staker
-    if staker != empty(address) and staker in [_from, _to]:
+    staker_used: bool = (staker != empty(address) and staker in [_from, _to])
+    if staker_used:
         assert _from != _to
         liquidity: LiquidityValuesOut = empty(LiquidityValuesOut)
 
@@ -938,6 +939,9 @@ def _transfer(_from: address, _to: address, _value: uint256):
 
     self.balanceOf[_from] -= _value
     self.balanceOf[_to] += _value
+
+    if staker_used:
+        self._checkpoint_gauge()
 
     log IERC20.Transfer(sender=_from, receiver=_to, value=_value)
 
