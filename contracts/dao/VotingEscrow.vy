@@ -659,6 +659,7 @@ def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
     self._merge_positions(owner, to)
     erc721._burn(token_id)
+    assert erc721._check_on_erc721_received(owner, to, token_id, data), "erc721: transfer to non-IERC721Receiver implementer"
 
 
 @external
