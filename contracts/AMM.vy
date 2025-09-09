@@ -215,6 +215,9 @@ def _debt_w() -> uint256:
 @external
 @view
 def get_debt() -> uint256:
+    """
+    @notice Debt of the AMM
+    """
     return self._debt()
 
 
@@ -227,6 +230,10 @@ def outdated_debt() -> uint256:
 @external
 @view
 def get_state() -> AMMState:
+    """
+    @notice State of the AMM
+    @return Returns a data strucuture which contains (collateral, debt, x0)
+    """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     state: AMMState = empty(AMMState)
     state.collateral = self.collateral_amount
@@ -238,6 +245,13 @@ def get_state() -> AMMState:
 @external
 @view
 def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
+    """
+    @notice Function to preview the result of exchange in the AMM
+    @param i Index of input coin (0 = stablecoin, 1 = LP token collateral)
+    @param j Index of output coin
+    @param in_amount Amount of coin i
+    @return Amount of coin j to be received
+    """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
 
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
@@ -260,6 +274,9 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 @external
 @view
 def get_p() -> uint256:
+    """
+    @notice Returns state price of the AMM itself
+    """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount
     debt: uint256 = self._debt()
@@ -271,7 +288,7 @@ def get_p() -> uint256:
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
     """
     @notice Exchanges two coins, callable by anyone
-    @param i Input coin index
+    @param i Index of input coin (0 = stablecoin, 1 = LP token collateral)
     @param j Output coin index
     @param in_amount Amount of input coin to swap
     @param min_out Minimal amount to get as output
@@ -374,12 +391,18 @@ def _withdraw(frac: uint256) -> Pair:
 @external
 @view
 def coins(i: uint256) -> IERC20:
+    """
+    @notice Coins in the AMM: 0 - stablecoin, 1 - collateral (LP)
+    """
     return [STABLECOIN, COLLATERAL][i]
 
 
 @external
 @view
 def value_oracle() -> OraclizedValue:
+    """
+    @notice Non-manipulable oracle which shows value of the whole AMM valued in stablecoin
+    """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
@@ -389,6 +412,9 @@ def value_oracle() -> OraclizedValue:
 @external
 @view
 def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
+    """
+    @notice Total value oracle for any specified amounts of collateral and debt in the AMM
+    """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
 
@@ -396,6 +422,13 @@ def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
 @external
 @view
 def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue:
+    """
+    @notice Change in the value oracle
+    @param collateral_amount Amount of collateral to deposit/withdraw to AMM
+    @param borrowed_amount Amount to borrow or repay when depositing/withdrawing
+    @param is_deposit Is it a deposit or withdrawal
+    @return (p_oracle, value)
+    """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
@@ -417,6 +450,9 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
 @external
 @view
 def max_debt() -> uint256:
+    """
+    @notice Maximum amount of debt which the AMM can possibly take
+    """
     return staticcall STABLECOIN.balanceOf(self) + self._debt()
 
 
@@ -468,6 +504,9 @@ def collect_fees() -> uint256:
 
 @external
 def set_killed(is_killed: bool):
+    """
+    @notice Kill (True) or unkill (False) the pool
+    """
     assert msg.sender == LT_CONTRACT, "Access"
     self.is_killed = is_killed
     log SetKilled(is_killed=is_killed)
@@ -482,6 +521,9 @@ def check_nonreentrant():
 
 @external
 def set_fee(fee: uint256):
+    """
+    @notice Set pool's fee for exchanges LP<>stacoin (all the fees go to LPs)
+    """
     assert msg.sender == LT_CONTRACT, "Access"
     assert fee <= MAX_FEE
     self.fee = fee
