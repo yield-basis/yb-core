@@ -701,6 +701,9 @@ def pricePerShare() -> uint256:
 @external
 @nonreentrant
 def set_amm(amm: LevAMM):
+    """
+    Set AMM: only allowed once (at init time)
+    """
     self._check_admin()
     assert self.amm == empty(LevAMM), "Already set"
     assert staticcall amm.STABLECOIN() == STABLECOIN.address
@@ -713,6 +716,9 @@ def set_amm(amm: LevAMM):
 @external
 @nonreentrant
 def set_admin(new_admin: address):
+    """
+    Set admin to factory or EOA
+    """
     self._check_admin()
 
     # Sanity check for the new admin
@@ -729,6 +735,9 @@ def set_admin(new_admin: address):
 @external
 @nonreentrant
 def set_rate(rate: uint256):
+    """
+    @notice Set borrow rate == donation rate for the AMM in units of 1e18-based fraction per second
+    """
     self._check_admin()
     extcall self.amm.set_rate(rate)
 
@@ -736,6 +745,9 @@ def set_rate(rate: uint256):
 @external
 @nonreentrant
 def set_amm_fee(fee: uint256):
+    """
+    @notice Set 1e18-based AMM fee
+    """
     self._check_admin()
     extcall self.amm.set_fee(fee)
 
@@ -792,12 +804,19 @@ def _distribute_borrower_fees(discount: uint256):
 @external
 @nonreentrant
 def distribute_borrower_fees(discount: uint256 = FEE_CLAIM_DISCOUNT):
+    """
+    @notice Distribute borrower fees to the AMM
+    @param discount Optional discount (1% by default): only settable by admin
+    """
     self._distribute_borrower_fees(discount)
 
 
 @external
 @nonreentrant
 def withdraw_admin_fees():
+    """
+    @notice Withdraw admin fees and distribute to the DAO
+    """
     admin: address = self.admin
     assert admin.is_contract, "Need factory"
     assert msg.sender == staticcall Factory(admin).admin(), "Access"
@@ -831,6 +850,9 @@ def withdraw_admin_fees():
 @external
 @nonreentrant
 def set_staker(staker: address):
+    """
+    @notice Set staker contract - allowed only once
+    """
     assert self.staker == empty(address), "Staker already set"
     assert staker != empty(address)
     self._check_admin()
@@ -848,6 +870,9 @@ def set_staker(staker: address):
 
 @external
 def set_killed(is_killed: bool):
+    """
+    @notice Kill or unkill the pool
+    """
     admin: address = self.admin
     if admin.is_contract:
         assert msg.sender in [admin, staticcall Factory(admin).admin(), staticcall Factory(admin).emergency_admin()], "Access"
