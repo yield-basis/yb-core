@@ -76,6 +76,9 @@ def __init__(amm: YbAMM):
 @external
 @view
 def coins(i: uint256) -> ERC20:
+    """
+    @notice Coins in the AMM: 0 - stablecoin, 1 - cryptoasset used to form collateral LP
+    """
     return [STABLECOIN, ASSET_TOKEN][i]
 
 
@@ -115,6 +118,13 @@ def _calculate(i: uint256, in_amount: uint256, only_flash: bool) -> (uint256, ui
 @external
 @view
 def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
+    """
+    @notice Function to preview the result of exchange in the virtual AMM
+    @param i Index of input coin (0 = stablecoin, 1 = crypto)
+    @param j Index of output coin
+    @param in_amount Amount of coin i
+    @return Amount of coin j to be received
+    """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
     _in_amount: uint256 = in_amount
     if i == 0:
@@ -124,6 +134,14 @@ def get_dy(i: uint256, j: uint256, in_amount: uint256) -> uint256:
 
 @external
 def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256, fee: uint256, data: Bytes[10**5]):
+    """
+    @notice Receive a flash loan
+    @param initiator The initiator of the loan
+    @param token The loan currency
+    @param total_flash_amount The amount of tokens lent
+    @param fee The additional amount of tokens to repay
+    @param data Arbitrary data structure, intended to contain user-defined parameters
+    """
     assert initiator == self
     assert token == STABLECOIN.address
     assert msg.sender == (staticcall FACTORY.flash()).address, "Wrong caller"
@@ -163,6 +181,15 @@ def onFlashLoan(initiator: address, token: address, total_flash_amount: uint256,
 @external
 @nonreentrant
 def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for: address = msg.sender) -> uint256:
+    """
+    @notice Exchanges two coins, callable by anyone
+    @param i Index of input coin (0 = stablecoin, 1 = crypto)
+    @param j Output coin index
+    @param in_amount Amount of input coin to swap
+    @param min_out Minimal amount to get as output
+    @param _for Address to send coins to
+    @return Amount of coins given in/out
+    """
     assert (i == 0 and j == 1) or (i == 1 and j == 0)
     flash: Flash = staticcall FACTORY.flash()
 
