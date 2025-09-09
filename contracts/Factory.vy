@@ -165,6 +165,13 @@ def add_market(
     rate: uint256,
     debt_ceiling: uint256
 ) -> Market:
+    """
+    @notice Create a new market/pool
+    @param pool Curve cryptopool which supports "refueling"
+    @param fee Fee of the releverage AMM (1e18-based)
+    @param rate Initial borrow/refueling rate in 1e18-based fraction per second
+    @param debt_ceiling Debt ceiling of the market. Factory to have enough stablecoins
+    """
     assert msg.sender == self.admin, "Access"
     assert staticcall pool.coins(0) == STABLECOIN.address, "Wrong stablecoin"
     assert staticcall pool.decimals() == 18
@@ -229,6 +236,9 @@ def add_market(
 
 @external
 def fill_staker_vpool(i: uint256):
+    """
+    @notice Set staker and vpool for market i in case they were set or changed in the implementations
+    """
     assert msg.sender == self.admin, "Access"
     assert i < self.market_count, "Nonexistent market"
 
@@ -272,6 +282,9 @@ def fill_staker_vpool(i: uint256):
 @external
 @nonreentrant
 def set_mint_factory(mint_factory: address):
+    """
+    @notice Set factory to mint stablecoins (like crvUSD). This can only ever be done once. Permission to get coins back is given
+    """
     assert msg.sender == self.admin, "Access"
     assert self.mint_factory == empty(address), "Only set once"
     assert mint_factory != empty(address)
@@ -285,6 +298,9 @@ def set_mint_factory(mint_factory: address):
 @external
 @nonreentrant
 def set_allocator(allocator: address, amount: uint256):
+    """
+    @notice Add allocator of stablecoins and take coins from it
+    """
     assert msg.sender == self.admin, "Access"
     assert allocator != self.mint_factory, "Minter"
     assert allocator != empty(address)
@@ -305,6 +321,9 @@ def set_allocator(allocator: address, amount: uint256):
 
 @external
 def set_agg(agg: address):
+    """
+    @notice Set or change stablecoin price aggregator
+    """
     assert msg.sender == self.admin, "Access"
     assert agg != empty(address)
     self.agg = agg
@@ -314,6 +333,9 @@ def set_agg(agg: address):
 
 @external
 def set_flash(flash: address):
+    """
+    @notice Set or change stablecoin flash lender implementation
+    """
     assert msg.sender == self.admin, "Access"
     self.flash = flash
     log SetFlash(flash=flash)
@@ -321,6 +343,9 @@ def set_flash(flash: address):
 
 @external
 def set_admin(new_admin: address, new_emergency_admin: address):
+    """
+    @notice Set new admins of the factory. It is important to set it to the DAO
+    """
     assert msg.sender == self.admin, "Access"
     assert new_admin != empty(address)
     assert new_emergency_admin != empty(address)
@@ -331,6 +356,9 @@ def set_admin(new_admin: address, new_emergency_admin: address):
 
 @external
 def set_fee_receiver(new_fee_receiver: address):
+    """
+    @notice Set new fee receiver. All pools give admin fee to it
+    """
     assert msg.sender == self.admin, "Access"
     self.fee_receiver = new_fee_receiver
     log SetFeeReceiver(fee_receiver=new_fee_receiver)
@@ -338,6 +366,9 @@ def set_fee_receiver(new_fee_receiver: address):
 
 @external
 def set_gauge_controller(gc: address):
+    """
+    @notice Set Gauge Controller. This can only be done once
+    """
     assert msg.sender == self.admin, "Access"
     assert self.gauge_controller == empty(address), "Already set"
     self.gauge_controller = gc
@@ -346,6 +377,9 @@ def set_gauge_controller(gc: address):
 
 @external
 def set_min_admin_fee(new_min_admin_fee: uint256):
+    """
+    @notice Set minimal admin fee (admin fee when nothing is staked)
+    """
     assert msg.sender == self.admin, "Access"
     assert new_min_admin_fee <= 10**18, "Admin fee too high"
     self.min_admin_fee = new_min_admin_fee
@@ -354,6 +388,14 @@ def set_min_admin_fee(new_min_admin_fee: uint256):
 
 @external
 def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address):
+    """
+    @notice Set implementations for all factory contracts needed for creating markets
+    @param amm AMM implementation
+    @param lt LT implementation
+    @param virtual_pool VirtualPool implementation
+    @param price_oracle LPPriceOracle implementation (price oracle showing the price of LP token in stablecoins)
+    @param staker Staker (gauge) implementation
+    """
     assert msg.sender == self.admin, "Access"
     if amm != empty(address):
         self.amm_impl = amm
