@@ -796,6 +796,9 @@ def _distribute_borrower_fees(discount: uint256):
     amount: uint256 = staticcall STABLECOIN.balanceOf(self)
     if amount > 0:
         # We price to the stablecoin we use, not the aggregated USD here, and this is correct
+        # It is possible to have a temporary denial of service here which, though, does not affect emergency
+        # withdrawal. It only can happen if price moves too fast. It does not prevent cryptopool from
+        # being traded and returning back to normal operation
         min_amount: uint256 = (10**18 - discount) * amount // staticcall CRYPTOPOOL.lp_price()
         extcall CRYPTOPOOL.add_liquidity([amount, 0], min_amount, empty(address), True)
         log DistributeBorrowerFees(sender=msg.sender, amount=amount, min_amount=min_amount, discount=discount)
