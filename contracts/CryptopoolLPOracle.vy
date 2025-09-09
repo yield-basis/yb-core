@@ -9,6 +9,8 @@
 
 interface Cryptopool:
     def lp_price() -> uint256: view
+    def virtual_price() -> uint256: view
+    def price_scale() -> uint256: view
 
 interface PriceOracle:
     def price() -> uint256: view
@@ -29,12 +31,20 @@ def __init__(pool: Cryptopool, agg: PriceOracle):
     AGG = agg
 
 
+@internal
+@view
+def lp_price() -> uint256:
+    virtual_price: uint256 = staticcall POOL.virtual_price()
+    p_scale: uint256 = staticcall POOL.price_scale()
+    return 2 * virtual_price * isqrt(p_scale * 10**18) // 10**18
+
+
 @external
 @view
 def price() -> uint256:
-    return staticcall POOL.lp_price() * staticcall AGG.price() // 10**18
+    return self.lp_price() * staticcall AGG.price() // 10**18
 
 
 @external
 def price_w() -> uint256:
-    return staticcall POOL.lp_price() * extcall AGG.price_w() // 10**18
+    return self.lp_price() * extcall AGG.price_w() // 10**18
