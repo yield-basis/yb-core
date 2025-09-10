@@ -245,6 +245,15 @@ def _checkpoint_gauge():
                     abi_encode(gauge, method_id=method_id("checkpoint(address)")),
                     is_static_call=False,
                     revert_on_failure=False)
+                if not success:
+                    # Try again but with fixed gas. This will just make TX fail if one tries to manipulate
+                    # the gas attached to the call while NOT inflating the gas estimate if the call does not revert
+                    success = raw_call(
+                        gc,
+                        abi_encode(gauge, method_id=method_id("checkpoint(address)")),
+                        gas=200_000,
+                        is_static_call=False,
+                        revert_on_failure=False)
 
 
 @internal
