@@ -139,6 +139,10 @@ def name() -> String[39]:
 @external
 @view
 def get_adjustment() -> uint256:
+    """
+    @notice Get a measure of how many Liquidity Tokens are staked: sqrt(staked / totalSupply)
+    @return Result from 0.0 (0) to 1.0 (1e18)
+    """
     staked: uint256 = staticcall LP_TOKEN.balanceOf(self)
     supply: uint256 = staticcall LP_TOKEN.totalSupply()
     return isqrt(unsafe_div(staked * 10**36, supply))
@@ -225,6 +229,11 @@ def _checkpoint_user(user: address):
 @external
 @nonreentrant
 def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
+    """
+    @notice Claim rewards (YB or external) earned by the user
+    @param reward Reward token (YB by default)
+    @param user User to claim for
+    """
     d_reward: uint256 = self._vest_rewards(reward, False)
     r: RewardIntegrals = self._checkpoint(reward, d_reward, user)
 
@@ -244,6 +253,11 @@ def claim(reward: IERC20 = YB, user: address = msg.sender) -> uint256:
 @external
 @view
 def preview_claim(reward: IERC20, user: address) -> uint256:
+    """
+    @notice Calculate amount of rewards which user can claim
+    @param reward Reward token address
+    @param user Recipient address
+    """
     d_reward: uint256 = 0
     if reward == YB:
         d_reward = staticcall GC.preview_emissions(self, block.timestamp)
@@ -257,6 +271,11 @@ def preview_claim(reward: IERC20, user: address) -> uint256:
 @external
 @nonreentrant
 def add_reward(token: IERC20, distributor: address):
+    """
+    @notice Add a non-YB reward token. This does not deposit it, just creates a possibility to do it
+    @param token Token address to add as an extra reward
+    @param distributor Address of distributor of the reward
+    """
     assert token != YB, "YB"
     assert token != LP_TOKEN, "LP_TOKEN"
     assert distributor != empty(address)
@@ -271,6 +290,11 @@ def add_reward(token: IERC20, distributor: address):
 
 @external
 def change_reward_distributor(token: IERC20, distributor: address):
+    """
+    @notice Change the distributor of a custom (non-YB) reward
+    @param token Reward token address
+    @param distributor New distributor of the reward
+    """
     assert token != YB, "YB"
     assert distributor != empty(address)
     assert self.rewards[token].distributor != empty(address), "Not added"
@@ -282,6 +306,12 @@ def change_reward_distributor(token: IERC20, distributor: address):
 @external
 @nonreentrant
 def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
+    """
+    @notice Deposit a custom (non-YB) reward token if it was added with add_reward
+    @param token Reward token address
+    @param amount Amount of token to deposit
+    @param finish_time Timestamp when distribution should finish. Do not change the reward rate if set to 0
+    """
     assert token != YB, "YB"
     assert amount > 0, "No rewards"
     r: Reward = self.rewards[token]
@@ -315,6 +345,11 @@ def deposit_reward(token: IERC20, amount: uint256, finish_time: uint256):
 @external
 @nonreentrant
 def deposit(assets: uint256, receiver: address) -> uint256:
+    """
+    @notice Deposit liquidity token to earn rewards
+    @param assets Amount of LT token to deposit
+    @param receiver Who should get the gauge tokens
+    """
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
     self._checkpoint_user(receiver)
@@ -327,6 +362,11 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 @external
 @nonreentrant
 def mint(shares: uint256, receiver: address) -> uint256:
+    """
+    @notice Deposit liquidity token to earn rewards given amount of gauge shares to receive
+    @param shares Gauge shares to receive
+    @param receiver Receiver of the gauge shares
+    """
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
     self._checkpoint_user(receiver)
@@ -339,6 +379,12 @@ def mint(shares: uint256, receiver: address) -> uint256:
 @external
 @nonreentrant
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
+    """
+    @notice Withdraw gauge shares given the amount of LT tokens to receive
+    @param assets Amount of LT tokens to receive
+    @param receiver Receiver of LT tokens
+    @param owner Who had the gauge tokens before the tx
+    """
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint_user(owner)
@@ -351,6 +397,12 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 @external
 @nonreentrant
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
+    """
+    @notice Withdraw gauge shares given the amount of gauge shares
+    @param shares Amount of gauge shares to withdraw
+    @param receiver Receiver of LT tokens
+    @param owner Who had the gauge tokens before the tx
+    """
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
 
     # Handle killing so that eadmin can withdraw anyone's shares to their own wallet
@@ -372,6 +424,9 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
 @external
 @nonreentrant
 def transfer(to: address, amount: uint256) -> bool:
+    """
+    @notice ERC20 transfer of gauge shares
+    """
     self._checkpoint_user(msg.sender)
     self._checkpoint_user(to)
     erc4626.erc20._transfer(msg.sender, to, amount)
@@ -382,6 +437,9 @@ def transfer(to: address, amount: uint256) -> bool:
 @external
 @nonreentrant
 def transferFrom(owner: address, to: address, amount: uint256) -> bool:
+    """
+    @notice ERC20 transferFrom of gauge shares
+    """
     self._checkpoint_user(owner)
     self._checkpoint_user(to)
     erc4626.erc20._spend_allowance(owner, msg.sender, amount)
