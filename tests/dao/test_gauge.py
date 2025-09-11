@@ -16,18 +16,22 @@ def dummy_factory(gc, admin):
 
 
 @pytest.fixture(scope="session")
-def gauges(mock_lp, gc, dummy_factory, admin, accounts):
+def lps(token_mock):
+    return [token_mock.deploy('LP %s' % i, 'g%s' % i, 18) for i in range(N_POOLS)]
+
+
+@pytest.fixture(scope="session")
+def gauges(lps, gc, dummy_factory, admin, accounts):
     gauge_deployer = boa.load_partial('contracts/dao/LiquidityGauge.vy')
     with boa.env.prank(dummy_factory.address):
-        gauges = [gauge_deployer.deploy(mock_lp.address) for i in range(N_POOLS)]
+        gauges = [gauge_deployer.deploy(lp.address) for lp in lps]
     with boa.env.prank(admin):
         for gauge in gauges:
             gc.add_gauge(gauge.address)
     for user in accounts:
         with boa.env.prank(user):
-            for g in gauges:
-                mock_lp.approve(g.address, 2**256 - 1)
-                mock_lp._mint_for_testing(user, 10**40)
+            for lp, g in zip(lps, gauges):
+                lp.approve(g.address, 2**256 - 1)
     return gauges
 
 
@@ -49,10 +53,15 @@ class StatefulG(RuleBasedStateMachine):
     token_amount = st.integers(min_value=0, max_value=10**25)
     dt = st.integers(min_value=0, max_value=30 * 86400)
 
+    def __init__(self):
+        super().__init__()
+
     @rule(uid=user_id, assets=token_amount, gid=gauge_id)
     def deposit(self, uid, assets, gid):
         user = self.accounts[uid]
         with boa.env.prank(user):
+            if self.lps[gid].balanceOf(user) < assets:
+                self.lps[gid]._mint_for_testing(user, assets)
             shares_after = self.gauges[gid].previewDeposit(assets) + self.gauges[gid].totalSupply()
             if shares_after >= 10**12 or shares_after == 0:
                 self.gauges[gid].deposit(assets, user)
@@ -95,11 +104,11 @@ class StatefulG(RuleBasedStateMachine):
 
     @invariant()
     def check_adjustment(self):
-        supply = self.mock_lp.totalSupply()
-        for g in self.gauges:
+        for lp, g in zip(self.lps, self.gauges):
+            supply = lp.totalSupply()
             measured_adjustment = g.get_adjustment()
             assert measured_adjustment <= 10**18
-            bal = self.mock_lp.balanceOf(g.address)
+            bal = lp.balanceOf(g.address)
             if supply == 0:
                 assert measured_adjustment == 0
             else:
@@ -128,8 +137,12 @@ class StatefulG(RuleBasedStateMachine):
         supply_after = self.yb.totalSupply()
         balances_after = [self.yb.balanceOf(user) for user in self.accounts]
 
+        err = 2 * max(g.totalSupply() / 1e18**2 for g in self.gauges)
+
         assert supply_before + expected_emissions == supply_after
-        assert abs(sum(balances_before) + expected_emissions - sum(balances_after)) <= len(self.gauges) + len(self.accounts)
+        real_emissions = sum(balances_after) - sum(balances_before)
+        assert real_emissions <= expected_emissions
+        assert abs(expected_emissions - real_emissions) <= max(len(self.gauges) + len(self.accounts), expected_emissions * err)
 
     @rule(dt=dt, gid=gauge_id)
     def check_mint_split_between_users(self, gid, dt):
@@ -183,14 +196,14 @@ class StatefulG(RuleBasedStateMachine):
 
 
 @pytest.mark.parametrize("_tmp", range(int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", 1))))  # This splits the test into small chunks which are easier to parallelize
-def test_gauges(mock_lp, gauges, gc, yb, accounts, vote_for_gauges, _tmp):
+def test_gauges(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb, _tmp):
     StatefulG.TestCase.settings = settings(max_examples=100, stateful_step_count=20)
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     run_state_machine_as_test(StatefulG)
 
 
-def test_gauges_fail_1(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_1(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -199,7 +212,7 @@ def test_gauges_fail_1(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_2(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_2(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -208,7 +221,7 @@ def test_gauges_fail_2(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_3(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_3(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -301,7 +314,7 @@ def test_gauges_fail_3(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_4(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_4(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -325,7 +338,7 @@ def test_gauges_fail_4(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_5(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_5(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -424,7 +437,7 @@ def test_gauges_fail_5(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_6(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_6(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -629,7 +642,7 @@ def test_gauges_fail_6(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_fail_7(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_7(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
@@ -664,7 +677,22 @@ def test_gauges_fail_7(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
     state.teardown()
 
 
-def test_gauges_not_enough_coins(mock_lp, gauges, gc, yb, accounts, vote_for_gauges):
+def test_gauges_fail_8(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
+    for k, v in locals().items():
+        setattr(StatefulG, k, v)
+    state = StatefulG()
+    state.check_adjustment()
+    state.check_mint_sum(dt=0)
+    state.check_adjustment()
+    state.deposit(assets=194_486_261_763_129_981_553, gid=1, uid=0)
+    state.check_adjustment()
+    state.deposit(assets=2, gid=1, uid=0)
+    state.check_adjustment()
+    state.check_mint_sum(dt=1)
+    state.teardown()
+
+
+def test_gauges_not_enough_coins(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb):
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     state = StatefulG()
