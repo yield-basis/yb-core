@@ -32,6 +32,10 @@ max_mint_rate: public(immutable(uint256))  # Ceiling of the mint rate
 
 @deploy
 def __init__(reserve: uint256, max_rate: uint256):
+    """
+    @param reserve Amount of YB tokens to emit over infinite time
+    @param max_rate Maximum emission rate in tokens per second (reached when rate_factor=1.0)
+    """
     ownable.__init__()
     erc20.__init__("Yield Basis", "YB", 18, "Just say no", "to EIP712")
     # Ownership is now with msg.sender
@@ -63,11 +67,19 @@ def _emissions(t: uint256, rate_factor: uint256) -> uint256:
 @external
 @view
 def preview_emissions(t: uint256, rate_factor: uint256) -> uint256:
+    """
+    @notice Calculate the amount of emissions to be released by the time t
+    @param t Time for which the emissions should be calculated
+    @param rate_factor Average rate factor from 0.0 (0) to 1.0 (1e18)
+    """
     return self._emissions(t, rate_factor)
 
 
 @external
 def start_emissions():
+    """
+    @notice Start token emissions. Ownership must be renounced no earlier than emissions are started
+    """
     ownable._check_owner()
     if self.last_minted == 0:
         self.last_minted = block.timestamp
@@ -75,6 +87,9 @@ def start_emissions():
 
 @external
 def renounce_ownership():
+    """
+    @notice Method for deployer to renounce ownership of the token. After this only GaugeController can mint
+    """
     ownable._check_owner()
     # Force-strt emissions when renouncing ownership
     if self.last_minted == 0:
