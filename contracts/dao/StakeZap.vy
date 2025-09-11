@@ -32,6 +32,14 @@ def _approve_all(gauge: LiquidityGauge, lt: LT, asset: IERC20):
 
 @external
 def deposit_and_stake(gauge: LiquidityGauge, assets: uint256, debt: uint256, min_shares: uint256, receiver: address = msg.sender) -> uint256:
+    """
+    @notice Deposit cryptoasset into LT contract and stake in LiquidityGauge for user
+    @param gauge Gauge to stake in (LP token address is taken from gauge)
+    @param assets Amount of cryptotokens to deposit
+    @param debt Debt size to take when creating the position
+    @param min_shares Minimal amount of LT tokens to create upon deposit
+    @param receiver Address to send gauge tokens to
+    """
     lt: LT = staticcall gauge.LP_TOKEN()
     asset: IERC20 = staticcall lt.ASSET_TOKEN()
     self._approve_all(gauge, lt, asset)
@@ -42,6 +50,13 @@ def deposit_and_stake(gauge: LiquidityGauge, assets: uint256, debt: uint256, min
 
 @external
 def withdraw_and_unstake(gauge: LiquidityGauge, shares: uint256, min_assets: uint256, receiver: address = msg.sender) -> uint256:
+    """
+    @notice Unstake LT from gauge and withdraw to receive cryptoassets
+    @param gauge Gauge to unstake
+    @param shares Amount of gauge tokens to unstake
+    @param min_assets Minimal amount of crypto to receive
+    @param receiver The recipient of crypto after the withdrawal
+    """
     lt: LT = staticcall gauge.LP_TOKEN()
     asset: IERC20 = staticcall lt.ASSET_TOKEN()
     lt_tokens: uint256 = extcall gauge.redeem(shares, self, msg.sender)
