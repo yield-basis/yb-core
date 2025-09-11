@@ -350,6 +350,9 @@ def preview_emissions(gauge: address, at_time: uint256) -> uint256:
 
 @external
 def emit() -> uint256:
+    """
+    @notice Callable from the gauge. Emits the inflation earned by the gauge to it
+    """
     self._checkpoint_gauge(msg.sender)
     emissions: uint256 = self.weighted_emissions_per_gauge[msg.sender]
     to_send: uint256 = emissions - self.sent_emissions_per_gauge[msg.sender]
@@ -361,6 +364,11 @@ def emit() -> uint256:
 
 @external
 def set_killed(gauge: address, is_killed: bool):
+    """
+    @notice Kill or unkill the gauge
+    @param gauge Gauge to kill (stop receiving emissions)
+    @param is_killed Kill or unkill. If unkilled - all the accumulated emissions (if any) get available
+    """
     ownable._check_owner()
     assert self.time_weight[gauge] > 0, "Gauge not added"
     self.is_killed[gauge] = is_killed
