@@ -1,9 +1,13 @@
 import boa
+import pytest
 from numpy import exp, longdouble
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, initialize
 from .conftest import RATE, RESERVE
+
+
+VEST_AMOUNT = 10**8 * 10**18
 
 
 def test_mint(yb, admin, accounts):
@@ -22,6 +26,15 @@ def test_mint(yb, admin, accounts):
 
         with boa.reverts():
             yb.mint(accounts[0], 10**17)
+
+
+@pytest.fixture(scope="session")
+def ivest(admin, yb, accounts):
+    vest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, accounts[2], admin)
+    with boa.env.prank(admin):
+        yb.mint(vest.address, VEST_AMOUNT)
+        vest.start()
+    return vest
 
 
 class StatefulYB(RuleBasedStateMachine):
@@ -60,8 +73,22 @@ class StatefulYB(RuleBasedStateMachine):
             assert d_balance == emitted == expected_emissions
             assert abs(emitted - calculated_emissions) / (emitted + 1) < 2e-18 / (relative_emitted or 1)
 
+    @rule()
+    def check_vest(self):
+        claimable = self.ivest.claimable()
+        balance_before = self.yb.balanceOf(self.accounts[2])
+        with boa.env.prank(self.accounts[3]):
+            self.ivest.claim()
+        balance_after = self.yb.balanceOf(self.accounts[2])
+        assert claimable == balance_after - balance_before
 
-def test_yb(yb, admin, accounts):
+        minted = self.yb.balanceOf(self.accounts[0])
+        vested = self.yb.balanceOf(self.accounts[2])
+
+        assert vested == VEST_AMOUNT * minted // RESERVE
+
+
+def test_yb(yb, admin, accounts, ivest):
     StatefulYB.TestCase.settings = settings(max_examples=200, stateful_step_count=100)
     for k, v in locals().items():
         setattr(StatefulYB, k, v)
