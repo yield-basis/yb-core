@@ -54,6 +54,9 @@ def __init__(yb: YBToken, recipient: address, admin: address):
 
 @external
 def start():
+    """
+    @notice Start the vest. It can be started after all tokens are deposited but before or after the inflation starts
+    """
     assert msg.sender == ownable.owner, "Admin required"
     assert self.initial_vest_reserve == 0, "Already started"
     vest_reserve: uint256 = staticcall YB.balanceOf(self)
@@ -63,6 +66,9 @@ def start():
 
 @external
 def set_recipient(new_recipient: address):
+    """
+    @notice Change recipient of the vested funds. Admin (owner) can change it
+    """
     assert msg.sender == ownable.owner, "Admin required"
     log NewRecepient(recipient=new_recipient, old_recipient=self.recipient)
     self.recipient = new_recipient
@@ -79,11 +85,17 @@ def _claimable() -> uint256:
 @external
 @view
 def claimable() -> uint256:
+    """
+    @notice Amount of tokens claimable since the last claim
+    """
     return self._claimable()
 
 
 @external
 def claim() -> uint256:
+    """
+    @notice Claim vested YB tokens and transfer to the current recipient
+    """
     claimable: uint256 = self._claimable()
     recipient: address = self.recipient
     self.claimed += claimable
