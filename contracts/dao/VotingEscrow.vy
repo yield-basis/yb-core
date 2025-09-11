@@ -638,6 +638,9 @@ def _merge_positions(owner: address, to: address):
 
 @external
 def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearanceChecker):
+    """
+    @notice Set checker for when the transfer os the ve-token is allowed (usually when all votes are removed)
+    """
     ownable._check_owner()
     self.transfer_clearance_checker = transfer_clearance_checker
     log SetTransferClearanceChecker(clearance_checker=transfer_clearance_checker.address)
@@ -645,6 +648,9 @@ def set_transfer_clearance_checker(transfer_clearance_checker: TransferClearance
 
 @external
 def transferFrom(owner: address, to: address, token_id: uint256):
+    """
+    @notice Transfer ve-NFT
+    """
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
     assert token_id == convert(owner, uint256), "Wrong token ID"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
@@ -654,6 +660,9 @@ def transferFrom(owner: address, to: address, token_id: uint256):
 
 @external
 def safeTransferFrom(owner: address, to: address, token_id: uint256, data: Bytes[1_024] = b""):
+    """
+    @notice Transfer ve-NFT and use a callback. Keep in mind that NFT gets destructed before the callback is hit
+    """
     assert erc721._is_approved_or_owner(msg.sender, token_id), "erc721: caller is not token owner or approved"
     assert token_id == convert(owner, uint256), "Wrong token ID"
     assert self._ve_transfer_allowed(owner, to), "Need max veLock"
