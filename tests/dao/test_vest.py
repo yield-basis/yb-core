@@ -11,11 +11,13 @@ VEST_SIZE = 10**8 * 10**18
 class StatefulVest(RuleBasedStateMachine):
     preallocation = st.lists(st.integers(min_value=10**18, max_value=10**8 * 10**18), min_size=10, max_size=10)
     time_delay = st.integers(min_value=0, max_value=2*365*86400)
+    account = st.integers(min_value=0, max_value=9)
 
     @initialize(preallocation=preallocation, dt_start=time_delay, dt_end=time_delay, dt_cliff=time_delay)
     def preallocate(self, preallocation, dt_start, dt_end, dt_cliff):
         psum = sum(preallocation)
         preallocation = [p * VEST_SIZE // psum for p in preallocation]
+        self.preallocation = preallocation
 
         t0 = boa.env.evm.patch.timestamp
         self.t_start = t0 + dt_start
@@ -29,9 +31,25 @@ class StatefulVest(RuleBasedStateMachine):
             self.vest_factory.add_tokens(VEST_SIZE)
             self.vest_factory.fund(self.accounts, preallocation, self.t_cliff)
 
-    @rule()
-    def dummy(self):
-        pass
+    @rule(uid=account)
+    def claim(self, uid):
+        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
+        if self.vest_factory.disabled_at(ce) == 0:
+            vested = self.vest_factory.vestedOf(ce)
+            locked = self.vest_factory.lockedOf(ce)
+            claimed = self.vest_factory.total_claimed(ce)
+            assert vested + locked == self.preallocation[uid]
+            balance_before = self.yb.balanceOf(ce)
+            self.vest_factory.claim(ce)
+            balance_after = self.yb.balanceOf(ce)
+            new_claimed = self.vest_factory.total_claimed(ce)
+            assert new_claimed == balance_after - balance_before + claimed
+            if boa.env.evm.patch.timestamp >= self.t_end:
+                assert new_claimed == self.preallocation[uid]
+
+    @rule(dt=time_delay)
+    def time_travel(self, dt):
+        boa.env.time_travel(dt)
 
 
 def test_vest(mock_gov_token, yb, ve_yb, gc, admin, accounts):
