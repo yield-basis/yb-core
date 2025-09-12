@@ -12,6 +12,7 @@ class StatefulVest(RuleBasedStateMachine):
     preallocation = st.lists(st.integers(min_value=10**18, max_value=10**8 * 10**18), min_size=10, max_size=10)
     time_delay = st.integers(min_value=0, max_value=2*365*86400)
     account = st.integers(min_value=0, max_value=9)
+    vote_weight = st.integers(min_value=0, max_value=10000)
 
     @initialize(preallocation=preallocation, dt_start=time_delay, dt_end=time_delay, dt_cliff=time_delay)
     def preallocate(self, preallocation, dt_start, dt_end, dt_cliff):
@@ -109,13 +110,74 @@ class StatefulVest(RuleBasedStateMachine):
         ce = self.ce[owner]
         owner = self.accounts[owner]
         amount = self.yb.balanceOf(ce.address)
+        locked = self.ve_yb.locked(ce.address)
 
-        if amount >= (4 * 365 * 86400) and self.ve_yb.locked(ce.address).amount > 0:
+        if amount >= (4 * 365 * 86400) and locked.amount > 0 and locked.end > boa.env.evm.patch.timestamp:
             if self.accounts[0] != owner:
                 with boa.reverts():
                     ce.increase_amount(amount)
             with boa.env.prank(owner):
                 ce.increase_amount(amount)
+
+    @rule(owner=account, dt=time_delay)
+    def increase_unlock_time(self, owner, dt):
+        ce = self.ce[owner]
+        owner = self.accounts[owner]
+        locked = self.ve_yb.locked(ce.address)
+        t = boa.env.evm.patch.timestamp
+        new_t = t + dt
+        new_t_round = new_t // (7 * 86400) * (7 * 86400)
+
+        if locked.amount > 0 and new_t_round > locked.end and\
+                locked.end > t and new_t_round <= t + 4 * 365 * 86400:
+            if self.accounts[0] != owner:
+                with boa.reverts():
+                    ce.increase_unlock_time(new_t)
+            with boa.env.prank(owner):
+                ce.increase_unlock_time(new_t)
+
+    @rule(owner=account)
+    def infinite_lock(self, owner):
+        ce = self.ce[owner]
+        owner = self.accounts[owner]
+        locked = self.ve_yb.locked(ce.address)
+        t = boa.env.evm.patch.timestamp
+
+        if locked.end > t and locked.amount > 0:
+            if self.accounts[0] != owner:
+                with boa.reverts():
+                    ce.infinite_lock_toggle()
+            with boa.env.prank(owner):
+                ce.infinite_lock_toggle()
+
+    @rule(owner=account)
+    def withdraw(self, owner):
+        ce = self.ce[owner]
+        owner = self.accounts[owner]
+        locked = self.ve_yb.locked(ce.address)
+        t = boa.env.evm.patch.timestamp
+
+        if locked.end <= t and locked.amount > 0:
+            if self.accounts[0] != owner:
+                with boa.reverts():
+                    ce.withdraw()
+            with boa.env.prank(owner):
+                ce.withdraw()
+
+    @rule(owner=account, vote=vote_weight)
+    def vote(self, owner, vote):
+        ce = self.ce[owner]
+        owner = self.accounts[owner]
+        locked = self.ve_yb.locked(ce.address)
+        t = boa.env.evm.patch.timestamp
+
+        if locked.end > t and locked.amount > 0 and\
+                self.gc.last_user_vote(ce.address, self.gauge.address) >= 10 * 86400:
+                    if self.accounts[0] != owner:
+                        with boa.reverts():
+                            self.vote_for_gauge_weights([self.gauge.address], [vote])
+                    with boa.env.prank(owner):
+                        self.vote_for_gauge_weights([self.gauge.address], [vote])
 
     @rule(dt=time_delay)
     def time_travel(self, dt):
@@ -123,7 +185,7 @@ class StatefulVest(RuleBasedStateMachine):
 
 
 def test_vest(mock_gov_token, yb, ve_yb, gc, admin, accounts):
-    StatefulVest.TestCase.settings = settings(max_examples=200, stateful_step_count=100)
+    StatefulVest.TestCase.settings = settings(max_examples=1000, stateful_step_count=100)
 
     gauge = boa.load('contracts/testing/MockLiquidityGauge.vy', mock_gov_token.address)
     with boa.env.prank(admin):
