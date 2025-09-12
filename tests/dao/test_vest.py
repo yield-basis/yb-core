@@ -25,57 +25,58 @@ class StatefulVest(RuleBasedStateMachine):
         self.t_cliff = self.t_start + dt_cliff + 1  # This will definitely create CliffEscrows
 
         with boa.env.prank(self.admin):
-            self.vest_factory = self.vest_impl.deploy(
+            self.vest = self.vest_impl.deploy(
                     self.yb.address, self.t_start, self.t_end, True, self.cliff_factory.address)
-            self.yb.approve(self.vest_factory.address, 2**256 - 1)
-            self.vest_factory.add_tokens(VEST_SIZE)
-            self.vest_factory.fund(self.accounts, preallocation, self.t_cliff)
+            self.yb.approve(self.vest.address, 2**256 - 1)
+            self.vest.add_tokens(VEST_SIZE)
+            self.vest.fund(self.accounts, preallocation, self.t_cliff)
+            self.ce = [self.cliff_impl.at(self.vest.recipient_to_cliff(owner)) for owner in self.accounts]
 
     @rule(uid=account)
     def claim(self, uid):
-        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
-        if self.vest_factory.disabled_at(ce) == 0:
-            vested = self.vest_factory.vestedOf(ce)
-            locked = self.vest_factory.lockedOf(ce)
-            claimed = self.vest_factory.total_claimed(ce)
+        ce = self.ce[uid].address
+        if self.vest.disabled_at(ce) == 0:
+            vested = self.vest.vestedOf(ce)
+            locked = self.vest.lockedOf(ce)
+            claimed = self.vest.total_claimed(ce)
             assert vested + locked == self.preallocation[uid]
             balance_before = self.yb.balanceOf(ce)
-            self.vest_factory.claim(ce)
+            self.vest.claim(ce)
             balance_after = self.yb.balanceOf(ce)
-            new_claimed = self.vest_factory.total_claimed(ce)
+            new_claimed = self.vest.total_claimed(ce)
             assert new_claimed == balance_after - balance_before + claimed
             if boa.env.evm.patch.timestamp >= self.t_end:
                 assert new_claimed == self.preallocation[uid]
 
     @rule(uid=account)
     def toggle_disable(self, uid):
-        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
+        ce = self.ce[uid].address
         with boa.env.prank(self.admin):
-            if not self.vest_factory.disabled_rugged(ce):
-                self.vest_factory.toggle_disable(ce)
+            if not self.vest.disabled_rugged(ce):
+                self.vest.toggle_disable(ce)
             else:
                 with boa.reverts():
-                    self.vest_factory.toggle_disable(ce)
+                    self.vest.toggle_disable(ce)
 
     @rule(uid=account)
     def rug(self, uid):
-        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
+        ce = self.ce[uid].address
         with boa.env.prank(self.admin):
-            if self.vest_factory.disabled_rugged(ce) or self.vest_factory.disabled_at(ce) == 0:
+            if self.vest.disabled_rugged(ce) or self.vest.disabled_at(ce) == 0:
                 with boa.reverts():
-                    self.vest_factory.rug_disabled(ce, self.admin)
+                    self.vest.rug_disabled(ce, self.admin)
             else:
-                b = self.vest_factory.lockedOf(ce)
+                b = self.vest.lockedOf(ce)
                 admin_before = self.yb.balanceOf(self.admin)
-                self.vest_factory.rug_disabled(ce, self.admin)
+                self.vest.rug_disabled(ce, self.admin)
                 assert self.yb.balanceOf(self.admin) - admin_before == b
 
     @rule(owner=account, caller=account, recipient=account)
     def claim_cliff(self, owner, caller, recipient):
+        ce = self.ce[owner]
         owner = self.accounts[owner]
         caller = self.accounts[caller]
         recipient = self.accounts[recipient]
-        ce = self.cliff_impl.at(self.vest_factory.recipient_to_cliff(owner))
         amount = self.yb.balanceOf(ce.address)
         if amount > 0:
             transfer_allowed = (boa.env.evm.patch.timestamp >= self.t_cliff) and (caller == owner or recipient == owner)
@@ -91,8 +92,8 @@ class StatefulVest(RuleBasedStateMachine):
 
     @rule(owner=account, dt=time_delay)
     def create_lock(self, owner, dt):
+        ce = self.ce[owner]
         owner = self.accounts[owner]
-        ce = self.cliff_impl.at(self.vest_factory.recipient_to_cliff(owner))
         amount = self.yb.balanceOf(ce.address)
 
         if amount > 0 and dt > 0 and self.ve_yb.locked(ce.address).amount == 0:
@@ -102,6 +103,19 @@ class StatefulVest(RuleBasedStateMachine):
                     ce.create_lock(amount, unlock_time)
             with boa.env.prank(owner):
                 ce.create_lock(amount, unlock_time)
+
+    @rule(owner=account)
+    def increase_amount(self, owner):
+        ce = self.ce[owner]
+        owner = self.accounts[owner]
+        amount = self.yb.balanceOf(ce.address)
+
+        if amount >= (4 * 365 * 86400) and self.ve_yb.locked(ce.address).amount > 0:
+            if self.accounts[0] != owner:
+                with boa.reverts():
+                    ce.increase_amount(amount)
+            with boa.env.prank(owner):
+                ce.increase_amount(amount)
 
     @rule(dt=time_delay)
     def time_travel(self, dt):
