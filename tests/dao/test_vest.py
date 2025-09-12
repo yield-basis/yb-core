@@ -89,6 +89,20 @@ class StatefulVest(RuleBasedStateMachine):
                     with boa.reverts():
                         ce.transfer(recipient, amount)
 
+    @rule(owner=account, dt=time_delay)
+    def create_lock(self, owner, dt):
+        owner = self.accounts[owner]
+        ce = self.cliff_impl.at(self.vest_factory.recipient_to_cliff(owner))
+        amount = self.yb.balanceOf(ce.address)
+
+        if amount > 0 and dt > 0 and self.ve_yb.locked(ce.address).amount == 0:
+            unlock_time = boa.env.evm.patch.timestamp + dt + 7 * 86400
+            if self.accounts[0] != owner:
+                with boa.reverts():
+                    ce.create_lock(amount, unlock_time)
+            with boa.env.prank(owner):
+                ce.create_lock(amount, unlock_time)
+
     @rule(dt=time_delay)
     def time_travel(self, dt):
         boa.env.time_travel(dt)
