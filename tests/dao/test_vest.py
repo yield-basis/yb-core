@@ -70,6 +70,25 @@ class StatefulVest(RuleBasedStateMachine):
                 self.vest_factory.rug_disabled(ce, self.admin)
                 assert self.yb.balanceOf(self.admin) - admin_before == b
 
+    @rule(owner=account, caller=account, recipient=account)
+    def claim_cliff(self, owner, caller, recipient):
+        owner = self.accounts[owner]
+        caller = self.accounts[caller]
+        recipient = self.accounts[recipient]
+        ce = self.cliff_impl.at(self.vest_factory.recipient_to_cliff(owner))
+        amount = self.yb.balanceOf(ce.address)
+        if amount > 0:
+            transfer_allowed = (boa.env.evm.patch.timestamp >= self.t_cliff) and (caller == owner or recipient == owner)
+            with boa.env.prank(caller):
+                if transfer_allowed:
+                    before = self.yb.balanceOf(recipient)
+                    ce.transfer(recipient, amount)
+                    after = self.yb.balanceOf(recipient)
+                    assert amount == after - before
+                else:
+                    with boa.reverts():
+                        ce.transfer(recipient, amount)
+
     @rule(dt=time_delay)
     def time_travel(self, dt):
         boa.env.time_travel(dt)
@@ -83,7 +102,8 @@ def test_vest(mock_gov_token, yb, ve_yb, gc, admin, accounts):
         gc.add_gauge(gauge.address)
         yb.mint(admin, VEST_SIZE)
 
-    cliff_factory = boa.load('contracts/dao/CliffEscrow.vy', yb.address, ve_yb.address, gc.address)
+    cliff_impl = boa.load_partial('contracts/dao/CliffEscrow.vy')
+    cliff_factory = cliff_impl.deploy(yb.address, ve_yb.address, gc.address)
     vest_impl = boa.load_partial('contracts/dao/VestingEscrow.vy')
 
     for k, v in locals().items():
