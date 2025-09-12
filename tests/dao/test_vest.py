@@ -47,6 +47,29 @@ class StatefulVest(RuleBasedStateMachine):
             if boa.env.evm.patch.timestamp >= self.t_end:
                 assert new_claimed == self.preallocation[uid]
 
+    @rule(uid=account)
+    def toggle_disable(self, uid):
+        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
+        with boa.env.prank(self.admin):
+            if not self.vest_factory.disabled_rugged(ce):
+                self.vest_factory.toggle_disable(ce)
+            else:
+                with boa.reverts():
+                    self.vest_factory.toggle_disable(ce)
+
+    @rule(uid=account)
+    def rug(self, uid):
+        ce = self.vest_factory.recipient_to_cliff(self.accounts[uid])
+        with boa.env.prank(self.admin):
+            if self.vest_factory.disabled_rugged(ce) or self.vest_factory.disabled_at(ce) == 0:
+                with boa.reverts():
+                    self.vest_factory.rug_disabled(ce, self.admin)
+            else:
+                b = self.vest_factory.lockedOf(ce)
+                admin_before = self.yb.balanceOf(self.admin)
+                self.vest_factory.rug_disabled(ce, self.admin)
+                assert self.yb.balanceOf(self.admin) - admin_before == b
+
     @rule(dt=time_delay)
     def time_travel(self, dt):
         boa.env.time_travel(dt)
