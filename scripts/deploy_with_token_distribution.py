@@ -39,10 +39,12 @@ vests = defaultdict(list)
 
 VotingSettings = namedtuple('VotingSettings', ['votingMode', 'supportThreshold', 'minParticipation', 'minDuration',
                                                'minProposerVotingPower'])
+VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excludedAccounts', 'decayMidpoint',
+                                                           'cooldown'])
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = ""  # ?
+DAO_SUBDOMAIN = "ybdaoname"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -51,21 +53,26 @@ VOTE_SETTINGS = VotingSettings(
     minDuration=7 * 86400,          # s
     minProposerVotingPower=1        # with NFTs 1 = has position, 0 = has no position
 )
-TARGET_CONFIG = (ZERO_ADDRESS, 0)  # ??
-MIN_APPROVALS = 1  # ?
+EXTENDED_PARAMS = VotingExtendedParams(
+    minApprovals=1,
+    excludedAccounts=[],
+    decayMidpoint=5000,
+    cooldown=86400
+)
+TARGET_CONFIG = (ZERO_ADDRESS, 0)
 DAO_DESCRIPTION = {
-    'name': 'Test YB DAO',
+    'name': 'Yield Basis DAO',
     'description': '',
     'links': []
 }
 PLUGIN_DESCRIPTION = {
     'name': 'Yield Basis Proposal',
-    'description': 'Temporary voting plugin before the one with decay is applied',
+    'description': '',
     'links': [],
     'processKey': 'YBP'
 }
 
-TOKEN_VOTING_FACTORY = "0x331499d6a58Dea87222B5935588A7b3ff6D83c44"
+TOKEN_VOTING_FACTORY = "0x1293C8E86b1d7055C07C32B0c37Ed8C14F0C5D10"
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 
 USD_TOKEN = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"  # crvUSD
@@ -208,9 +215,8 @@ if __name__ == '__main__':
         ve_yb.address,
         VOTE_SETTINGS,
         TARGET_CONFIG,
-        MIN_APPROVALS,
         pin_to_ipfs(PLUGIN_DESCRIPTION).encode(),
-        []
+        EXTENDED_PARAMS
     ))
     if not FORK:
         sleep(EXTRA_TIMEOUT)
