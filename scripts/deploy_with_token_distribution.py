@@ -262,8 +262,8 @@ if __name__ == '__main__':
 
     # Immediate 1 year vest (6)
 
-    t0 = int(time()) + 30 * 86400
-    t1 = t0 + 2 * 365 * 86400
+    t0 = int(time()) + VESTING_SHIFT
+    t1 = t0 + 365 * 86400
     vesting_1yi = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
     if not FORK:
         sleep(EXTRA_TIMEOUT)
