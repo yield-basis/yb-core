@@ -24,6 +24,11 @@ Insiders
 1, 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045, 1000001, "Vitalik Buterin (warning: that's a joke, not alpha)"
 1, 0x9afEdB50260491Dba19F93819B1a8d62a2D90B63, 1000000, "Test addy"
 
+Test for other types of vest
+4, 0x9afEdB50260491Dba19F93819B1a8d62a2D90B63, 1000000, "Test addy"
+5, 0x9afEdB50260491Dba19F93819B1a8d62a2D90B63, 1000000, "Test addy"
+6, 0x9afEdB50260491Dba19F93819B1a8d62a2D90B63, 1000000, "Test addy"
+
 Unlocked allocations (for testing now)
 2, 0x40907540d8a6c65c637785e8f8b742ae6b0b9968, 1000000, "Test only"
 2, 0x9afEdB50260491Dba19F93819B1a8d62a2D90B63, 1000000, "Test addy"

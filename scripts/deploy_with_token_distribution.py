@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaotest"  # XXX change
+DAO_SUBDOMAIN = "ybdaot1"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -162,7 +162,7 @@ if __name__ == '__main__':
         sleep(EXTRA_TIMEOUT)
         verify(cliff_impl, etherscan, wait=False)
     t0 = int(time()) + VESTING_SHIFT
-    t1 = t0 + 2 * 365 * 86400 + VESTING_SHIFT
+    t1 = t0 + 2 * 365 * 86400
     vesting = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
     if not FORK:
         sleep(EXTRA_TIMEOUT)
@@ -193,6 +193,7 @@ if __name__ == '__main__':
             sleep(EXTRA_TIMEOUT)
 
     # Inflation-like vest(s) (3)
+
     for address, amount, comment in vests[3]:
         ivest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, address, admin)
         if not FORK:
@@ -204,6 +205,87 @@ if __name__ == '__main__':
         if not FORK:
             sleep(EXTRA_TIMEOUT)
         print(f"IVest:   {ivest.address} for {address}")
+
+    # 1 year delay + 1 year vest (4)
+
+    t0 = int(time()) + 365 * 86400
+    t1 = t0 + 365 * 86400
+    vesting_1y = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(vesting_1y, etherscan, wait=False)
+
+    if vests[4]:
+        recipients = [row[0] for row in vests[4]]
+        amounts = [int(row[1] * 10**18) for row in vests[4]]
+        total = sum(amounts)
+
+        yb.approve(vesting_1y.address, 2**256 - 1)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        yb.mint(admin, total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_1y.add_tokens(total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_1y.fund(recipients, amounts, 0)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+
+    # 1 month delay + 2 year vest (5)
+
+    t0 = int(time()) + 30 * 86400
+    t1 = t0 + 2 * 365 * 86400
+    vesting_2y = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(vesting_2y, etherscan, wait=False)
+
+    if vests[5]:
+        recipients = [row[0] for row in vests[5]]
+        amounts = [int(row[1] * 10**18) for row in vests[5]]
+        total = sum(amounts)
+
+        yb.approve(vesting_2y.address, 2**256 - 1)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        yb.mint(admin, total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_2y.add_tokens(total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_2y.fund(recipients, amounts, 0)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+
+    # Immediate 1 year vest (6)
+
+    t0 = int(time()) + 30 * 86400
+    t1 = t0 + 2 * 365 * 86400
+    vesting_1yi = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(vesting_1yi, etherscan, wait=False)
+
+    if vests[6]:
+        recipients = [row[0] for row in vests[6]]
+        amounts = [int(row[1] * 10**18) for row in vests[6]]
+        total = sum(amounts)
+
+        yb.approve(vesting_1yi.address, 2**256 - 1)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        yb.mint(admin, total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_1yi.add_tokens(total)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
+        vesting_1yi.fund(recipients, amounts, 0)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
 
     # Aragon
 
@@ -278,16 +360,22 @@ if __name__ == '__main__':
 
     # Transfer to YB co
     vesting.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
+    vesting_1y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
+    vesting_2y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
+    vesting_1yi.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
 
     # YB set minter to GC
 
     # YB STILL has deployer as an admin, it needs to start emissions and renounce ownership later
 
-    print(f"YB:      {yb.address}")
-    print(f"veYB:    {ve_yb.address}")
-    print(f"GC:      {gc.address}")
-    print(f"CE:      {cliff_impl.address}")
-    print(f"Vest:    {vesting.address}")
+    print(f"YB:         {yb.address}")
+    print(f"veYB:       {ve_yb.address}")
+    print(f"GC:         {gc.address}")
+    print(f"CE:         {cliff_impl.address}")
+    print(f"Vest:       {vesting.address}")
+    print(f"Vest 1y:    {vesting_1y.address}")
+    print(f"Vest 2y:    {vesting_2y.address}")
+    print(f"Vest 1yi:   {vesting_1yi.address}")
     print()
     print(f"DAO:    {deployed_dao.dao}")
     print(f"Plugin: {deployed_dao.plugin}")
