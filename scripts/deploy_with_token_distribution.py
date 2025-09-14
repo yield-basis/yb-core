@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = True
+FORK = False
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaoname"  # XXX change
+DAO_SUBDOMAIN = "ybdaoname-testingonly-1"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(yb, etherscan, wait=False)
-    ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'Yield Basis', 'YB', '')
+    ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'VotingEscrow for Yield Basis', 'veYB', '')
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(ve_yb, etherscan, wait=False)
@@ -226,23 +226,28 @@ if __name__ == '__main__':
     yb_amm_impl = amm_interface.deploy_as_blueprint()
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+        yb_amm_impl.ctor_calldata = b""
         verify(yb_amm_impl, etherscan, wait=False)
     lt_interface = boa.load_partial('contracts/LT.vy')
     yb_lt_impl = lt_interface.deploy_as_blueprint()
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+        yb_lt_impl.ctor_calldata = b""
         verify(yb_lt_impl, etherscan, wait=False)
     vpool_impl = boa.load_partial('contracts/VirtualPool.vy').deploy_as_blueprint()
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+        vpool_impl.ctor_calldata = b""
         verify(vpool_impl, etherscan, wait=False)
     oracle_impl = boa.load_partial('contracts/CryptopoolLPOracle.vy').deploy_as_blueprint()
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+        oracle_impl.ctor_calldata = b""
         verify(oracle_impl, etherscan, wait=False)
     gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+        gauge_impl.ctor_calldata = b""
         verify(gauge_impl, etherscan, wait=False)
     stake_zap = boa.load('contracts/dao/StakeZap.vy')
     if not FORK:
