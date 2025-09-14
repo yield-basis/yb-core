@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaoname-testingonly-1"  # XXX change
+DAO_SUBDOMAIN = "ybdaotest"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(yb, etherscan, wait=False)
-    ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'VotingEscrow for Yield Basis', 'veYB', '')
+    ve_yb = boa.load('contracts/dao/VotingEscrow.vy', yb.address, 'VotingEscrow: Yield Basis', 'veYB', '')
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(ve_yb, etherscan, wait=False)
