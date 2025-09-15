@@ -377,6 +377,12 @@ if __name__ == '__main__':
     # YB set minter to GC
     yb.set_minter(gc.address, True)
 
+    # Ownerships
+    yb.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
+    if FORK:
+        with boa.env.prank("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9"):
+            yb.renounce_ownership()
+
     # YB STILL has deployer as an admin, it needs to start emissions and renounce ownership later
 
     print(f"YB:         {yb.address}")
