@@ -359,11 +359,15 @@ if __name__ == '__main__':
         FLASH,
         FEE_RECEIVER,
         gc.address,
-        deployed_dao.dao,
+        admin,
         EMERGENCY_ADMIN)
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(yb_factory, etherscan, wait=False)
+
+    # Curve minter can take crvUSD back
+    yb_factory.set_mint_factory(MINT_FACTORY)
+    yb_factory.set_admin(deployed_dao.dao, EMERGENCY_ADMIN)
 
     # Transfer to Aragon:
     # gc
@@ -377,9 +381,6 @@ if __name__ == '__main__':
 
     # YB set minter to GC
     yb.set_minter(gc.address, True)
-
-    # Curve minter can take crvUSD back
-    yb_factory.set_mint_factory(MINT_FACTORY)
 
     # Ownerships
     yb.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
