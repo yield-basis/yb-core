@@ -370,9 +370,9 @@ if __name__ == '__main__':
 
     # Transfer to YB co
     vesting.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
-    vesting_1y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
-    vesting_2y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
-    vesting_1yi.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
+    vesting_1y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
+    vesting_2y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
+    vesting_1yi.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
 
     # YB set minter to GC
     yb.set_minter(gc.address, True)
