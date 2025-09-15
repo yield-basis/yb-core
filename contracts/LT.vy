@@ -832,9 +832,8 @@ def withdraw_admin_fees():
     """
     admin: address = self.admin
     assert admin.is_contract, "Need factory"
-    assert msg.sender == staticcall Factory(admin).admin(), "Access"
-
     assert not staticcall self.amm.is_killed(), "Killed"
+    extcall self.amm.check_nonreentrant()
 
     fee_receiver: address = staticcall Factory(admin).fee_receiver()
     assert fee_receiver != empty(address), "No fee_receiver"
