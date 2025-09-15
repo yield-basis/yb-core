@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = True
+FORK = False
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaot2"  # XXX change
+DAO_SUBDOMAIN = "ybdaot3"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -92,8 +92,8 @@ def read_data():
         reader = csv.reader(f)
         for row in reader:
             if len(row) > 0:
-                if row[0] in ['0', '1', '2', '3']:
-                    yield [int(row[0]), row[1].strip(), float(row[2]), ','.join(row[3:])]
+                if row[0] in ['0', '1', '2', '3', '4', '5', '6']:
+                    yield [int(row[0]), row[1].strip(), int(row[2]), ','.join(row[3:])]
 
 
 def account_load(fname):
