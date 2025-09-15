@@ -172,6 +172,11 @@ if __name__ == '__main__':
     ))
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+    print()
+    print(f"DAO:    {deployed_dao.dao}")
+    print(f"Plugin: {deployed_dao.plugin}")
+    print(f"Cond:   {deployed_dao.condition}")
+    print()
 
     # Filter addresses
     for vest_type in vests:
