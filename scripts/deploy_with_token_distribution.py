@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = False
+FORK = True
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaot1"  # XXX change
+DAO_SUBDOMAIN = "ybdaot2"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -170,6 +170,16 @@ if __name__ == '__main__':
     ))
     if not FORK:
         sleep(EXTRA_TIMEOUT)
+
+    # Filter addresses
+    for vest_type in vests:
+        # [(addr, amount, comment)]
+        new_vests = []
+        for addr, amount, comment in vests[vest_type]:
+            if addr == "DAO":
+                addr = deployed_dao.dao
+            new_vests.append((addr, amount, comment))
+        vests[vest_type] = new_vests
 
     # Vests with cliff (1)
 
