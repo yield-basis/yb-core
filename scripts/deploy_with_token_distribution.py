@@ -414,6 +414,7 @@ if __name__ == '__main__':
     gc.transfer_ownership(deployed_dao.dao)
 
     # Transfer to YB co
+    vesting_team.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
     vesting.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
     vesting_1y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
     vesting_2y.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
