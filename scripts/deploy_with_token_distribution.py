@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaot5"  # XXX change
+DAO_SUBDOMAIN = "yb"
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -88,12 +88,12 @@ EXTRA_TIMEOUT = 30
 
 
 def read_data():
-    name = os.path.dirname(__file__) + '/token_distribution_example.csv'
+    name = os.path.dirname(__file__) + '/deployment-config-prod.csv'
     with open(name, 'r') as f:
         reader = csv.reader(f)
         for row in reader:
             if len(row) > 0:
-                if row[0] in ['0', '1', '2', '3', '4', '5', '6']:
+                if row[0] in ['0', '1', '2', '3', '4', '5', '6', '7']:
                     yield [int(row[0]), row[1].strip(), int(row[2]), ','.join(row[3:])]
 
 
@@ -140,6 +140,7 @@ if __name__ == '__main__':
         boa.env.add_account(admin)
 
     yb = boa.load('contracts/dao/YB.vy', int(vests[0][0][1] * 10**18), int(RATE * vests[0][0][1] * 10**18))
+    grand_total = int(vests[0][0][1] * 10**18)
     if not FORK:
         sleep(EXTRA_TIMEOUT)
         verify(yb, etherscan, wait=False)
@@ -198,6 +199,7 @@ if __name__ == '__main__':
     recipients = [row[0] for row in vests[1]]
     amounts = [int(row[1] * 10**18) for row in vests[1]]
     total = sum(amounts)
+    grand_total += total
 
     yb.approve(vesting.address, 2**256 - 1)
     if not FORK:
@@ -212,12 +214,38 @@ if __name__ == '__main__':
     if not FORK:
         sleep(EXTRA_TIMEOUT)
 
+    # Vests with cliff (7)
+
+    vesting_team = boa.load('contracts/dao/VestingEscrow.vy', yb.address, t0, t1, True, cliff_impl.address)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+        verify(vesting_team, etherscan, wait=False)
+
+    recipients = [row[0] for row in vests[7]]
+    amounts = [int(row[1] * 10**18) for row in vests[7]]
+    total = sum(amounts)
+    grand_total += total
+
+    yb.approve(vesting_team.address, 2**256 - 1)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+    yb.mint(admin, total)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+    vesting_team.add_tokens(total)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+    vesting_team.fund(recipients, amounts, t0 + 365 * 86400 // 2)
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+
     # No vesting no cliff allocations (2)
 
     for address, amount, comment in vests[2]:
         yb.mint(address, int(amount * 10**18))
         if not FORK:
             sleep(EXTRA_TIMEOUT)
+        grand_total += int(amount * 10**18)
 
     # Inflation-like vest(s) (3)
 
@@ -231,7 +259,11 @@ if __name__ == '__main__':
         ivest.start()
         if not FORK:
             sleep(EXTRA_TIMEOUT)
+        ivest.transfer_ownership(deployed_dao.dao)
+        if not FORK:
+            sleep(EXTRA_TIMEOUT)
         print(f"IVest:   {ivest.address} for {address}")
+        grand_total += int(amount * 10**18)
 
     # 1 year delay + 1 year vest (4)
 
@@ -246,6 +278,7 @@ if __name__ == '__main__':
         recipients = [row[0] for row in vests[4]]
         amounts = [int(row[1] * 10**18) for row in vests[4]]
         total = sum(amounts)
+        grand_total += total
 
         yb.approve(vesting_1y.address, 2**256 - 1)
         if not FORK:
@@ -273,6 +306,7 @@ if __name__ == '__main__':
         recipients = [row[0] for row in vests[5]]
         amounts = [int(row[1] * 10**18) for row in vests[5]]
         total = sum(amounts)
+        grand_total += total
 
         yb.approve(vesting_2y.address, 2**256 - 1)
         if not FORK:
@@ -300,6 +334,7 @@ if __name__ == '__main__':
         recipients = [row[0] for row in vests[6]]
         amounts = [int(row[1] * 10**18) for row in vests[6]]
         total = sum(amounts)
+        grand_total += total
 
         yb.approve(vesting_1yi.address, 2**256 - 1)
         if not FORK:
@@ -394,7 +429,9 @@ if __name__ == '__main__':
     print(f"veYB:       {ve_yb.address}")
     print(f"GC:         {gc.address}")
     print(f"CE:         {cliff_impl.address}")
+    print(f"IVest:      {ivest.address}")
     print(f"Vest:       {vesting.address}")
+    print(f"Vest Team:  {vesting_team.address}")
     print(f"Vest 1y:    {vesting_1y.address}")
     print(f"Vest 2y:    {vesting_2y.address}")
     print(f"Vest 1yi:   {vesting_1yi.address}")
@@ -405,3 +442,5 @@ if __name__ == '__main__':
     print()
     print(f"Factory: {yb_factory.address}")
     print(f"StakeZap: {stake_zap.address}")
+    print()
+    print(f"Control sum: {grand_total // 10**18}")
