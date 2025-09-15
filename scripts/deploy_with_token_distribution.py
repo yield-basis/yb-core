@@ -21,7 +21,7 @@ from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
 
 
-FORK = False
+FORK = True
 
 RATE = 1 / (4 * 365 * 86400)
 
@@ -44,7 +44,7 @@ VotingExtendedParams = namedtuple('VotingExtendedParams', ['minApprovals', 'excl
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-DAO_SUBDOMAIN = "ybdaot3"  # XXX change
+DAO_SUBDOMAIN = "ybdaot5"  # XXX change
 DAO_URI = ""  # ?
 VOTE_SETTINGS = VotingSettings(
     votingMode=1,                   # 0 = no early execution, 1 = enable it. Switch 1->0 after 1st markets are seeded
@@ -375,6 +375,7 @@ if __name__ == '__main__':
     vesting_1yi.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")  # XXX
 
     # YB set minter to GC
+    yb.set_minter(gc.address, True)
 
     # YB STILL has deployer as an admin, it needs to start emissions and renounce ownership later
 
