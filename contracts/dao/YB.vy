@@ -21,7 +21,7 @@ exports: (
     erc20.mint,
     erc20.is_minter,
     erc20.set_minter,
-    ownable.transfer_ownership,
+    erc20.transfer_ownership,
     ownable.owner
 )
 
