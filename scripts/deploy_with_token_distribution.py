@@ -79,7 +79,8 @@ USD_TOKEN = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"  # crvUSD
 AGG = "0x18672b1b0c623a30089A280Ed9256379fb0E4E62"  # crvUSD aggregator
 FLASH = "0x26dE7861e213A5351F6ED767d00e0839930e9eE1"
 FEE_RECEIVER = "0x0000000000000000000000000000000000000000"  # DAO sets it to actual fee distributor when necessary
-EMERGENCY_ADMIN = "0x467947EE34aF926cF1DCac093870f613C96B1E0c"
+EMERGENCY_ADMIN = "0x467947EE34aF926cF1DCac093870f613C96B1E0c"  # Curve Emergency DAO
+MINT_FACTORY = "0xC9332fdCB1C491Dcc683bAe86Fe3cb70360738BC"  # Curve ControllerFactory
 
 ETHERSCAN_URL = "https://api.etherscan.io/api"
 
@@ -376,6 +377,9 @@ if __name__ == '__main__':
 
     # YB set minter to GC
     yb.set_minter(gc.address, True)
+
+    # Curve minter can take crvUSD back
+    yb_factory.set_mint_factory(MINT_FACTORY)
 
     # Ownerships
     yb.transfer_ownership("0xC1671c9efc9A2ecC347238BeA054Fc6d1c6c28F9")
