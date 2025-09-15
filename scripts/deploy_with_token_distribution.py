@@ -155,6 +155,22 @@ if __name__ == '__main__':
         sleep(EXTRA_TIMEOUT)
         verify(gc, etherscan, wait=False)
 
+    # Aragon
+
+    factory = boa.load_abi(os.path.dirname(__file__) + '/TokenVotingFactory.abi.json', name="TVFactory").at(TOKEN_VOTING_FACTORY)
+    deployed_dao = factory.deployDAOWithTokenVoting((
+        DAO_SUBDOMAIN,
+        pin_to_ipfs(DAO_DESCRIPTION).encode(),
+        DAO_URI,
+        ve_yb.address,
+        VOTE_SETTINGS,
+        TARGET_CONFIG,
+        pin_to_ipfs(PLUGIN_DESCRIPTION).encode(),
+        EXTENDED_PARAMS
+    ))
+    if not FORK:
+        sleep(EXTRA_TIMEOUT)
+
     # Vests with cliff (1)
 
     cliff_impl = boa.load('contracts/dao/CliffEscrow.vy', yb.address, ve_yb.address, gc.address)
@@ -286,22 +302,6 @@ if __name__ == '__main__':
         vesting_1yi.fund(recipients, amounts, 0)
         if not FORK:
             sleep(EXTRA_TIMEOUT)
-
-    # Aragon
-
-    factory = boa.load_abi(os.path.dirname(__file__) + '/TokenVotingFactory.abi.json', name="TVFactory").at(TOKEN_VOTING_FACTORY)
-    deployed_dao = factory.deployDAOWithTokenVoting((
-        DAO_SUBDOMAIN,
-        pin_to_ipfs(DAO_DESCRIPTION).encode(),
-        DAO_URI,
-        ve_yb.address,
-        VOTE_SETTINGS,
-        TARGET_CONFIG,
-        pin_to_ipfs(PLUGIN_DESCRIPTION).encode(),
-        EXTENDED_PARAMS
-    ))
-    if not FORK:
-        sleep(EXTRA_TIMEOUT)
 
     # Deploy AMM, LT, vpool, lp oracle, gauge impl, stake zap, factory with dao as an admin
     amm_interface = boa.load_partial('contracts/AMM.vy')
