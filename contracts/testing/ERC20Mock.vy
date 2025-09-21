@@ -82,3 +82,8 @@ def _burn_for_testing(_target: address, _value: uint256) -> bool:
     log Transfer(_from=_target, _to=empty(address), _value=_value)
 
     return True
+
+
+@external
+def checkpoint_staker_rebase():
+    pass

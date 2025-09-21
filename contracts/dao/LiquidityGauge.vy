@@ -52,6 +52,7 @@ interface IERC20Slice:
 
 interface LT:
     def is_killed() -> bool: view
+    def checkpoint_staker_rebase(): nonpayable
 
 
 event AddReward:
@@ -351,6 +352,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
     @param receiver Who should get the gauge tokens
     """
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
+    extcall LT(LP_TOKEN.address).checkpoint_staker_rebase()
     shares: uint256 = erc4626._preview_deposit(assets)
     self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
@@ -368,6 +370,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
     @param receiver Receiver of the gauge shares
     """
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
+    extcall LT(LP_TOKEN.address).checkpoint_staker_rebase()
     assets: uint256 = erc4626._preview_mint(shares)
     self._checkpoint_user(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
@@ -386,6 +389,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     @param owner Who had the gauge tokens before the tx
     """
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
+    extcall LT(LP_TOKEN.address).checkpoint_staker_rebase()
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint_user(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
@@ -404,6 +408,8 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     @param owner Who had the gauge tokens before the tx
     """
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
+
+    extcall LT(LP_TOKEN.address).checkpoint_staker_rebase()
 
     # Handle killing so that eadmin can withdraw anyone's shares to their own wallet
     sender: address = msg.sender

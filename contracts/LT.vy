@@ -696,6 +696,21 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: a
 
 
 @external
+def checkpoint_staker_rebase():
+    staker: address = self.staker
+    killed: bool = staticcall self.amm.is_killed()
+
+    if msg.sender == staker and not killed:
+        lv: LiquidityValuesOut = self._calculate_values(self._price_oracle_w())
+        self.liquidity.admin = lv.admin
+        self.liquidity.total = lv.total
+        self.liquidity.staked = lv.staked
+        self.totalSupply = lv.supply_tokens
+        self.balanceOf[staker] = lv.staked_tokens
+        self._log_token_reduction(staker, lv.token_reduction)
+
+
+@external
 @view
 def pricePerShare() -> uint256:
     """
@@ -934,15 +949,15 @@ def _mint(_to: address, _value: uint256):
 def _transfer(_from: address, _to: address, _value: uint256):
     assert _to not in [self, empty(address)]
 
-    killed: bool = staticcall self.amm.is_killed()
-
     staker: address = self.staker
     staker_used: bool = (staker != empty(address) and staker in [_from, _to])
     if staker_used:
         assert _from != _to
         liquidity: LiquidityValuesOut = empty(LiquidityValuesOut)
 
-        if killed:
+        if msg.sender == staker or staticcall self.amm.is_killed():
+            # If sender is staker - it's mint/redeem/deposit/withdraw
+            # where we did checkpoint_staker_rebase() in the same tx
             liquidity.ideal_staked = self.liquidity.ideal_staked
             liquidity.staked = self.liquidity.staked
             liquidity.total = self.liquidity.total
