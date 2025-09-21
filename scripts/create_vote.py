@@ -57,13 +57,16 @@ if __name__ == '__main__':
 
     voting = boa.load_abi(os.path.dirname(__file__) + '/TokenVoting.abi.json', name="AragonVoting").at(VOTING_PLUGIN)
 
-    yb = boa.load_abi(os.path.dirname(__file__) + '/erc20.abi.json', name="YB").at("0x766b660f3f3D5F97831FdF2F873235BbE100Cb30")
+    vest = boa.load_abi(os.path.dirname(__file__) + '/ivest.abi.json', name="YB").at("0x36e36D5D588D480A15A40C7668Be52D36eb206A8")
 
     proposal_id = voting.createProposal(*Proposal(
-        metadata=pin_to_ipfs({'title': 'Transfer', 'summary': 'send 1 yb', 'resources': []}).encode(),
+        metadata=pin_to_ipfs({
+            'title': 'Pass control over Curve grant to Curve DAO',
+            'summary': 'Change ownership of InflationaryVest to Curve Ownership DAO',
+            'resources': []}).encode(),
         actions=[
-            Action(to=yb.address, value=0,
-                   data=yb.transfer.prepare_calldata("0x7a16fF8270133F063aAb6C9977183D9e72835428", 10**18))
+            Action(to=vest.address, value=0,
+                   data=vest.transfer_ownership.prepare_calldata("0x40907540d8a6c65c637785e8f8b742ae6b0b9968"))
         ],
         allowFailureMap=0,
         startDate=0,
