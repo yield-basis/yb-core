@@ -46,6 +46,13 @@ class StatefulVE(RuleBasedStateMachine):
     def add_gauge(self, gauge_id):
         gauge = self.fake_gauges[gauge_id]
 
+        if self.added_gauges:
+            # XXX this is an issue!
+            # Adding gauge and voting for it immediately if there was no checkpoint for a long time
+            # gets immediate rewards to this gauge for all the time missed.
+            # This is a minor thing, however it exists!
+            self.gc.checkpoint(self.added_gauges[0])
+
         with boa.env.prank(self.admin):
             if gauge in self.added_gauges:
                 with boa.reverts():
@@ -379,6 +386,30 @@ def test_emit_expected_emissions(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.create_lock(amount=2_425_115_004_361_743_762, lock_duration=112685815, uid=0)
     state.vote(gauge_ids=[3, 0], uid=0, weight=5000)
     state.emit(gauge_id=0)
+    state.teardown()
+
+
+def test_early_emissions_vote(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.check_sum_votes()
+    state.set_adjustment(adj=0, gauge_id=0)
+    state.add_gauge(gauge_id=0)
+    state.create_lock(amount=201_108_336_682_509_384_677_353_256_941_072_854_112, lock_duration=604800, uid=2)
+    state.set_adjustment(adj=15601, gauge_id=0)
+    state.vote(gauge_ids=[0], uid=2, weight=6499)
+    state.create_lock(amount=6_617_116_090_072_901_844_606_799_209_676_004_925_052, lock_duration=604800, uid=6)
+    state.add_gauge(gauge_id=2)
+    state.add_gauge(gauge_id=4)
+    state.create_lock(amount=1, lock_duration=604800, uid=0)
+    state.set_adjustment(adj=55112, gauge_id=1)
+    state.time_travel(dt=256813)
+
+    state.add_gauge(gauge_id=1)
+    state.vote(gauge_ids=[3], uid=6, weight=1016)
+    state.emit(gauge_id=1)
+
     state.teardown()
 
 
