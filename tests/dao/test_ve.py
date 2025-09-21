@@ -90,16 +90,16 @@ class StatefulVE(RuleBasedStateMachine):
         unlock_time = min(t + lock_duration, 2**256 - 1)
         unlock_time_round = unlock_time // WEEK * WEEK
         with boa.env.prank(user):
-            if self.voting_balances[user]['unlock_time'] <= t:
+            if self.voting_balances[user]['value'] == 0:
+                with boa.reverts('Nothing is locked'):
+                    self.ve_mock.increase_unlock_time(unlock_time)
+            elif self.voting_balances[user]['unlock_time'] <= t:
                 if self.voting_balances[user]['unlock_time'] == 0:
                     with boa.reverts():
                         self.ve_mock.increase_unlock_time(unlock_time)
                 else:
                     with boa.reverts('Lock expired'):
                         self.ve_mock.increase_unlock_time(unlock_time)
-            elif self.voting_balances[user]['value'] == 0:
-                with boa.reverts('Nothing is locked'):
-                    self.ve_mock.increase_unlock_time(unlock_time)
             elif unlock_time_round <= self.voting_balances[user]['unlock_time']:
                 with boa.reverts('Can only increase lock duration'):
                     self.ve_mock.increase_unlock_time(unlock_time)
