@@ -13,7 +13,7 @@ from networks import PINATA_TOKEN
 
 
 FORK = False
-VOTING_PLUGIN = "0xD4f8EaCE89891e89FA46eE60B02a48D3d0FD137C"
+VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
