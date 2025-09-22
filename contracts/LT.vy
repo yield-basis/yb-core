@@ -692,6 +692,9 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: a
     assert extcall STABLECOIN.transfer(amm.address, withdrawn_levamm.debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transfer(receiver, withdrawn_cswap[1], default_return_value=True)
 
+    if not killed:
+        self._checkpoint_gauge()
+
     return (withdrawn_cswap[1], stables_to_return)
 
 
