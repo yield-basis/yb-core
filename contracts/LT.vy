@@ -66,6 +66,7 @@ interface Factory:
     def admin() -> address: view
     def emergency_admin() -> address: view
     def fee_receiver() -> address: view
+    def gauge_controller() -> address: view
     def min_admin_fee() -> uint256: view
 
 
@@ -229,18 +230,11 @@ def _checkpoint_gauge():
     """
     gauge: address = self.staker
     if gauge != empty(address):
-        success: bool = False
-        res: Bytes[32] = empty(Bytes[32])
-        success, res = raw_call(
-            self.admin,
-            method_id("gauge_controller()"),
-            max_outsize=32,
-            is_static_call=True,
-            revert_on_failure=False)
-        if success:
-            gc: address = convert(res, address)
+        admin: address = self.admin
+        if admin.is_contract:
+            gc: address = staticcall Factory(admin).gauge_controller()
             if gc != empty(address):
-                success = raw_call(
+                success: bool = raw_call(
                     gc,
                     abi_encode(gauge, method_id=method_id("checkpoint(address)")),
                     is_static_call=False,
@@ -754,6 +748,7 @@ def set_admin(new_admin: address):
         check_address: address = staticcall Factory(new_admin).admin()
         check_address = staticcall Factory(new_admin).emergency_admin()
         check_address = staticcall Factory(new_admin).fee_receiver()
+        check_address = staticcall Factory(new_admin).gauge_controller()
         check_uint: uint256 = staticcall Factory(new_admin).min_admin_fee()
 
     self.admin = new_admin
