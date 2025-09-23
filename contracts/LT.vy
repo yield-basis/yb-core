@@ -995,7 +995,7 @@ def _transfer(_from: address, _to: address, _value: uint256):
     self.balanceOf[_from] -= _value
     self.balanceOf[_to] += _value
 
-    if staker_used:
+    if staker_used and msg.sender != staker:
         self._checkpoint_gauge()
 
     log IERC20.Transfer(sender=_from, receiver=_to, value=_value)
