@@ -21,7 +21,7 @@ FORK = False
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
-EXTRA_TIMEOUT = 30
+EXTRA_TIMEOUT = 10
 ETHERSCAN_URL = "https://api.etherscan.io/api"
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
@@ -55,6 +55,8 @@ def verify(*args, **kw):
             break
         except ValueError as e:
             print(e)
+            if "Already Verified" in str(e):
+                return
 
 
 def account_load(fname):
