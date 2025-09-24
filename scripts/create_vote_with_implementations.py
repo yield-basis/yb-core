@@ -14,14 +14,14 @@ from networks import PINATA_TOKEN
 from time import sleep
 
 from boa.explorer import Etherscan
-from boa.verifiers import verify
+from boa.verifiers import verify as boa_verify
 
 
 FORK = False
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
-EXTRA_TIMEOUT = 60 * 2
+EXTRA_TIMEOUT = 30
 ETHERSCAN_URL = "https://api.etherscan.io/api"
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
@@ -47,6 +47,16 @@ def pin_to_ipfs(content: dict):
     return 'ipfs://' + response.json()["IpfsHash"]
 
 
+def verify(*args, **kw):
+    while True:
+        try:
+            sleep(EXTRA_TIMEOUT)
+            boa_verify(*args, **kw)
+            break
+        except ValueError as e:
+            print(e)
+
+
 def account_load(fname):
     path = os.path.expanduser(os.path.join('~', '.brownie', 'accounts', fname + '.json'))
     with open(path, 'r') as f:
@@ -70,18 +80,15 @@ if __name__ == '__main__':
     amm_interface = boa.load_partial('contracts/AMM.vy')
     yb_amm_impl = amm_interface.deploy_as_blueprint()
     if not FORK:
-        sleep(EXTRA_TIMEOUT)
         yb_amm_impl.ctor_calldata = b""
         verify(yb_amm_impl, etherscan, wait=True)
     lt_interface = boa.load_partial('contracts/LT.vy')
     yb_lt_impl = lt_interface.deploy_as_blueprint()
     if not FORK:
-        sleep(EXTRA_TIMEOUT)
         yb_lt_impl.ctor_calldata = b""
         verify(yb_lt_impl, etherscan, wait=True)
     gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
     if not FORK:
-        sleep(EXTRA_TIMEOUT)
         gauge_impl.ctor_calldata = b""
         verify(gauge_impl, etherscan, wait=True)
 
