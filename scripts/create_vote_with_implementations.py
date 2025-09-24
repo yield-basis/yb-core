@@ -22,7 +22,7 @@ VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
 EXTRA_TIMEOUT = 10
-ETHERSCAN_URL = "https://api.etherscan.io/api"
+
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
                                    "tryEarlyExecution"])
@@ -74,7 +74,7 @@ if __name__ == '__main__':
         boa.set_network_env(NETWORK)
         USER = account_load('yb-deployer')
         boa.env.add_account(USER)
-        etherscan = Etherscan(ETHERSCAN_URL, ETHERSCAN_API_KEY)
+        etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
     voting = boa.load_abi(os.path.dirname(__file__) + '/TokenVoting.abi.json', name="AragonVoting").at(VOTING_PLUGIN)
     factory = boa.load_abi(os.path.dirname(__file__) + '/Factory.abi.json', name="YB").at("0x370a449FeBb9411c95bf897021377fe0B7D100c0")
