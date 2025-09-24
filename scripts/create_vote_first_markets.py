@@ -79,21 +79,6 @@ if __name__ == '__main__':
     voting = boa.load_abi(os.path.dirname(__file__) + '/TokenVoting.abi.json', name="AragonVoting").at(VOTING_PLUGIN)
     factory = boa.load_abi(os.path.dirname(__file__) + '/Factory.abi.json', name="YB").at("0x370a449FeBb9411c95bf897021377fe0B7D100c0")
 
-    amm_interface = boa.load_partial('contracts/AMM.vy')
-    yb_amm_impl = amm_interface.deploy_as_blueprint()
-    if not FORK:
-        yb_amm_impl.ctor_calldata = b""
-        verify(yb_amm_impl, etherscan, wait=True)
-    lt_interface = boa.load_partial('contracts/LT.vy')
-    yb_lt_impl = lt_interface.deploy_as_blueprint()
-    if not FORK:
-        yb_lt_impl.ctor_calldata = b""
-        verify(yb_lt_impl, etherscan, wait=True)
-    gauge_impl = boa.load_partial('contracts/dao/LiquidityGauge.vy').deploy_as_blueprint()
-    if not FORK:
-        gauge_impl.ctor_calldata = b""
-        verify(gauge_impl, etherscan, wait=True)
-
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
             'title': 'Create first Yield Basis markerts',
