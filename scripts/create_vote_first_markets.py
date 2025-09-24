@@ -19,7 +19,7 @@ from boa.verifiers import verify as boa_verify
 
 FORK = True
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
-USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
+USER = "0xeAfD26ffA47a9e387FB7409A456c4f7c4EF31ad8"
 
 EXTRA_TIMEOUT = 10
 
@@ -72,7 +72,7 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer')
+        USER = account_load('yb-deployer-2')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
