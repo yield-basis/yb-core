@@ -72,7 +72,7 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer-2')
+        USER = account_load('yb-deployer-a')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
@@ -82,7 +82,7 @@ if __name__ == '__main__':
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
             'title': 'Create first Yield Basis markerts',
-            'summary': 'Create first YB markets with 2M crvUSD for each: with WBTC, cbBTC, tBTC collaterals',
+            'summary': 'Create first YB markets with 2M crvUSD for each: WBTC collateral',
             'resources': []}).encode(),
         actions=[
             Action(to=factory.address, value=0,
@@ -92,23 +92,7 @@ if __name__ == '__main__':
                         int(0.035 * 1e18 / (86400 * 365)),
                         2 * 10**6 * 10**18
                        )
-                   ),
-            Action(to=factory.address, value=0,
-                   data=factory.add_market.prepare_calldata(
-                        "0x83f24023d15d835a213df24fd309c47dAb5BEb32",
-                        int(0.0092 * 1e18),
-                        int(0.035 * 1e18 / (86400 * 365)),
-                        2 * 10**6 * 10**18
-                       )
-                   ),
-            Action(to=factory.address, value=0,
-                   data=factory.add_market.prepare_calldata(
-                        "0xf1F435B05D255a5dBdE37333C0f61DA6F69c6127",
-                        int(0.0092 * 1e18),
-                        int(0.035 * 1e18 / (86400 * 365)),
-                        2 * 10**6 * 10**18
-                       )
-                   ),
+                   )
         ],
         allowFailureMap=0,
         startDate=0,
