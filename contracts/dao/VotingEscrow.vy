@@ -530,7 +530,8 @@ def total_supply_at(timepoint: uint256) -> uint256:
 
         if _min == _epoch:
             # Future total supply search -> iterate over all slope changes
-            t_i: uint256 = point.ts  # Already rounded to whole weeks
+            t_i: uint256 = point.ts  # Already rounded to whole weeks <- NOT really, needs rounding / live with this issue
+            # To work around - need to checkpoint before submitting any vote
             for i: uint256 in range(255):
                 t_i += WEEK
                 d_slope: int256 = 0
