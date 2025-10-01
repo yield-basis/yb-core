@@ -234,6 +234,7 @@ def test_loss_negative_value(cryptopool, collateral_token, stablecoin, yb_amm, y
 
     print("Share price after withdraw 1:", yb_lt.pricePerShare() / 1e18)
     print("Collateral withdrawn and transferred 1->2:", collateral_amount / 1e18)
+    print("Admin:", yb_lt.liquidity().admin / 1e18)
 
     p = 10**8 / cryptopool.get_dy(0, 1, 10**8)
     print("Price:", p)
