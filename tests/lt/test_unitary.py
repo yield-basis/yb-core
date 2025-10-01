@@ -189,3 +189,59 @@ def test_preview_emergency_withdraw(cryptopool, yb_lt, collateral_token, stablec
 
         assert c_1 - c_0 == d_collateral
         assert s_1 - s_0 == d_stables
+
+
+def test_loss_negative_value(cryptopool, collateral_token, stablecoin, yb_amm, yb_lt, yb_allocated,
+                             accounts, admin):
+    with boa.env.prank(admin):
+        cryptopool.apply_new_parameters(
+            5 * 10**5,
+            5 * 10**5,
+            cryptopool.fee_gamma(),
+            cryptopool.allowed_extra_profit(),
+            cryptopool.adjustment_step(),
+            cryptopool.ma_time())
+
+    # Seed
+    stablecoin._mint_for_testing(admin, 100_000 * 10**6)
+    collateral_token._mint_for_testing(admin, 10**6)
+    with boa.env.prank(admin):
+        cryptopool.add_liquidity([100_000 * 10**6, 10**6], 0)
+
+    user1 = accounts[1]
+    user2 = accounts[2]
+    swapper = accounts[0]
+
+    # Deposit one
+    collateral_token._mint_for_testing(user1, 10**18)
+    with boa.env.prank(user1):
+        yb_lt.deposit(10**18, 10**18 * 100_000, 0)
+
+    # Trade
+    stablecoin._mint_for_testing(swapper, 50_000 * 10**18)
+    with boa.env.prank(swapper):
+        cryptopool.exchange(0, 1, 50_000 * 10**18, 0)
+
+    print()
+    print("Share price before sleep:", yb_lt.pricePerShare() / 1e18)
+    boa.env.time_travel(86400)
+    print("Share price after sleep:", yb_lt.pricePerShare() / 1e18)
+
+    with boa.env.prank(user1):
+        yb_lt.withdraw(10**10, 0)
+        collateral_amount = collateral_token.balanceOf(user1)
+        collateral_token.transfer(user2, collateral_amount)
+
+    print("Share price after withdraw 1:", yb_lt.pricePerShare() / 1e18)
+    print("Collateral withdrawn and transferred 1->2:", collateral_amount / 1e18)
+
+    p = 10**8 / cryptopool.get_dy(0, 1, 10**8)
+    print("Price:", p)
+
+    debt0 = int(p * collateral_amount)
+    with boa.env.anchor():
+        with boa.env.prank(user2):
+            yb_lt.deposit(collateral_amount, debt0, 0)
+            balance = yb_lt.balanceOf(user2)
+            print("Shares 2:", balance / 1e18)
+            assert balance <= 10**10  # What the first user withdrew
