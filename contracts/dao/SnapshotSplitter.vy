@@ -52,6 +52,7 @@ splits: public(HashMap[uint256, HashMap[address, uint256]])
 weighted_votes: public(WeightedVote[10])
 address_mappings: public(HashMap[address, address])
 claimed: public(HashMap[address, bool])
+total_claimed: public(uint256)
 
 
 @deploy
@@ -128,13 +129,15 @@ def get_fraction(voter: address) -> uint256:
     return self._get_fraction(voter)
 
 
+@nonreentrant
 @external
 def claim(_for: address = msg.sender) -> uint256:
     assert not self.claimed[_for], "Already claimed"
-    amount: uint256 = (staticcall TOKEN.balanceOf(self)) * self._get_fraction(_for) // 10**18
+    amount: uint256 = (staticcall TOKEN.balanceOf(self) + self.total_claimed) * self._get_fraction(_for) // 10**18
     self.claimed[_for] = True
     _to: address = self.address_mappings[_for]
     if _to == empty(address):
         _to = _for
+    self.total_claimed += amount
     extcall TOKEN.transfer(_to, amount)
     return amount

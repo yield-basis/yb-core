@@ -16,6 +16,7 @@ TEST_YB_HOLDER = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 VOTE_IDS = [1206, 1213]
 SPLITS = {1206: (398069876760505032592651518, 19719666439017461732129672)}
 VOTE_SPLITTING_USER = "0x989AEb4d175e16225E39E87d0D97A3360524AD80"  # Works if there's only one (our case - that's convex)
+USER_MAPPINGS = {"0x989AEb4d175e16225E39E87d0D97A3360524AD80": "0x1389388d01708118b497f59521f6943Be2541bb7"}
 
 
 def account_load(fname):
@@ -44,14 +45,15 @@ if __name__ == '__main__':
         splitter.register_split(vote_id, VOTE_SPLITTING_USER, yay, nay)
     splitter.register_votes(VOTE_IDS, [2, 1])
     splitter.register_mappings(
-        ["0x989AEb4d175e16225E39E87d0D97A3360524AD80"],  # from
-        ["0x1389388d01708118b497f59521f6943Be2541bb7"]   # to
+        list(USER_MAPPINGS.keys()),
+        list(USER_MAPPINGS.values())
     )
+
+    yb_interface = boa.load_partial('contracts/dao/YB.vy')
+    yb = yb_interface.at(YB)
 
     if FORK:
         with boa.env.prank(TEST_YB_HOLDER):
-            yb_interface = boa.load_partial('contracts/dao/YB.vy')
-            yb = yb_interface.at(YB)
             yb.transfer(splitter.address, 5 * 10**6 * 10**18)
 
     splitter.renounce_ownership()
@@ -72,3 +74,13 @@ if __name__ == '__main__':
         ]
         fracs = [splitter.get_fraction(u) for u in TEST_USERS]
         print(f'Fraction: {sum(fracs)/1e18}')
+        claimed = {}
+        for user in TEST_USERS:
+            with boa.env.prank(user):
+                splitter.claim()
+                with boa.reverts():
+                    splitter.claim()
+                claimed[user] = yb.balanceOf(USER_MAPPINGS.get(user, user))
+        print(f"Total claimed: {sum(claimed.values()) / 1e18}")
+        from pprint import pprint
+        pprint(claimed)
