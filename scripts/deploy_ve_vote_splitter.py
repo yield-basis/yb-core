@@ -39,9 +39,20 @@ if __name__ == '__main__':
     splitter = boa.load('contracts/dao/SnapshotSplitter.vy', ARAGON, VE)
     for vote_id, (yay, nay) in SPLITS.items():
         splitter.register_split(vote_id, VOTE_SPLITTING_USER, yay, nay)
+    splitter.register_votes(VOTE_IDS, [2, 1])
 
-    for vote_id in VOTE_IDS:
-        yes, no, total = splitter.get_vote(vote_id)
-        print(f'Yes: {yes/1e18}, No: {no/1e18}, Total: {total/1e18}')
-        vote = splitter.get_aragon_vote(vote_id, VOTE_SPLITTING_USER)
-        print(f'Test vote: {vote/1e18}')
+    TEST_USERS = [
+        "0x989AEb4d175e16225E39E87d0D97A3360524AD80",
+        "0x52f541764E6e90eeBc5c21Ff570De0e2D63766B6",
+        "0xF147b8125d2ef93FB6965Db97D6746952a133934",
+        "0x9B44473E223f8a3c047AD86f387B80402536B029",
+        "0x7a16fF8270133F063aAb6C9977183D9e72835428",
+        "0xF89501B77b2FA6329F94F5A05FE84cEbb5c8b1a0",
+        "0x425d16B0e08a28A3Ff9e4404AE99D78C0a076C5A",
+        "0x32D03DB62e464c9168e41028FFa6E9a05D8C6451",
+        "0x0D5Dc686d0a2ABBfDaFDFb4D0533E886517d4E83",
+        "0x10E3085127C9BD92AB325F8D1f65CDcEC2436149",
+        "0x39415255619783A2E71fcF7d8f708A951d92e1b6"
+    ]
+    fracs = [splitter.get_fraction(u) for u in TEST_USERS]
+    print(f'Fraction: {sum(fracs)/1e18}')
