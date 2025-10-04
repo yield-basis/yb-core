@@ -132,6 +132,7 @@ def get_fraction(voter: address) -> uint256:
 @nonreentrant
 @external
 def claim(_for: address = msg.sender) -> uint256:
+    assert ownable.owner == empty(address)
     assert not self.claimed[_for], "Already claimed"
     amount: uint256 = (staticcall TOKEN.balanceOf(self) + self.total_claimed) * self._get_fraction(_for) // 10**18
     self.claimed[_for] = True
