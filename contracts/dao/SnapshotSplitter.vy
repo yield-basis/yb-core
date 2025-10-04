@@ -75,6 +75,7 @@ def register_split(vote_id: uint256, voter: address, yay: uint256, nay: uint256)
 
 @external
 def register_votes(vote_ids: DynArray[uint256, 10], weights: DynArray[uint256, 10]):
+    ownable._check_owner()
     total_weight: uint256 = 0
     for w: uint256 in weights:
         total_weight += w
