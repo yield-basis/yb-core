@@ -126,3 +126,15 @@ def _get_fraction(voter: address) -> uint256:
 @view
 def get_fraction(voter: address) -> uint256:
     return self._get_fraction(voter)
+
+
+@external
+def claim(_for: address = msg.sender) -> uint256:
+    assert not self.claimed[_for], "Already claimed"
+    amount: uint256 = (staticcall TOKEN.balanceOf(self)) * self._get_fraction(_for) // 10**18
+    self.claimed[_for] = True
+    _to: address = self.address_mappings[_for]
+    if _to == empty(address):
+        _to = _for
+    extcall TOKEN.transfer(_to, amount)
+    return amount

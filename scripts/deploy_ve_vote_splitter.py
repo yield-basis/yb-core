@@ -54,6 +54,8 @@ if __name__ == '__main__':
             yb = yb_interface.at(YB)
             yb.transfer(splitter.address, 5 * 10**6 * 10**18)
 
+    splitter.renounce_ownership()
+
     if FORK:
         TEST_USERS = [
             "0x989AEb4d175e16225E39E87d0D97A3360524AD80",
