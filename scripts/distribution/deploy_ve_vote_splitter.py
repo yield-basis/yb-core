@@ -13,7 +13,8 @@ YB = "0x01791F726B4103694969820be083196cC7c045fF"
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 TEST_YB_HOLDER = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 
-VOTE_IDS = [1206, 1213]
+VOTE_IDS = [1206, 1213, 1222]
+RELEVANT_VE = [658360138395682645902965202, 713271904611301298813191944, 645952437505820310296747634]
 SPLITS = {1206: (398069876760505032592651518, 19719666439017461732129672)}
 VOTE_SPLITTING_USER = "0x989AEb4d175e16225E39E87d0D97A3360524AD80"  # Works if there's only one (our case - that's convex)
 USER_MAPPINGS = {"0x989AEb4d175e16225E39E87d0D97A3360524AD80": "0x1389388d01708118b497f59521f6943Be2541bb7"}
@@ -43,7 +44,9 @@ if __name__ == '__main__':
     splitter = boa.load('contracts/dao/SnapshotSplitter.vy', ARAGON, VE, YB)
     for vote_id, (yay, nay) in SPLITS.items():
         splitter.register_split(vote_id, VOTE_SPLITTING_USER, yay, nay)
-    splitter.register_votes(VOTE_IDS, [2, 1])
+        if vote_id in SPLITS:
+            RELEVANT_VE[VOTE_IDS.index(vote_id)] -= SPLITS[vote_id][1]
+    splitter.register_votes(VOTE_IDS, [2, 1, 2], RELEVANT_VE)
     splitter.register_mappings(
         list(USER_MAPPINGS.keys()),
         list(USER_MAPPINGS.values())

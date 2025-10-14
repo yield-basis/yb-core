@@ -74,7 +74,7 @@ def register_split(vote_id: uint256, voter: address, yay: uint256, nay: uint256)
 
 
 @external
-def register_votes(vote_ids: DynArray[uint256, 10], weights: DynArray[uint256, 10]):
+def register_votes(vote_ids: DynArray[uint256, 10], weights: DynArray[uint256, 10], relevant_ve: DynArray[uint256, 10]):
     ownable._check_owner()
     total_weight: uint256 = 0
     for w: uint256 in weights:
@@ -84,7 +84,7 @@ def register_votes(vote_ids: DynArray[uint256, 10], weights: DynArray[uint256, 1
         state: VoteState = staticcall ARAGON.getVote(vid)
         self.weighted_votes[i] = WeightedVote(
             vid=vid,
-            weight=(total_weight * state.yea // weights[i] + 1),  # We will divide ve amount by this, so it has to be LARGER than the original weight
+            weight=(total_weight * relevant_ve[i] // weights[i] + 1),  # We will divide ve amount by this, so it has to be LARGER than the original weight
             block=state.snapshotBlock
         )
         i += 1
@@ -110,15 +110,10 @@ def _get_fraction(voter: address) -> uint256:
             break
 
         vote: uint8 = staticcall ARAGON.getVoterState(wv.vid, voter)
-        if vote > 0:
+        if vote == 1:
             split: uint256 = self.splits[wv.vid][voter]
             if split == 0:
-                if vote == 1:
-                    split = 10**18
-                elif vote == 2:
-                    split = 0
-                elif vote == 3:
-                    split = 5 * 10**17
+                split = 10**18
             weight += (staticcall VE.balanceOfAt(voter, wv.block)) * split // wv.weight
 
     return weight
