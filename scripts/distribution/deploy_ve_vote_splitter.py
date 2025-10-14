@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 
 import boa
+import json
+import os
+from eth_account import account
+from boa.explorer import Etherscan
 from networks import NETWORK
 from networks import ETHERSCAN_API_KEY
+from getpass import getpass
+from time import sleep
+from boa.verifiers import verify
 
 
 FORK = True
@@ -38,10 +45,14 @@ if __name__ == '__main__':
         admin = DEPLOYER
         boa.env.eoa = admin
     else:
-        admin = account_load('yb-deployer')
+        admin = account_load('distribution-voter')
         boa.env.add_account(admin)
 
     splitter = boa.load('contracts/dao/SnapshotSplitter.vy', ARAGON, VE, YB)
+    if not FORK:
+        sleep(30)
+        verify(splitter, etherscan, wait=True)
+
     for vote_id, (yay, nay) in SPLITS.items():
         splitter.register_split(vote_id, VOTE_SPLITTING_USER, yay, nay)
         if vote_id in SPLITS:
@@ -59,31 +70,31 @@ if __name__ == '__main__':
         with boa.env.prank(TEST_YB_HOLDER):
             yb.transfer(splitter.address, 5 * 10**6 * 10**18)
 
-    splitter.renounce_ownership()
+        splitter.renounce_ownership()
 
-    if FORK:
-        TEST_USERS = [
-            "0x989AEb4d175e16225E39E87d0D97A3360524AD80",
-            "0x52f541764E6e90eeBc5c21Ff570De0e2D63766B6",
-            "0xF147b8125d2ef93FB6965Db97D6746952a133934",
-            "0x9B44473E223f8a3c047AD86f387B80402536B029",
-            "0x7a16fF8270133F063aAb6C9977183D9e72835428",
-            "0xF89501B77b2FA6329F94F5A05FE84cEbb5c8b1a0",
-            "0x425d16B0e08a28A3Ff9e4404AE99D78C0a076C5A",
-            "0x32D03DB62e464c9168e41028FFa6E9a05D8C6451",
-            "0x0D5Dc686d0a2ABBfDaFDFb4D0533E886517d4E83",
-            "0x10E3085127C9BD92AB325F8D1f65CDcEC2436149",
-            "0x39415255619783A2E71fcF7d8f708A951d92e1b6"
-        ]
-        fracs = [splitter.get_fraction(u) for u in TEST_USERS]
-        print(f'Fraction: {sum(fracs)/1e18}')
-        claimed = {}
-        for user in TEST_USERS:
-            with boa.env.prank(user):
-                splitter.claim()
-                with boa.reverts():
+        if FORK:
+            TEST_USERS = [
+                "0x989AEb4d175e16225E39E87d0D97A3360524AD80",
+                "0x52f541764E6e90eeBc5c21Ff570De0e2D63766B6",
+                "0xF147b8125d2ef93FB6965Db97D6746952a133934",
+                "0x9B44473E223f8a3c047AD86f387B80402536B029",
+                "0x7a16fF8270133F063aAb6C9977183D9e72835428",
+                "0xF89501B77b2FA6329F94F5A05FE84cEbb5c8b1a0",
+                "0x425d16B0e08a28A3Ff9e4404AE99D78C0a076C5A",
+                "0x32D03DB62e464c9168e41028FFa6E9a05D8C6451",
+                "0x0D5Dc686d0a2ABBfDaFDFb4D0533E886517d4E83",
+                "0x10E3085127C9BD92AB325F8D1f65CDcEC2436149",
+                "0x39415255619783A2E71fcF7d8f708A951d92e1b6"
+            ]
+            fracs = [splitter.get_fraction(u) for u in TEST_USERS]
+            print(f'Fraction: {sum(fracs)/1e18}')
+            claimed = {}
+            for user in TEST_USERS:
+                with boa.env.prank(user):
                     splitter.claim()
-                claimed[user] = yb.balanceOf(USER_MAPPINGS.get(user, user))
-        print(f"Total claimed: {sum(claimed.values()) / 1e18}")
-        from pprint import pprint
-        pprint(claimed)
+                    with boa.reverts():
+                        splitter.claim()
+                    claimed[user] = yb.balanceOf(USER_MAPPINGS.get(user, user))
+            print(f"Total claimed: {sum(claimed.values()) / 1e18}")
+            from pprint import pprint
+            pprint(claimed)
