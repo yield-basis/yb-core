@@ -9,7 +9,6 @@ from networks import NETWORK
 from networks import ETHERSCAN_API_KEY
 from getpass import getpass
 from time import sleep
-from time import time
 from boa.verifiers import verify
 
 
@@ -72,7 +71,10 @@ if __name__ == '__main__':
         batch = items[:BATCH_SIZE]
         items = items[len(batch):]
         users, amounts = list(zip(*batch))
+        before = yb.balanceOf(admin)
         multisend.send(users, amounts)
+        after = yb.balanceOf(admin)
+        print("Sent:", before - after, ", Expected:", sum(amounts))
         if not FORK:
             sleep(30)
 
