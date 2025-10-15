@@ -45,7 +45,7 @@ if __name__ == '__main__':
         admin = DEPLOYER
         boa.env.eoa = admin
     else:
-        admin = account_load('distribution-voter')
+        admin = account_load('yb-deployer')
         boa.env.add_account(admin)
 
     splitter = boa.load('contracts/dao/SnapshotSplitter.vy', ARAGON, VE, YB)
