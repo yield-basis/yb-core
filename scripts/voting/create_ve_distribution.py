@@ -17,9 +17,9 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 
-FORK = True
+FORK = False
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
-USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
+USER = "0xeAfD26ffA47a9e387FB7409A456c4f7c4EF31ad8"
 YB = "0x01791F726B4103694969820be083196cC7c045fF"
 SPLITTER = "0xC8aA884f54eA5eaEF5ef4086607C00580a103928"
 
@@ -74,7 +74,7 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer')
+        USER = account_load('yb-deployer-2')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
             'title': 'Send tokens for Curve governance airdrop to veCRV voters',
-            'summary': 'Allocate 5M YB for Curve ve-governance airdrop - those who voted for important proposals',
+            'summary': 'Allocate 5M YB for Curve ve-governance airdrop - those who voted YES for important proposals 1206, 1213 and 1222',
             'resources': []}).encode(),
         actions=[
             Action(to=YB, value=0, data=yb.transfer.prepare_calldata(SPLITTER, 5 * 10**6 * 10**18))
