@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Governance vote splitter
+# 0xC8aA884f54eA5eaEF5ef4086607C00580a103928
 
 import boa
 import json
