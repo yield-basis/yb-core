@@ -12,7 +12,7 @@ from time import sleep
 from boa.verifiers import verify
 
 
-FORK = True
+FORK = False
 ARAGON = "0xE478de485ad2fe566d49342Cbd03E49ed7DB3356"
 VE = "0x5f3b5DfEb7B28CDbD7FAba78963EE202a494e2A2"
 YB = "0x01791F726B4103694969820be083196cC7c045fF"
@@ -58,9 +58,13 @@ if __name__ == '__main__':
 
     for vote_id, (yay, nay) in SPLITS.items():
         splitter.register_split(vote_id, VOTE_SPLITTING_USER, yay, nay)
+        if not FORK:
+            sleep(30)
         if vote_id in SPLITS:
             RELEVANT_VE[VOTE_IDS.index(vote_id)] -= SPLITS[vote_id][1]
     splitter.register_votes(VOTE_IDS, [2, 1, 2], RELEVANT_VE)
+    if not FORK:
+        sleep(30)
     splitter.register_mappings(
         list(USER_MAPPINGS.keys()),
         list(USER_MAPPINGS.values())
