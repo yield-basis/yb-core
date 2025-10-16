@@ -13,11 +13,10 @@ from time import time
 from boa.verifiers import verify
 
 
-FORK = True
+FORK = False
 YB = "0x01791F726B4103694969820be083196cC7c045fF"
-DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
-TEST_YB_HOLDER = "0xdD6969f143D919C72052111c6679b21c71268b7a"
-VESTING_SHIFT = 5 * 60  # s
+DEPLOYER = "0xa41074e0472E4e014c655dD143E9f5b87784a9DF"
+VESTING_SHIFT = 30 * 60  # s
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 FUND_AMOUNT = 5_625_000 * 10**18
 
@@ -40,7 +39,7 @@ if __name__ == '__main__':
         admin = DEPLOYER
         boa.env.eoa = admin
     else:
-        admin = account_load('distribution-voter')
+        admin = account_load('ADMIN')
         boa.env.add_account(admin)
 
     t0 = int(time()) + VESTING_SHIFT
@@ -53,13 +52,10 @@ if __name__ == '__main__':
 
     yb_interface = boa.load_partial('contracts/dao/YB.vy')
     yb = yb_interface.at(YB)
+    print("Funds available:", yb.balanceOf(DEPLOYER))
     yb.approve(vesting.address, 2**256-1)
     if not FORK:
         sleep(30)
-
-    if FORK:
-        with boa.env.prank(TEST_YB_HOLDER):
-            yb.transfer(admin, FUND_AMOUNT)
 
     with open(os.path.dirname(__file__) + "/split-vested.json", "r") as f:
         users = json.load(f)
@@ -73,5 +69,8 @@ if __name__ == '__main__':
 
     recipients, amounts = list(zip(*users.items()))
     vesting.fund(recipients, amounts, 0)
+    if not FORK:
+        sleep(30)
 
     print(vesting.unallocated_supply())
+    print("Funds available:", yb.balanceOf(DEPLOYER))
