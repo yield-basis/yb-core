@@ -810,8 +810,13 @@ def allocate_stablecoins(limit: uint256 = max_value(uint256)):
 
     elif allocation < allocated:
         lp_price: uint256 = extcall (staticcall self.amm.PRICE_ORACLE_CONTRACT()).price_w()
-        assert allocation >= lp_price * (staticcall self.amm.collateral_amount()) // 10**18, "Not enough stables"
-        to_transfer: uint256 = min(allocated - allocation, staticcall STABLECOIN.balanceOf(self.amm.address))
+        # Normal operation leaves 50% surplus - coefficient 1
+        # "At the edge" is 1/2
+        # Safe lower limit for deflating the market - 3/4
+        safe_lower_limit: uint256 = lp_price * (staticcall self.amm.collateral_amount()) * 3 // 4 // 10**18
+        to_transfer: uint256 = min(
+            min(allocated - allocation, allocated - safe_lower_limit),
+            staticcall STABLECOIN.balanceOf(self.amm.address))
         allocated -= to_transfer
         assert extcall STABLECOIN.transferFrom(self.amm.address, allocator, to_transfer, default_return_value=True)
         self.stablecoin_allocated = allocated
