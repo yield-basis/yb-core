@@ -16,6 +16,7 @@ interface PriceOracle:
 interface AMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def collateral_amount() -> uint256: view
+    def value_oracle() -> OraclizedValue: view
 
 interface LT:
     def set_rate(rate: uint256): nonpayable
@@ -24,6 +25,11 @@ interface LT:
     def amm() -> AMM: view
     def stablecoin_allocated() -> uint256: view
     def set_killed(is_killed: bool): nonpayable
+
+
+struct OraclizedValue:
+    p_o: uint256
+    value: uint256
 
 
 ADMIN: public(immutable(address))
@@ -74,7 +80,9 @@ def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
             lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
             available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
             allocated: uint256 = staticcall lt.stablecoin_allocated()
+            safe_limit: uint256 = (staticcall amm.value_oracle()).value * 3 // 4
             assert available_limit < allocated, "Deflate"
+            assert available_limit >= safe_limit, "Not enough reserves"
             extcall lt.allocate_stablecoins(available_limit)
 
 
