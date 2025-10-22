@@ -55,7 +55,7 @@ def lt_set_amm_rate(lt: LT, fee: uint256):
 
 
 @external
-def lt_allocate_stablecoins(lt: LT, limit: uint256):
+def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
     if limit != 0:
         assert msg.sender == ADMIN, "Access"
         extcall lt.allocate_stablecoins(limit)
