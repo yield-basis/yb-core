@@ -79,7 +79,7 @@ def preview_migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coef
 
 
 @internal
-def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out_vs_in: uint256, debt_coefficient: uint256,
+def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256, debt_coefficient: uint256,
                    _for: address) -> uint256:
     # Prepare asset approvals (e.g. WBTC etc)
     asset: IERC20 = staticcall lt_from.ASSET_TOKEN()
@@ -98,20 +98,18 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out_vs_in: ui
 
     debt = debt * debt_coefficient // 10**18
 
-    # Compute min_shares and deposit
-    min_shares: uint256 = min_out_vs_in * shares_in // 10**18
-    return extcall lt_to.deposit(assets, debt, min_shares, _for)
+    return extcall lt_to.deposit(assets, debt, min_out, _for)
 
 
 @external
-def migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out_vs_in: uint256,
+def migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
                   debt_coefficient: uint256 = 10**18):
     extcall lt_from.transferFrom(msg.sender, self, shares_in)
-    self._migrate_plain(lt_from, lt_to, shares_in, min_out_vs_in, debt_coefficient, msg.sender)
+    self._migrate_plain(lt_from, lt_to, shares_in, min_out, debt_coefficient, msg.sender)
 
 
 @external
-def migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, min_out_vs_in: uint256,
+def migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
                    debt_coefficient: uint256 = 10**18):
     gauge_from: Gauge = staticcall lt_from.staker()
     gauge_to: Gauge = staticcall lt_to.staker()
@@ -122,4 +120,4 @@ def migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, min_out_vs_in: ui
     amount_lt_from: uint256 = extcall gauge_from.redeem(shares_in, self, msg.sender)
     amount_lt_to: uint256 = self._migrate_plain(lt_from, lt_to, amount_lt_from, 0, debt_coefficient, self)
     shares_out: uint256 = extcall gauge_to.deposit(amount_lt_to, msg.sender)
-    assert shares_out >= min_out_vs_in * shares_in // 10**18, "not enough out"
+    assert shares_out >= min_out, "not enough out"
