@@ -28,6 +28,7 @@ interface LT:
 
 ADMIN: public(immutable(address))
 FACTORY: public(immutable(Factory))
+disabled_lts: public(HashMap[LT, bool])
 
 
 @deploy
@@ -58,9 +59,15 @@ def lt_set_amm_rate(lt: LT, fee: uint256):
 def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
     if limit != 0:
         assert msg.sender == ADMIN, "Access"
+        self.disabled_lts[lt] = False
         extcall lt.allocate_stablecoins(limit)
 
     else:
+        if msg.sender == ADMIN:
+            self.disabled_lts[lt] = True
+        else:
+            assert self.disabled_lts[lt]
+
         # Deallocate as much as available, and allow anyone to do it
         amm: AMM = staticcall lt.amm()
         lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
