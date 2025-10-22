@@ -409,12 +409,13 @@ def _log_token_reduction(staker: address, token_reduction: int256):
 @external
 @view
 @nonreentrant
-def preview_deposit(assets: uint256, debt: uint256) -> uint256:
+def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool = True) -> uint256:
     """
     @notice Returns the amount of shares which can be obtained upon depositing assets, including slippage.
             Reverts if amounts are too high
     @param assets Amount of crypto to deposit
     @param debt Amount of stables to borrow for MMing (approx same value as crypto)
+    @param raise_overflow Raise if deposit overflows (optional and true by default)
     """
     lp_tokens: uint256 = staticcall CRYPTOPOOL.calc_token_amount([debt, assets], True)
     supply: uint256 = self.totalSupply
@@ -426,8 +427,9 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         if liquidity.total > 0:
             v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True)
-            if amm_max_debt < v.value:
-                raise "Debt too high"
+            if raise_overflow:
+                if amm_max_debt < v.value:
+                    raise "Debt too high"
             # Liquidity contains admin fees, so we need to subtract
             # If admin fees are negative - we get LESS LP tokens
             # value_before = v.value_before - liquidity.admin = total
@@ -435,8 +437,9 @@ def preview_deposit(assets: uint256, debt: uint256) -> uint256:
             return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
     v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt)
-    if amm_max_debt < v.value:
-        raise "Debt too high"
+    if raise_overflow:
+        if amm_max_debt < v.value:
+            raise "Debt too high"
     return v.value * 10**18 // p_o
 
 
