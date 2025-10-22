@@ -65,16 +65,17 @@ def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
     else:
         if msg.sender == ADMIN:
             self.disabled_lts[lt] = True
-        else:
-            assert self.disabled_lts[lt]
 
-        # Deallocate as much as available, and allow anyone to do it
-        amm: AMM = staticcall lt.amm()
-        lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
-        available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
-        allocated: uint256 = staticcall lt.stablecoin_allocated()
-        assert available_limit < allocated, "Deflate"
-        extcall lt.allocate_stablecoins(available_limit)
+        else:
+            assert self.disabled_lts[lt], "Not disabled"
+
+            # Deallocate as much as available, and allow anyone to do it
+            amm: AMM = staticcall lt.amm()
+            lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
+            available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
+            allocated: uint256 = staticcall lt.stablecoin_allocated()
+            assert available_limit < allocated, "Deflate"
+            extcall lt.allocate_stablecoins(available_limit)
 
 
 @external
