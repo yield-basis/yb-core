@@ -8,8 +8,14 @@ DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 TEST_USER = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"  # <- Just one guy
 
-DUST_AMOUNT = 10**17  # LT shares
+STAKED_WHALES = [
+    "0x196a2A9A22C2fD8f5107e97Df9ad14A23e81982B",
+    "0x196a2A9A22C2fD8f5107e97Df9ad14A23e81982B",
+    "0xa79a356B01ef805B3089b4FE67447b96c7e6DD4C"
+]
+
 MIGRATE_AMOUNT = 10**17  # LT shares
+WHALE_AMOUNT = int(1.8e18)
 
 
 if __name__ == '__main__':
@@ -70,6 +76,7 @@ if __name__ == '__main__':
                 50 * 10**6 * 10**18)
             new_lts.append(lt_interface.at(new_market.lt))
             new_gauges.append(gauge_interface.at(new_market.staker))
+            factory_owner.lt_allocate_stablecoins(lt.address, 0)
 
     # Pass ownership to the owner
     with boa.env.prank(DAO):
@@ -77,7 +84,28 @@ if __name__ == '__main__':
 
     print(f"During migration: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
 
+    if WHALE_AMOUNT > 0:
+        # Free up some space just in case
+        for user, lt, gauge in zip(STAKED_WHALES, lts, gauges):
+            with boa.env.prank(user):
+                gauge.redeem(WHALE_AMOUNT, user, user)
+                lt.withdraw(lt.balanceOf(user), 0)
+
+    # Withdraw admin fees minus test amounts
+    with boa.env.prank(TEST_USER):
+        for lt in lts:
+            lt.withdraw(lt.balanceOf(TEST_USER) - 2 * MIGRATE_AMOUNT, 0)
+
     # Use claimed admin fees as a test for deposits and withdrawals
+    with boa.env.prank(TEST_USER):
+        for lt, gauge in zip(lts, gauges):
+            lt.approve(gauge.address, 2**256 - 1)
+            gauge.deposit(MIGRATE_AMOUNT, TEST_USER)
+
+        for old_lt, new_lt in zip(lts, new_lts):
+            print("Migrating", old_lt.symbol())
+            old_lt.approve(migrator.address, 2**256 - 1)
+            migrator.migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT, 0)
 
     # Pass ownership back
     with boa.env.prank(DAO):
