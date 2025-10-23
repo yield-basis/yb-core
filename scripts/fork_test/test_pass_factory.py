@@ -36,8 +36,10 @@ if __name__ == '__main__':
     with boa.env.prank(DAO):
         factory.set_fee_receiver(DAO)
 
-    for i in range(3):
-        lts[i].withdraw_admin_fees()
+    for lt in lts:
+        lt.withdraw_admin_fees()
+        with boa.env.prank(DAO):
+            lt.transfer(TEST_USER, lt.balanceOf(DAO))
 
     for i in range(3):
         print("Admin fees in DAO:", lts[i].balanceOf(DAO) / 1e18)
@@ -60,9 +62,9 @@ if __name__ == '__main__':
     new_lts = []
     new_gauges = []
     with boa.env.prank(DAO):
-        for i in range(3):
+        for lt in lts:
             new_market = factory.add_market(
-                lts[i].CRYPTOPOOL(),
+                lt.CRYPTOPOOL(),
                 int(0.0092 * 1e18),
                 int(0.07 * 1e18 / (86400 * 365)),
                 50 * 10**6 * 10**18)
