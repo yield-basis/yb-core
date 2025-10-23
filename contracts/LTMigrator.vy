@@ -117,7 +117,7 @@ def migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     if staticcall lt_to.allowance(self, gauge_to.address) == 0:
         extcall lt_to.approve(gauge_to.address, max_value(uint256))
 
-    amount_lt_from: uint256 = extcall gauge_from.redeem(shares_in, self, msg.sender)
-    amount_lt_to: uint256 = self._migrate_plain(lt_from, lt_to, amount_lt_from, 0, debt_coefficient, self)
-    shares_out: uint256 = extcall gauge_to.deposit(amount_lt_to, msg.sender)
+    lt_in: uint256 = extcall gauge_from.redeem(shares_in, self, msg.sender)
+    lt_out: uint256 = self._migrate_plain(lt_from, lt_to, lt_in, 0, debt_coefficient, self)
+    shares_out: uint256 = extcall gauge_to.deposit(lt_out, msg.sender)
     assert shares_out >= min_out, "not enough out"
