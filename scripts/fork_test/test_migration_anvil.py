@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 import boa
 from networks import NETWORK
 
@@ -121,31 +122,32 @@ if __name__ == '__main__':
                 lt.withdraw(lt.balanceOf(user), 0)
 
     # Use claimed admin fees as a test for deposits and withdrawals
-    with boa.env.prank(TEST_USER):
-        for lt, gauge in zip(lts, gauges):
-            lt.approve(gauge.address, 2**256 - 1)
-            gauge.deposit(MIGRATE_AMOUNT, TEST_USER)
+    if "--migrate" in sys.argv[1:]:
+        with boa.env.prank(TEST_USER):
+            for lt, gauge in zip(lts, gauges):
+                lt.approve(gauge.address, 2**256 - 1)
+                gauge.deposit(MIGRATE_AMOUNT, TEST_USER)
 
-        for old_lt, new_lt in zip(lts, new_lts):
-            print("Migrating", old_lt.symbol())
-            old_lt.approve(migrator.address, 2**256 - 1)
-            amount_to = migrator.preview_migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT)
-            print("  calculated amount:", amount_to / 1e18)
-            migrator.migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT, int(amount_to * 0.999))
-            print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
+            for old_lt, new_lt in zip(lts, new_lts):
+                print("Migrating", old_lt.symbol())
+                old_lt.approve(migrator.address, 2**256 - 1)
+                amount_to = migrator.preview_migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT)
+                print("  calculated amount:", amount_to / 1e18)
+                migrator.migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT, int(amount_to * 0.999))
+                print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
 
-        for old_lt, old_g, new_lt, new_g in zip(lts, gauges, new_lts, new_gauges):
-            print("Migrating", old_g.symbol())
-            old_g.approve(migrator.address, 2**256 - 1)
-            migrate_amount = old_g.balanceOf(TEST_USER)
-            amount_to = migrator.preview_migrate_staked(old_lt.address, new_lt.address, migrate_amount)
-            print("  calculated amount:", amount_to / 1e18)
-            migrator.migrate_staked(old_lt.address, new_lt.address, migrate_amount, int(amount_to * 0.999))
-            print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
+            for old_lt, old_g, new_lt, new_g in zip(lts, gauges, new_lts, new_gauges):
+                print("Migrating", old_g.symbol())
+                old_g.approve(migrator.address, 2**256 - 1)
+                migrate_amount = old_g.balanceOf(TEST_USER)
+                amount_to = migrator.preview_migrate_staked(old_lt.address, new_lt.address, migrate_amount)
+                print("  calculated amount:", amount_to / 1e18)
+                migrator.migrate_staked(old_lt.address, new_lt.address, migrate_amount, int(amount_to * 0.999))
+                print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
 
-    # Pass ownership back
-    with boa.env.prank(DAO):
-        factory_owner.transfer_ownership_back()
+        # Pass ownership back
+        with boa.env.prank(DAO):
+            factory_owner.transfer_ownership_back()
 
     print(f"After migration: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
 
