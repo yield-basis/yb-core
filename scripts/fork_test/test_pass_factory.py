@@ -16,7 +16,6 @@ STAKED_WHALES = [
 ]
 
 MIGRATE_AMOUNT = 10**17  # LT shares
-WHALE_AMOUNT = int(2.5e18)
 
 
 if __name__ == '__main__':
@@ -87,17 +86,19 @@ if __name__ == '__main__':
 
     print(f"During migration: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
 
-    if WHALE_AMOUNT > 0:
-        # Free up some space just in case
-        for user, lt, gauge in zip(STAKED_WHALES, lts, gauges):
-            with boa.env.prank(user):
-                gauge.redeem(WHALE_AMOUNT, user, user)
-                lt.withdraw(lt.balanceOf(user), 0)
-
     # Withdraw admin fees minus test amounts
     with boa.env.prank(TEST_USER):
         for lt in lts:
             lt.withdraw(lt.balanceOf(TEST_USER) - 2 * MIGRATE_AMOUNT, 0)
+
+    # Free up some space just in case
+    for user, lt, gauge in zip(STAKED_WHALES, lts, gauges):
+        with boa.env.prank(user):
+            need_to_withdraw = factory_owner.lt_needs_withdraw(lt.address) / 1e18
+            print(f"Need to withdraw {need_to_withdraw} from {lt.symbol()}")
+            if need_to_withdraw > 0:
+                gauge.redeem(int(need_to_withdraw * 1.5e18), user, user)
+                lt.withdraw(lt.balanceOf(user), 0)
 
     # Use claimed admin fees as a test for deposits and withdrawals
     with boa.env.prank(TEST_USER):

@@ -18,6 +18,9 @@ interface AMM:
     def collateral_amount() -> uint256: view
     def value_oracle() -> OraclizedValue: view
 
+interface Cryptopool:
+    def price_scale() -> uint256: view
+
 interface LT:
     def set_rate(rate: uint256): nonpayable
     def set_amm_fee(fee: uint256): nonpayable
@@ -25,6 +28,8 @@ interface LT:
     def amm() -> AMM: view
     def stablecoin_allocated() -> uint256: view
     def set_killed(is_killed: bool): nonpayable
+    def CRYPTOPOOL() -> Cryptopool: view
+    def pricePerShare() -> uint256: view
 
 
 struct OraclizedValue:
@@ -59,6 +64,20 @@ def lt_set_rate(lt: LT, rate: uint256):
 def lt_set_amm_rate(lt: LT, fee: uint256):
     assert msg.sender == ADMIN, "Access"
     extcall lt.set_amm_fee(fee)
+
+
+@external
+@view
+def lt_needs_withdraw(lt: LT) -> uint256:
+    amm: AMM = staticcall lt.amm()
+    lp_price: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
+    available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
+    allocated: uint256 = staticcall lt.stablecoin_allocated()
+    p_share: uint256 = (staticcall (staticcall lt.CRYPTOPOOL()).price_scale()) * (staticcall lt.pricePerShare()) // 10**18
+    if available_limit >= allocated:
+        return (available_limit - allocated + 1) * 10**18 // p_share
+    else:
+        return 0
 
 
 @external
