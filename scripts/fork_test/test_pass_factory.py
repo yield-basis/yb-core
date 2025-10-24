@@ -5,6 +5,7 @@ from networks import NETWORK
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
+GAUGE_CONTROLLER = "0x1Be14811A3a06F6aF4fA64310a636e1Df04c1c21"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 TEST_USER = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"  # <- Just one guy
 
@@ -23,6 +24,7 @@ if __name__ == '__main__':
     boa.env.eoa = DAO
 
     factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
+    gauge_controller = boa.load_partial('contracts/dao/GaugeController.vy').at(GAUGE_CONTROLLER)
     factory_owner = boa.load('contracts/MigrationFactoryOwner.vy', DAO, FACTORY)
     migrator = boa.load('contracts/LTMigrator.vy', factory.STABLECOIN(), factory_owner.address)
 
@@ -74,6 +76,7 @@ if __name__ == '__main__':
                 int(0.0092 * 1e18),
                 int(0.07 * 1e18 / (86400 * 365)),
                 50 * 10**6 * 10**18)
+            gauge_controller.add_gauge(new_market.staker)
             new_lts.append(lt_interface.at(new_market.lt))
             new_gauges.append(gauge_interface.at(new_market.staker))
             factory_owner.lt_allocate_stablecoins(lt.address, 0)
@@ -105,7 +108,19 @@ if __name__ == '__main__':
         for old_lt, new_lt in zip(lts, new_lts):
             print("Migrating", old_lt.symbol())
             old_lt.approve(migrator.address, 2**256 - 1)
-            migrator.migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT, 0)
+            amount_to = migrator.preview_migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT)
+            print("  calculated amount:", amount_to / 1e18)
+            migrator.migrate_plain(old_lt.address, new_lt.address, MIGRATE_AMOUNT, int(amount_to * 0.999))
+            print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
+
+        for old_lt, old_g, new_lt, new_g in zip(lts, gauges, new_lts, new_gauges):
+            print("Migrating", old_g.symbol())
+            old_g.approve(migrator.address, 2**256 - 1)
+            migrate_amount = old_g.balanceOf(TEST_USER)
+            amount_to = migrator.preview_migrate_staked(old_lt.address, new_lt.address, migrate_amount)
+            print("  calculated amount:", amount_to / 1e18)
+            migrator.migrate_staked(old_lt.address, new_lt.address, migrate_amount, int(amount_to * 0.999))
+            print("  actual amount:", new_lt.balanceOf(TEST_USER) / 1e18)
 
     # Pass ownership back
     with boa.env.prank(DAO):
