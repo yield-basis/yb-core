@@ -15,7 +15,7 @@ STAKED_WHALES = [
 ]
 
 MIGRATE_AMOUNT = 10**17  # LT shares
-WHALE_AMOUNT = int(1.8e18)
+WHALE_AMOUNT = int(2.5e18)
 
 
 if __name__ == '__main__':
