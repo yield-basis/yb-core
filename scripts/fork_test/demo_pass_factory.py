@@ -18,6 +18,22 @@ STAKED_WHALES = [
 MIGRATE_AMOUNT = 10**17  # LT shares
 
 
+# Steps to do by the DAO:
+
+# (1 proposal) - yb-deployer
+# 1. Set new LT implementation
+# 2. Set fee receiver to DAO
+# 3. Withdraw admin fees for all LTs
+
+# 4. Create 3 new markets (3 proposals) - yb-deployer-a/b/c
+
+# (1 proposal) - yb-deployer-2
+# 5. Pass Factory ownership
+# 6. Withdraw all admin fees as Bitcoins
+# 7. Approve all Bitcoins to new markets
+# 8. Migration factory owner -> allocate 0 (so that people do not use that space)
+
+
 if __name__ == '__main__':
     boa.fork(NETWORK)
     boa.env.eoa = DAO
