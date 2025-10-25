@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import boa
+import os.path
 from networks import NETWORK
 
 
@@ -46,8 +47,10 @@ if __name__ == '__main__':
 
     lt_interface = boa.load_partial('contracts/LT.vy')
     gauge_interface = boa.load_partial('contracts/dao/LiquidityGauge.vy')
+    erc20_interface = boa.load_abi(os.path.dirname(__file__) + '/erc20.abi.json')
     lts = [lt_interface.at(factory.markets(i).lt) for i in range(3)]
     gauges = [gauge_interface.at(factory.markets(i).staker) for i in range(3)]
+    assets = [erc20_interface.at(lt.ASSET_TOKEN()) for lt in lts]
 
     for i in range(3):
         pps = lts[i].pricePerShare() / 1e18
@@ -56,32 +59,32 @@ if __name__ == '__main__':
         print("Gauge PPS before admin claim:", pps * g_rate)
         print()
 
-    # Test admin fees with tBTC
+    # Stage 1.
     with boa.env.prank(DAO):
-        factory.set_fee_receiver(DAO)
-
-    for lt in lts:
-        lt.withdraw_admin_fees()
+        lt_blueprint = lt_interface.deploy_as_blueprint()
         with boa.env.prank(DAO):
-            lt.transfer(TEST_USER, lt.balanceOf(DAO))
+            # Set new LT implementation
+            factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS)
+            # Fee receiver -> DAO
+            factory.set_fee_receiver(DAO)
+            for lt in lts:
+                lt.withdraw_admin_fees()
+
+                lt.transfer(TEST_USER, 2 * MIGRATE_AMOUNT)  # <- this one is a test, not for a vote
 
     for i in range(3):
         print("Admin fees in DAO:", lts[i].balanceOf(DAO) / 1e18)
 
         pps = lts[i].pricePerShare() / 1e18
         g_rate = gauges[i].previewRedeem(10**18) / 1e18
-        print("PPS before admin claim:", pps)
-        print("Gauge PPS before admin claim:", pps * g_rate)
+        print("PPS after admin claim:", pps)
+        print("Gauge PPS after admin claim:", pps * g_rate)
         print("Admin fees left:", lts[i].liquidity().admin / 1e18)
         print()
 
     print(f"Before: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
 
-    # Set new LT implementation
-    lt_blueprint = lt_interface.deploy_as_blueprint()
-    with boa.env.prank(DAO):
-        factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS)
-
+    # Stage 2.
     # Create new markets
     new_lts = []
     new_gauges = []
@@ -92,21 +95,27 @@ if __name__ == '__main__':
                 int(0.0092 * 1e18),
                 int(0.07 * 1e18 / (86400 * 365)),
                 50 * 10**6 * 10**18)
-            gauge_controller.add_gauge(new_market.staker)
             new_lts.append(lt_interface.at(new_market.lt))
             new_gauges.append(gauge_interface.at(new_market.staker))
-            factory_owner.lt_allocate_stablecoins(lt.address, 0)
 
-    # Pass ownership to the owner
+    # Stage 3.
     with boa.env.prank(DAO):
+        # Add gauges
+        for gauge in new_gauges:
+            gauge_controller.add_gauge(gauge)
+        # Pass the factory
         factory.set_admin(factory_owner.address, factory.emergency_admin())
+        for lt, new_lt, asset in zip(lts, new_lts, assets):
+            amount = lt.balanceOf(DAO)
+            min_amount = int(0.98 * lt.preview_withdraw(amount))
+            # Withdraw Bitcoins
+            lt.withdraw(amount, min_amount)
+            # Allocate
+            factory_owner.lt_allocate_stablecoins(lt.address, 0)
+            # Approve to new markets
+            asset.approve(new_lt.address, 2**256 - 1)
 
     print(f"During migration: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
-
-    # Withdraw admin fees minus test amounts
-    with boa.env.prank(TEST_USER):
-        for lt in lts:
-            lt.withdraw(lt.balanceOf(TEST_USER) - 2 * MIGRATE_AMOUNT, 0)
 
     # Free up some space just in case
     for user, lt, gauge in zip(STAKED_WHALES, lts, gauges):
