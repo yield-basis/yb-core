@@ -100,9 +100,9 @@ def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
             available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
             allocated: uint256 = staticcall lt.stablecoin_allocated()
             safe_limit: uint256 = (staticcall amm.value_oracle()).value * 3 // 4
-            assert available_limit < allocated, "Need someone to withdraw, not migrate"
-            assert available_limit >= safe_limit, "Not enough reserves"
-            extcall lt.allocate_stablecoins(available_limit)
+            if available_limit < allocated:  # Do not revert if we have less but do nothing
+                assert available_limit >= safe_limit, "Not enough reserves"
+                extcall lt.allocate_stablecoins(available_limit)
 
 
 @external
