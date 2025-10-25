@@ -28,10 +28,11 @@ MIGRATE_AMOUNT = 10**17  # LT shares
 # 4. Create 3 new markets (3 proposals) - yb-deployer-a/b/c
 
 # (1 proposal) - yb-deployer-2
-# 5. Pass Factory ownership
-# 6. Withdraw all admin fees as Bitcoins
-# 7. Approve all Bitcoins to new markets
-# 8. Migration factory owner -> allocate 0 (so that people do not use that space)
+# 5. Add gauges for all the markets to GaugeController
+# 6. Pass Factory ownership
+# 7. Withdraw all admin fees as Bitcoins
+# 8. Approve all Bitcoins to new markets
+# 9. Migration factory owner -> allocate 0 (so that people do not use that space)
 
 
 if __name__ == '__main__':
