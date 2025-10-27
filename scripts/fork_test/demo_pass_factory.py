@@ -127,6 +127,8 @@ if __name__ == '__main__':
                 gauge.redeem(int(need_to_withdraw * 1.5e18), user, user)
                 lt.withdraw(lt.balanceOf(user), 0)
 
+    boa.env.time_travel(3000)  # Test some time delay
+
     # Deployer as a test user
     with boa.env.prank(TEST_USER_2):
         for old_lt, new_lt in zip(lts, new_lts):

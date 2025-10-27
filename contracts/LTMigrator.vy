@@ -20,6 +20,9 @@ interface Gauge:
     def previewDeposit(assets: uint256) -> uint256: view
     def previewRedeem(shares: uint256) -> uint256: view
 
+interface AMM:
+    def collect_fees() -> uint256: nonpayable
+
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address) -> uint256: nonpayable
     def withdraw(shares: uint256, min_assets: uint256) -> uint256: nonpayable
@@ -28,7 +31,7 @@ interface LT:
     def allowance(_from: address, _to: address) -> uint256: view
     def transferFrom(_from: address, _to: address, _amount: uint256) -> bool: nonpayable
     def ASSET_TOKEN() -> IERC20: view
-    def amm() -> address: view
+    def amm() -> AMM: view
     def allocate_stablecoins(): nonpayable
     def CRYPTOPOOL() -> Cryptopool: view
     def preview_emergency_withdraw(shares: uint256) -> (uint256, int256): view
@@ -85,12 +88,15 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     asset: IERC20 = staticcall lt_from.ASSET_TOKEN()
     if staticcall asset.allowance(self, lt_to.address) == 0:
         extcall asset.approve(lt_to.address, max_value(uint256))
-    amm: address = staticcall lt_from.amm()
+    amm: AMM = staticcall lt_from.amm()
+
+    # Explicitly collect fees to cryptopool so that they don't screw our measurements
+    extcall amm.collect_fees()
 
     # Withdraw from LT
-    debt: uint256 = staticcall STABLECOIN.balanceOf(amm)
+    debt: uint256 = staticcall STABLECOIN.balanceOf(amm.address)
     assets: uint256 = extcall lt_from.withdraw(shares_in, 0)
-    debt = (staticcall STABLECOIN.balanceOf(amm)) - debt
+    debt = (staticcall STABLECOIN.balanceOf(amm.address)) - debt
 
     # Now we freed up some stablecoins in the AMM
     extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_from, 0)  # Take what freed up from old allocation
