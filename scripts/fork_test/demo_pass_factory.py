@@ -9,6 +9,7 @@ DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 GAUGE_CONTROLLER = "0x1Be14811A3a06F6aF4fA64310a636e1Df04c1c21"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 TEST_USER = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"  # <- Just one guy
+TEST_USER_2 = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # <- YB deployer
 
 STAKED_WHALES = [
     "0x196a2A9A22C2fD8f5107e97Df9ad14A23e81982B",
@@ -125,6 +126,18 @@ if __name__ == '__main__':
             if need_to_withdraw > 0:
                 gauge.redeem(int(need_to_withdraw * 1.5e18), user, user)
                 lt.withdraw(lt.balanceOf(user), 0)
+
+    # Deployer as a test user
+    with boa.env.prank(TEST_USER_2):
+        for old_lt, new_lt in zip(lts, new_lts):
+            migration_amount = old_lt.balanceOf(TEST_USER_2)
+            if migration_amount > 0:
+                print("Migrating", old_lt.symbol())
+                old_lt.approve(migrator.address, 2**256 - 1)
+                amount_to = migrator.preview_migrate_plain(old_lt.address, new_lt.address, migration_amount)
+                print("  calculated amount:", amount_to / 1e18)
+                migrator.migrate_plain(old_lt.address, new_lt.address, migration_amount, int(amount_to * 0.999))
+                print("  actual amount:", new_lt.balanceOf(TEST_USER_2) / 1e18)
 
     # Use claimed admin fees as a test for deposits and withdrawals
     with boa.env.prank(TEST_USER):
