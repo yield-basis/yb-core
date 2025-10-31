@@ -440,7 +440,7 @@ def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool = True)
     if raise_overflow:
         if amm_max_debt < v.value:
             raise "Debt too high"
-    return v.value * 10**18 // p_o
+    return convert(self._adjust(v.value * 10**18 // p_o), uint256)
 
 
 @external
