@@ -95,7 +95,7 @@ if __name__ == '__main__':
                 lt.CRYPTOPOOL(),
                 int(0.0092 * 1e18),
                 int(0.07 * 1e18 / (86400 * 365)),
-                50 * 10**6 * 10**18)
+                100 * 10**6 * 10**18)
             gauge_controller.add_gauge(new_market.staker)
             new_lts.append(lt_interface.at(new_market.lt))
             new_gauges.append(gauge_interface.at(new_market.staker))
