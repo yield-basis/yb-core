@@ -10,6 +10,7 @@ from ethereum.ercs import IERC20
 
 interface MFOwner:
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
+    def lt_in_factory(lt: LT) -> bool: view
 
 interface Cryptopool:
     def balances(i: uint256) -> uint256: view
@@ -84,6 +85,10 @@ def preview_migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coef
 @internal
 def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256, debt_coefficient: uint256,
                    _for: address) -> uint256:
+    # Check that LTs are in the factory
+    assert staticcall FACTORY_OWNER.lt_in_factory(lt_from)
+    assert staticcall FACTORY_OWNER.lt_in_factory(lt_to)
+
     # Prepare asset approvals (e.g. WBTC etc)
     asset: IERC20 = staticcall lt_from.ASSET_TOKEN()
     if staticcall asset.allowance(self, lt_to.address) == 0:

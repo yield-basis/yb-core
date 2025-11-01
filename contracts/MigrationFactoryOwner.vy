@@ -1,4 +1,10 @@
 # @version 0.4.3
+"""
+@title MigrationFactoryOwner
+@author Scientia Spectra AG
+@license Copyright (c) 2025
+"""
+from ethereum.ercs import IERC20
 
 
 interface Factory:
@@ -8,6 +14,7 @@ interface Factory:
     def set_fee_receiver(new_fee_receiver: address): nonpayable
     def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address): nonpayable
     def set_min_admin_fee(new_min_admin_fee: uint256): nonpayable
+    def STABLECOIN() -> IERC20: view
 
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
@@ -39,6 +46,7 @@ struct OraclizedValue:
 
 ADMIN: public(immutable(address))
 FACTORY: public(immutable(Factory))
+STABLECOIN: public(immutable(IERC20))
 disabled_lts: public(HashMap[LT, bool])
 
 
@@ -46,6 +54,7 @@ disabled_lts: public(HashMap[LT, bool])
 def __init__(admin: address, factory: Factory):
     ADMIN = admin
     FACTORY = factory
+    STABLECOIN = staticcall factory.STABLECOIN()
 
 
 @external
@@ -78,6 +87,12 @@ def lt_needs_withdraw(lt: LT) -> uint256:
         return (available_limit - allocated + 1) * 10**18 // p_share
     else:
         return 0
+
+
+@external
+@view
+def lt_in_factory(lt: address) -> bool:
+    return (staticcall STABLECOIN.allowance(FACTORY.address, lt)) > 0
 
 
 @external
