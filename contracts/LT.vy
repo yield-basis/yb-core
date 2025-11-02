@@ -333,7 +333,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
             # Admin doesn't pay for value loss
             dv_use_36 = value_change * 10**18
     else:
-        # If stakeda part is small - positive admin fees are charged on profits and negative on losses
+        # If staked part is small - positive admin fees are charged on profits and negative on losses
         dv_use_36 = value_change * (10**18 - f_a)
 
     prev.admin += (value_change - dv_use_36 // 10**18)
