@@ -18,15 +18,15 @@ interface IERC20Slice:
     def symbol() -> String[29]: view
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256, adjust_cryptopool: bool) -> OraclizedValue: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue: nonpayable
     def _withdraw(frac: uint256) -> Pair: nonpayable
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool, adjust_cryptopool: bool) -> OraclizedValue: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
     def fee() -> uint256: view
-    def value_oracle(adjust_cryptopool: bool) -> OraclizedValue: view
+    def value_oracle() -> OraclizedValue: view
     def get_state() -> AMMState: view
     def get_debt() -> uint256: view
     def collateral_amount() -> uint256: view
-    def value_oracle_for(collateral: uint256, debt: uint256, adjust_cryptopool: bool) -> OraclizedValue: view
+    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
@@ -301,7 +301,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         10**18 - (10**18 - self._min_admin_fee()) * isqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
-    cur_value: int256 = convert((staticcall self.amm.value_oracle(True)).value * 10**18 // p_o, int256)
+    cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
     value_change: int256 = cur_value - (prev_value + prev.admin)
 
@@ -416,7 +416,7 @@ def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool = True)
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         if liquidity.total > 0:
-            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True, True)
+            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True)
             if raise_overflow:
                 if amm_max_debt < v.value:
                     raise "Debt too high"
@@ -426,7 +426,7 @@ def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool = True)
             value_after: uint256 = convert(convert(v.value * 10**18 // p_o, int256) - liquidity.admin, uint256)
             return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
-    v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt, True)
+    v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt)
     if raise_overflow:
         if amm_max_debt < v.value:
             raise "Debt too high"
@@ -483,8 +483,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     if supply > 0:
         liquidity_values = self._calculate_values(p_o)
 
-    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt, True)
-    value_after: int256 = convert(v.value * 10**18 // p_o, int256)
+    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt)
+    value_after: uint256 = v.value * 10**18 // p_o
 
     # Value is measured in USD
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
@@ -495,21 +495,20 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         supply = liquidity_values.supply_tokens
         self.liquidity.admin = liquidity_values.admin
         value_before: uint256 = liquidity_values.total
-        value_after -= liquidity_values.admin
-
-        self.liquidity.total = convert(value_after, uint256)
+        value_after = convert(convert(value_after, int256) - liquidity_values.admin, uint256)
+        self.liquidity.total = value_after
         self.liquidity.staked = liquidity_values.staked
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
         if staker != empty(address):
             self.balanceOf[staker] = liquidity_values.staked_tokens
             self._log_token_reduction(staker, liquidity_values.token_reduction)
         # ideal_staked is only changed when we transfer coins to staker
-        shares = supply * convert(value_after, uint256) // value_before - supply
+        shares = supply * value_after // value_before - supply
 
     else:
         # Initial value/shares ratio is EXACTLY 1.0 in collateral units
         # Value is measured in USD
-        shares = convert(value_after, uint256)
+        shares = value_after
         # self.liquidity.admin is 0 at start but can be rolled over if everything was withdrawn
         self.liquidity.ideal_staked = 0         # Likely already 0 since supply was 0
         self.liquidity.staked = 0               # Same: nothing staked when supply is 0

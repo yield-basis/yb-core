@@ -33,8 +33,6 @@ class StatefulTrader(RuleBasedStateMachine):
         self.collateral_token._mint_for_testing(self.admin, 10**36)
         self.stablecoin._mint_for_testing(self.admin, 100_000 * 10**36)
 
-        self.amm_used = True
-
     @rule(amount=amount, mul=debt_multiplier, uid=user_id)
     def deposit(self, amount, mul, uid):
         user = self.accounts[uid]
@@ -46,7 +44,6 @@ class StatefulTrader(RuleBasedStateMachine):
             else:
                 try:
                     self.yb_lt.deposit(amount, debt, 0)
-                    self.amm_used = True
                 except Exception as e:
                     if amount < 10**7:
                         # Amount being too small could be causing math precision errors in cryptoswap
@@ -90,7 +87,6 @@ class StatefulTrader(RuleBasedStateMachine):
             if shares <= user_shares and shares > 0:
                 try:
                     self.yb_lt.withdraw(shares, 0)
-                    self.amm_used = True
                 except Exception:
                     if user_shares < 10000:
                         return
@@ -115,7 +111,6 @@ class StatefulTrader(RuleBasedStateMachine):
                     self.stablecoin._mint_for_testing(user, -d_stables)
                 try:
                     self.yb_lt.emergency_withdraw(shares)
-                    self.amm_used = True
                 except Exception:
                     # Failures could be if pool is too imbalanced to return the amount of debt requested
                     # or number of shares being too close to 0 thus returning zero debt
@@ -133,7 +128,6 @@ class StatefulTrader(RuleBasedStateMachine):
         with boa.env.prank(self.admin):
             try:
                 self.cryptopool.exchange(i, j, amount, 0)
-                self.amm_used = False
             except Exception:
                 # We are not testing exchanges here, so we are not checking all the corner cases where it may revert
                 return
@@ -145,7 +139,6 @@ class StatefulTrader(RuleBasedStateMachine):
             with boa.env.prank(self.admin):
                 try:
                     out = self.yb_amm.exchange(0, 1, amount, 0)
-                    self.amm_used = True
                 except Exception as e:
                     if amount > self.yb_amm.get_debt():
                         return
@@ -162,12 +155,8 @@ class StatefulTrader(RuleBasedStateMachine):
             self.stablecoin._mint_for_testing(self.admin, amount)
             with boa.env.prank(self.admin):
                 try:
-                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
-                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
                     self.yb_amm.exchange(1, 0, lp, 0)
-                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
-                    self.amm_used = True
                 except Exception as e:
                     if amount < 10**10:
                         return
@@ -205,28 +194,9 @@ class StatefulTrader(RuleBasedStateMachine):
 
     @invariant()
     def uponly(self):
-        if self.amm_used:
-            if False:
-                try:
-                    debt = self.yb_amm.get_debt()
-                    pow = (self.yb_amm.value_oracle(False).value + debt) / debt
-                except Exception:
-                    return
-                scaleup = ((self.cryptopool.get_virtual_price() * 2) / (10**18 + self.cryptopool.xcp_profit())) ** pow
-                pps = self.yb_lt.pricePerShare() * scaleup
-                assert pps - self.pps >= -1e-5 * max(self.pps, pps)
-                self.pps = pps
-
-            if True:
-                pps = self.yb_amm.value_oracle(False).value * 10**18 // self.cryptopool.price_scale() * 10**18 // self.yb_lt.totalSupply()
-                print('pps:', pps)
-                print('pscale:', self.cryptopool.price_scale())
-                print('value oracle:', self.yb_amm.value_oracle(False).value, 'supply:', self.yb_lt.totalSupply())
-                print('liquidity total:', self.yb_lt.liquidity().total)
-                print('liquidity admin:', self.yb_lt.liquidity().admin)
-                print()
-                assert pps - self.pps >= -1e-7 * max(self.pps, pps)
-                self.pps = pps
+        pps = self.yb_lt.pricePerShare()
+        assert pps - self.pps >= -1e-12 * max(self.pps, pps)
+        self.pps = pps
 
 
 def test_price_return(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
@@ -340,5 +310,21 @@ def test_pps_fail_6(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cry
     state.trade_in_levamm(amount=0, is_stablecoin=True)
     state.uponly()
     state.trade_in_levamm(amount=172_081_994_037_040, is_stablecoin=False)
+    state.uponly()
+    state.teardown()
+
+
+def test_pps_fail_7(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
+                    yb_allocated, seed_cryptopool, accounts, admin):
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
+    for k, v in locals().items():
+        setattr(StatefulTrader, k, v)
+    state = StatefulTrader()
+    state.uponly()
+    state.trade_in_cryptopool(amount=7_420_264_227_954_283_422, is_stablecoin=False)
+    state.uponly()
+    state.trade_in_levamm(amount=0, is_stablecoin=True)
+    state.uponly()
+    state.deposit(amount=20_613_976_297, mul=4.0, uid=0)
     state.uponly()
     state.teardown()
