@@ -22,6 +22,10 @@ interface PriceOracle:
 interface LT:
     def distribute_borrower_fees(): nonpayable
 
+interface CurveCryptoPool:
+    def xcp_profit() -> uint256: view
+    def get_virtual_price() -> uint256: view
+
 
 struct AMMState:
     collateral: uint256
@@ -156,6 +160,14 @@ def get_x0(p_oracle: uint256, collateral: uint256, debt: uint256, safe_limits: b
     D: uint256 = coll_value**2 - 4 * coll_value * LEV_RATIO // 10**18 * debt
     return (coll_value + self.sqrt(D)) * 10**18 // (2 * LEV_RATIO)
 ###
+
+@internal
+@view
+def _adjust(full_value: uint256) -> uint256:
+    """
+    @notice Convenience method for adjusting Curve Cryptopool collateral to not include reserves unused for rebalancing
+    """
+    return full_value * (staticcall CurveCryptoPool(COLLATERAL.address).xcp_profit() + 10**18) // (2 * (staticcall CurveCryptoPool(COLLATERAL.address).get_virtual_price()))
 
 
 @internal
@@ -347,7 +359,7 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
 
 
 @external
-def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue:
+def _deposit(d_collateral: uint256, d_debt: uint256, adjust_cryptopool: bool = False) -> OraclizedValue:
     assert msg.sender == LT_CONTRACT, "Access violation"
     assert not self.is_killed
 
@@ -366,6 +378,10 @@ def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue:
     value_after: uint256 = self.get_x0(p_o, collateral, debt, True) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
 
     log AddLiquidityRaw(token_amounts=[d_collateral, d_debt], invariant=value_after, price_oracle=p_o)
+
+    if adjust_cryptopool:
+        value_after = self.get_x0(p_o, self._adjust(collateral), debt, True) * 10**18 // (2 * LEVERAGE - 10**18)  # Value in fiat
+
     return OraclizedValue(p_o=p_o, value=value_after)
 
 
@@ -399,34 +415,41 @@ def coins(i: uint256) -> IERC20:
 
 @external
 @view
-def value_oracle() -> OraclizedValue:
+def value_oracle(adjust_cryptopool: bool = False) -> OraclizedValue:
     """
     @notice Non-manipulable oracle which shows value of the whole AMM valued in stablecoin
+    @param adjust_cryptopool Exclude cryptopool rebalancing reserves
     """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
     collateral: uint256 = self.collateral_amount  # == y_initial
     debt: uint256 = self._debt()
+    if adjust_cryptopool:
+        collateral = self._adjust(collateral)
     return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
 @view
-def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue:
+def value_oracle_for(collateral: uint256, debt: uint256, adjust_cryptopool: bool = False) -> OraclizedValue:
     """
     @notice Total value oracle for any specified amounts of collateral and debt in the AMM
     """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
-    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
+    effective_collateral: uint256 = collateral
+    if adjust_cryptopool:
+        effective_collateral = self._adjust(collateral)
+    return OraclizedValue(p_o=p_o, value=self.get_x0(p_o, effective_collateral, debt, False) * 10**18 // (2 * LEVERAGE - 10**18))
 
 
 @external
 @view
-def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue:
+def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool, adjust_cryptopool: bool = False) -> OraclizedValue:
     """
     @notice Change in the value oracle
     @param collateral_amount Amount of collateral to deposit/withdraw to AMM
     @param borrowed_amount Amount to borrow or repay when depositing/withdrawing
     @param is_deposit Is it a deposit or withdrawal
+    @param adjust_cryptopool Exclude cryptopool rebalancing reserves
     @return (p_oracle, value)
     """
     p_o: uint256 = staticcall PRICE_ORACLE_CONTRACT.price()
@@ -439,6 +462,9 @@ def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposi
     else:
         collateral -= collateral_amount
         debt -= borrowed_amount
+
+    if adjust_cryptopool:
+        collateral = self._adjust(collateral)
 
     x0_after: uint256 = self.get_x0(p_o, collateral, debt, is_deposit)
 

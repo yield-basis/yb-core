@@ -139,15 +139,12 @@ class StatefulTrader(RuleBasedStateMachine):
                     return
                 raise
 
-    def _adjust(self, value):
-        return value * (10**18 + self.cryptopool.xcp_profit()) // (2 * self.cryptopool.get_virtual_price())
- 
     @invariant()
     def staked_fractions(self):
         p_o = self.cryptopool.price_oracle()
         lv = self.get_lv(p_o)
 
-        assert abs(lv.admin + lv.total - self._adjust(self.yb_amm.value_oracle()[1] * 10**18 // p_o)) <= 10
+        assert abs(lv.admin + lv.total - self.yb_amm.value_oracle(True)[1] * 10**18 // p_o) <= 10
         assert abs(lv.staked / lv.total - lv.staked_tokens / lv.supply_tokens) < 1e-10
 
         if hasattr(self, 'lv'):

@@ -18,15 +18,15 @@ interface IERC20Slice:
     def symbol() -> String[29]: view
 
 interface LevAMM:
-    def _deposit(d_collateral: uint256, d_debt: uint256) -> OraclizedValue: nonpayable
+    def _deposit(d_collateral: uint256, d_debt: uint256, adjust_cryptopool: bool) -> OraclizedValue: nonpayable
     def _withdraw(frac: uint256) -> Pair: nonpayable
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
+    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool, adjust_cryptopool: bool) -> OraclizedValue: view
     def fee() -> uint256: view
-    def value_oracle() -> OraclizedValue: view
+    def value_oracle(adjust_cryptopool: bool) -> OraclizedValue: view
     def get_state() -> AMMState: view
     def get_debt() -> uint256: view
     def collateral_amount() -> uint256: view
-    def value_oracle_for(collateral: uint256, debt: uint256) -> OraclizedValue: view
+    def value_oracle_for(collateral: uint256, debt: uint256, adjust_cryptopool: bool) -> OraclizedValue: view
     def set_rate(rate: uint256) -> uint256: nonpayable
     def collect_fees() -> uint256: nonpayable
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
@@ -43,8 +43,6 @@ interface CurveCryptoPool:
     def add_liquidity(amounts: uint256[2], min_mint_amount: uint256, receiver: address, donation: bool) -> uint256: nonpayable
     def remove_liquidity(amount: uint256, min_amounts: uint256[2]) -> uint256[2]: nonpayable
     def lp_price() -> uint256: view
-    def get_virtual_price() -> uint256: view
-    def xcp_profit() -> uint256: view
     def price_scale() -> uint256: view
     def decimals() -> uint256: view
     def mid_fee() -> uint256: view
@@ -225,14 +223,6 @@ def _price_oracle_w() -> uint256:
 
 
 @internal
-@view
-def _adjust(full_value: uint256) -> int256:
-    return convert(
-        full_value * (staticcall CRYPTOPOOL.xcp_profit() + 10**18) // (2 * (staticcall CRYPTOPOOL.get_virtual_price())),
-        int256)
-
-
-@internal
 def _checkpoint_gauge():
     """
     @notice Checkpoint a gauge if any to prevent flash loan attacks on reward distribution, reverts are ignored
@@ -311,7 +301,7 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         10**18 - (10**18 - self._min_admin_fee()) * isqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
-    cur_value: int256 = self._adjust((staticcall self.amm.value_oracle()).value * 10**18 // p_o)
+    cur_value: int256 = convert((staticcall self.amm.value_oracle(True)).value * 10**18 // p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
     value_change: int256 = cur_value - (prev_value + prev.admin)
 
@@ -426,21 +416,21 @@ def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool = True)
     if supply > 0:
         liquidity: LiquidityValuesOut = self._calculate_values(p_o)
         if liquidity.total > 0:
-            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True)
+            v: OraclizedValue = staticcall amm.value_change(lp_tokens, debt, True, True)
             if raise_overflow:
                 if amm_max_debt < v.value:
                     raise "Debt too high"
             # Liquidity contains admin fees, so we need to subtract
             # If admin fees are negative - we get LESS LP tokens
             # value_before = v.value_before - liquidity.admin = total
-            value_after: uint256 = convert(self._adjust(v.value * 10**18 // p_o) - liquidity.admin, uint256)
+            value_after: uint256 = convert(convert(v.value * 10**18 // p_o, int256) - liquidity.admin, uint256)
             return liquidity.supply_tokens * value_after // liquidity.total - liquidity.supply_tokens
 
-    v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt)
+    v: OraclizedValue = staticcall amm.value_oracle_for(lp_tokens, debt, True)
     if raise_overflow:
         if amm_max_debt < v.value:
             raise "Debt too high"
-    return convert(self._adjust(v.value * 10**18 // p_o), uint256)
+    return v.value * 10**18 // p_o
 
 
 @external
@@ -487,8 +477,8 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     if supply > 0:
         liquidity_values = self._calculate_values(p_o)
 
-    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt)
-    value_after: int256 = self._adjust(v.value * 10**18 // p_o)
+    v: OraclizedValue = extcall amm._deposit(lp_tokens, debt, True)
+    value_after: int256 = convert(v.value * 10**18 // p_o, int256)
 
     # Value is measured in USD
     # Do not allow value to become larger than HALF of the available stablecoins after the deposit
