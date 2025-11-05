@@ -162,8 +162,12 @@ class StatefulTrader(RuleBasedStateMachine):
             self.stablecoin._mint_for_testing(self.admin, amount)
             with boa.env.prank(self.admin):
                 try:
+                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
                     lp = self.cryptopool.add_liquidity([amount, crypto_amount], 0)
+                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
                     self.yb_amm.exchange(1, 0, lp, 0)
+                    print('levamm value oracle:', self.yb_amm.value_oracle(True).value)
+                    self.amm_used = True
                 except Exception as e:
                     if amount < 10**10:
                         return
@@ -320,5 +324,21 @@ def test_pps_fail_5(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cry
     state.deposit(amount=100, mul=0.0, uid=0)
     state.uponly()
     state.deposit(amount=48_356_219_927_274, mul=0.0, uid=0)
+    state.uponly()
+    state.teardown()
+
+
+def test_pps_fail_6(cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, cryptopool_oracle,
+                    yb_allocated, seed_cryptopool, accounts, admin):
+    StatefulTrader.TestCase.settings = settings(max_examples=2000, stateful_step_count=10)
+    for k, v in locals().items():
+        setattr(StatefulTrader, k, v)
+    state = StatefulTrader()
+    state.uponly()
+    state.trade_in_cryptopool(amount=94_502_830_665_209_455_884, is_stablecoin=False)
+    state.uponly()
+    state.trade_in_levamm(amount=0, is_stablecoin=True)
+    state.uponly()
+    state.trade_in_levamm(amount=172_081_994_037_040, is_stablecoin=False)
     state.uponly()
     state.teardown()

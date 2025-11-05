@@ -467,12 +467,18 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
     amm: LevAMM = self.amm
     assert extcall STABLECOIN.transferFrom(amm.address, self, debt, default_return_value=True)
     assert extcall ASSET_TOKEN.transferFrom(msg.sender, self, assets, default_return_value=True)
+
+    # add_liquidity can make profit, but change in price_scale (IF) can cause loss
     lp_tokens: uint256 = extcall CRYPTOPOOL.add_liquidity([debt, assets], 0, amm.address, False)
     p_o: uint256 = self._price_oracle_w()
 
     supply: uint256 = self.totalSupply
     shares: uint256 = 0
 
+    # Running calculate_values before _deposit but after add_liquidity means that:
+    # fees from add_liquidity are given to all the previous LPs in YB
+    # as well as loss from adjustment of price_scale is shared by them
+    # but not by the new depositor
     liquidity_values: LiquidityValuesOut = empty(LiquidityValuesOut)
     if supply > 0:
         liquidity_values = self._calculate_values(p_o)
@@ -490,6 +496,7 @@ def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: addre
         self.liquidity.admin = liquidity_values.admin
         value_before: uint256 = liquidity_values.total
         value_after -= liquidity_values.admin
+
         self.liquidity.total = convert(value_after, uint256)
         self.liquidity.staked = liquidity_values.staked
         self.totalSupply = liquidity_values.supply_tokens  # will be increased by mint
