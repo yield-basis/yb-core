@@ -19,17 +19,10 @@ exports: (
     erc4626.erc20.approve,
     erc4626.erc20.allowance,
     erc4626.decimals,
-    erc4626.totalAssets,
-    erc4626.convertToShares,
-    erc4626.convertToAssets,
     erc4626.maxDeposit,
-    erc4626.previewDeposit,
     erc4626.maxMint,
-    erc4626.previewMint,
     erc4626.maxWithdraw,
-    erc4626.previewWithdraw,
     erc4626.maxRedeem,
-    erc4626.previewRedeem,
     erc4626.asset,
     erc4626.ownable.transfer_ownership,
     erc4626.ownable.owner,
@@ -53,6 +46,7 @@ interface IERC20Slice:
 interface LT:
     def is_killed() -> bool: view
     def checkpoint_staker_rebase(): nonpayable
+    def updated_balances() -> (uint256, uint256): view  # -> (supply, staker_balance)
 
 
 event AddReward:
@@ -451,3 +445,155 @@ def transferFrom(owner: address, to: address, amount: uint256) -> bool:
     erc4626.erc20._transfer(owner, to, amount)
     extcall GC.emit()
     return True
+
+
+@internal
+@view
+def _total_assets() -> uint256:
+    """
+    @dev This is used in internal view-only methods. "Write" methods do a real checkpoint_staker_rebase() for that
+    """
+    return (staticcall LT(LP_TOKEN.address).updated_balances())[1]
+
+
+@internal
+@view
+def _convert_to_shares_rebase(assets: uint256, roundup: bool) -> uint256:
+    """
+    @dev An `internal` conversion function (from assets to shares)
+         with support for rounding direction.
+    @param assets The 32-byte assets amount.
+    @param roundup The Boolean variable that specifies whether
+           to round up or not. The default `False` is round down.
+    @return uint256 The converted 32-byte shares amount.
+    """
+    supply: uint256 = erc4626.erc20.totalSupply
+    if supply == 0:
+        return assets + self._total_assets()
+    else:
+        return math._mul_div(
+            assets, supply + 1, self._total_assets() + 1, roundup
+        )
+
+
+@internal
+@view
+def _convert_to_assets_rebase(shares: uint256, roundup: bool) -> uint256:
+    """
+    @dev An `internal` conversion function (from shares to assets)
+         with support for rounding direction.
+    @param shares The 32-byte shares amount.
+    @param roundup The Boolean variable that specifies whether
+           to round up or not. The default `False` is round down.
+    @return uint256 The converted 32-byte assets amount.
+    """
+    supply: uint256 = erc4626.erc20.totalSupply
+    if supply == 0:
+        return shares - self._total_assets()
+    else:
+        return math._mul_div(
+            shares, self._total_assets() + 1, supply + 1, roundup
+        )
+
+
+@external
+@view
+def previewDeposit(assets: uint256) -> uint256:
+    """
+    @dev Allows an on-chain or off-chain user to simulate the
+         effects of their deposit at the current block, given
+         current on-chain conditions.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#previewdeposit.
+    @param assets The 32-byte assets amount.
+    @return uint256 The simulated 32-byte returning shares amount.
+    """
+    return self._convert_to_shares_rebase(assets, False)
+
+
+def previewMint(shares: uint256) -> uint256:
+    """
+    @dev Allows an on-chain or off-chain user to simulate the
+         effects of their `mint` at the current block, given
+         current on-chain conditions.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#previewmint.
+    @param shares The 32-byte shares amount.
+    @return uint256 The simulated 32-byte required assets amount.
+    """
+    return self._convert_to_assets_rebase(shares, True)
+
+
+@external
+@view
+def previewWithdraw(assets: uint256) -> uint256:
+    """
+    @dev Allows an on-chain or off-chain user to simulate the
+         effects of their withdrawal at the current block, given
+         current on-chain conditions.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#previewwithdraw.
+    @param assets The 32-byte assets amount.
+    @return uint256 The simulated 32-byte burned shares amount.
+    """
+    return self._convert_to_shares_rebase(assets, True)
+
+
+@external
+@view
+def previewRedeem(shares: uint256) -> uint256:
+    """
+    @dev Allows an on-chain or off-chain user to simulate the effects
+         of their redeemption at the current block, given current
+         on-chain conditions.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#previewredeem.
+    @param shares The 32-byte shares amount to be redeemed.
+    @return uint256 The simulated 32-byte returning assets amount.
+    """
+    return self._convert_to_assets_rebase(shares, False)
+
+
+@external
+@view
+def convertToShares(assets: uint256) -> uint256:
+    """
+    @dev Returns the amount of shares that the vault would
+         exchange for the amount of assets provided, in an
+         ideal scenario where all the conditions are met.
+    @notice Note that the conversion must round down to `0`.
+            For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#converttoshares.
+    @param assets The 32-byte assets amount.
+    @return uint256 The converted 32-byte shares amount.
+    """
+    return self._convert_to_shares_rebase(assets, False)
+
+
+@external
+@view
+def convertToAssets(shares: uint256) -> uint256:
+    """
+    @dev Returns the amount of assets that the vault would
+         exchange for the amount of shares provided, in an
+         ideal scenario where all the conditions are met.
+    @notice Note that the conversion must round down to `0`.
+            For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#converttoassets.
+    @param shares The 32-byte shares amount.
+    @return uint256 The converted 32-byte assets amount.
+    """
+    return self._convert_to_assets_rebase(shares, False)
+
+
+@external
+@view
+def totalAssets() -> uint256:
+    """
+    @dev Returns the total amount of the underlying asset
+         that is managed by the vault.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#totalassets.
+    @return uint256 The 32-byte total managed assets.
+    """
+    return self._total_assets()

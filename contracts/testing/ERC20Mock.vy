@@ -87,3 +87,9 @@ def _burn_for_testing(_target: address, _value: uint256) -> bool:
 @external
 def checkpoint_staker_rebase():
     pass
+
+
+@external
+@view
+def updated_balances() -> (uint256, uint256):
+    return (self.total_supply, self.balanceOf[msg.sender])

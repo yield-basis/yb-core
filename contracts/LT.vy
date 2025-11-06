@@ -717,6 +717,13 @@ def checkpoint_staker_rebase():
 
 @external
 @view
+def updated_balances() -> (uint256, uint256):
+    lv: LiquidityValuesOut = self._calculate_values(self._price_oracle())
+    return (lv.supply_tokens, lv.staked_tokens)
+
+
+@external
+@view
 def pricePerShare() -> uint256:
     """
     Non-manipulatable "fair price per share" oracle
