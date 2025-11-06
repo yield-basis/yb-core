@@ -121,9 +121,10 @@ class StatefulVE(RuleBasedStateMachine):
         old_powers = [self.gc.vote_user_slopes(user, self.added_gauges[g].address).power for g in gauge_ids]
         for old_weight in old_powers:
             user_power += weight - old_weight
-            if user_power > 10000:
-                return True
-        return False
+        if user_power > 10000:
+            return True
+        else:
+            return False
 
     @rule(gauge_ids=gauge_ids, uid=user_id, weight=weight)
     def vote(self, gauge_ids, uid, weight):
@@ -686,3 +687,24 @@ def test_weight_manipulation(ve_yb, yb, gc, admin, collateral_token, stablecoin)
 
     assert claimed_by_regular > 0
     assert claimed_by_hacker == 0
+
+
+def test_no_revert_too_much(ve_yb, yb, gc, fake_gauges, accounts, admin):
+    for k, v in locals().items():
+        setattr(StatefulVE, k, v)
+    state = StatefulVE()
+    state.check_sum_votes()
+    state.add_gauge(gauge_id=0)
+    state.check_sum_votes()
+    state.create_lock(amount=126144000, lock_duration=1213589, uid=2)
+    state.check_sum_votes()
+    state.vote(gauge_ids=[0], uid=2, weight=4997)
+    state.check_sum_votes()
+    state.add_gauge(gauge_id=1)
+    state.check_sum_votes()
+    state.add_gauge(gauge_id=2)
+    state.check_sum_votes()
+    state.time_travel(dt=864000)
+    state.check_sum_votes()
+    state.vote(gauge_ids=[1, 2, 0], uid=2, weight=2502)
+    state.teardown()
