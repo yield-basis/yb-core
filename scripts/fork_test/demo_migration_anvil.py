@@ -83,8 +83,10 @@ if __name__ == '__main__':
 
     # Set new LT implementation
     lt_blueprint = lt_interface.deploy_as_blueprint()
+    gauge_blueprint = gauge_interface.deploy_as_blueprint()
     with boa.env.prank(DAO):
-        factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS)
+        factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS,
+                                    gauge_blueprint.address)
 
     # Create new markets
     new_lts = []

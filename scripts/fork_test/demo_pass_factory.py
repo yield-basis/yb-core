@@ -63,9 +63,11 @@ if __name__ == '__main__':
     # Stage 1.
     with boa.env.prank(DAO):
         lt_blueprint = lt_interface.deploy_as_blueprint()
+        gauge_blueprint = gauge_interface.deploy_as_blueprint()
         with boa.env.prank(DAO):
             # Set new LT implementation
-            factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS)
+            factory.set_implementations(ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS,
+                                        gauge_blueprint.address)
             # Fee receiver -> DAO
             factory.set_fee_receiver(DAO)
             for lt in lts:

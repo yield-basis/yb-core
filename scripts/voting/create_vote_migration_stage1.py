@@ -90,6 +90,12 @@ if __name__ == '__main__':
         lt_blueprint.ctor_calldata = b""
         verify(lt_blueprint, etherscan, wait=True)
 
+    gauge_interface = boa.load_partial('contracts/dao/LiquidityGauge.vy')
+    gauge_blueprint = gauge_interface.deploy_as_blueprint()
+    if not FORK:
+        lt_blueprint.ctor_calldata = b""
+        verify(gauge_blueprint, etherscan, wait=True)
+
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
             'title': 'Stage 1 of liquidity migration',
@@ -99,7 +105,7 @@ if __name__ == '__main__':
             Action(
                 to=factory.address, value=0,
                 data=factory.set_implementations.prepare_calldata(
-                    ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS
+                    ZERO_ADDRESS, lt_blueprint.address, ZERO_ADDRESS, ZERO_ADDRESS, gauge_blueprint.address
                 )
             ),
             Action(
