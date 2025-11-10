@@ -131,6 +131,9 @@ if __name__ == '__main__':
 
     boa.env.time_travel(3000)  # Test some time delay
 
+    for gauge in new_gauges:
+        print(gauge.totalAssets())  # Should be 0
+
     # Deployer as a test user
     with boa.env.prank(TEST_USER_2):
         for old_lt, new_lt in zip(lts, new_lts):
