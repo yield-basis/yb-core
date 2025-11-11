@@ -21,7 +21,6 @@ exports: (
     erc4626.decimals,
     erc4626.maxDeposit,
     erc4626.maxMint,
-    erc4626.maxWithdraw,
     erc4626.maxRedeem,
     erc4626.asset,
     erc4626.ownable.transfer_ownership,
@@ -597,3 +596,18 @@ def totalAssets() -> uint256:
     @return uint256 The 32-byte total managed assets.
     """
     return self._total_assets()
+
+
+@external
+@view
+def maxWithdraw(owner: address) -> uint256:
+    """
+    @dev Returns the maximum amount of the underlying asset that
+         can be withdrawn from the owner balance in the vault,
+         through a `withdraw` call.
+    @notice For the to be fulfilled conditions, please refer to:
+            https://eips.ethereum.org/EIPS/eip-4626#maxwithdraw.
+    @param owner The 20-byte owner address.
+    @return uint256 The 32-byte maximum withdraw amount.
+    """
+    return self._convert_to_assets_rebase(erc4626.erc20.balanceOf[owner], False)
