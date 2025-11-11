@@ -731,10 +731,10 @@ def pricePerShare() -> uint256:
     """
     Non-manipulatable "fair price per share" oracle
     """
-    v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
-    if v.supply_tokens == 0:
+    if self.totalSupply == 0:
         return 10**18
     else:
+        v: LiquidityValuesOut = self._calculate_values(self._price_oracle())
         return v.total * 10**18 // v.supply_tokens
 
 
