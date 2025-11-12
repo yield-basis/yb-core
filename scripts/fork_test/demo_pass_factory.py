@@ -115,8 +115,7 @@ if __name__ == '__main__':
             lt.withdraw(amount, min_amount)
             # Allocate
             factory_owner.lt_allocate_stablecoins(lt.address, 0)
-            # Approve to new markets
-            asset.approve(new_lt.address, 2**256 - 1)
+            factory_owner.lt_allocate_stablecoins(new_lt.address)
 
     print(f"During migration: admin = {factory.admin()}, emergency_admin = {factory.emergency_admin()}")
 

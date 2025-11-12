@@ -127,15 +127,15 @@ if __name__ == '__main__':
                 data=factory_owner.lt_allocate_stablecoins.prepare_calldata(old_lt.address, 0)
             ),
             Action(
-                to=asset, value=0,
-                data=new_lt.approve.prepare_calldata(new_lt.address, 2**256 - 1)
+                to=factory_owner, value=0,
+                data=factory_owner.lt_allocate_stablecoins.prepare_calldata(new_lt.address)
             )
         ]
 
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
             'title': 'Stage 3 of liquidity migration',
-            'summary': 'Add gauges for new markets. Pass Factory to MigrationFactoryOwner. Withdraw wrapped Bitcoins from each market admin fees. Allocate freed up crvUSD to new markets. Approve Bitcoin wrappers for deposits into new markets.',
+            'summary': 'Add gauges for new markets. Pass Factory to MigrationFactoryOwner. Withdraw wrapped Bitcoins from each market admin fees. Allocate freed up crvUSD to new markets.',
             'resources': []}).encode(),
         actions=actions,
         allowFailureMap=0,
