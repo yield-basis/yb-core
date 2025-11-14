@@ -43,8 +43,10 @@ last_claimed_for: public(HashMap[address, uint256])
 token_sets: public(DynArray[IERC20,MAX_TOKENS][10**9])  # n_set -> token_set
 current_token_set: public(uint256)
 initial_set_for_epoch: public(HashMap[uint256, uint256])  # epoch_time -> token_set_id
+max_set_for_epoch: public(HashMap[uint256, uint256])
 balances_for_epoch: public(HashMap[uint256, HashMap[IERC20, uint256]])
 token_balances: public(HashMap[IERC20, uint256])
+claimed_for: public(HashMap[uint256, HashMap[address, HashMap[IERC20, bool]]])
 
 
 @deploy
@@ -69,6 +71,7 @@ def _fill_epochs():
     for epoch: uint256 in epochs:
         if self.initial_set_for_epoch[epoch] == 0:
             self.initial_set_for_epoch[epoch] = set_id
+        self.max_set_for_epoch[epoch] = set_id
 
     for token: IERC20 in token_set:
         balance: uint256 = staticcall token.balanceOf(self)
@@ -99,8 +102,45 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
 
 
 @external
+def claim_all(user: address = msg.sender, epoch_count: uint256 = 50):
+    self._fill_epochs()
+
+    epoch: uint256 = self.last_claimed_for[user]
+    if epoch == 0:
+        epoch = INITIAL_EPOCH
+    else:
+        epoch += WEEK
+    save_epoch: uint256 = 0
+
+    for i: uint256 in range(50):
+        if epoch > block.timestamp or i >= epoch_count:
+            break
+
+        else:
+            save_epoch = epoch
+            votes: uint256 = staticcall VE.getPastVotes(user, epoch)
+            total_votes: uint256 = staticcall VE.getPastTotalSupply(epoch)
+
+            ts_id: uint256 = self.initial_set_for_epoch[epoch]
+            max_ts_id: uint256 = self.max_set_for_epoch[epoch]
+            for j: uint256 in range(50):
+                for token: IERC20 in self.token_sets[ts_id]:
+                    if not self.claimed_for[epoch][user][token]:
+                        amount: uint256 = self.balances_for_epoch[epoch][token] * votes // total_votes
+                        if amount > 0:
+                            assert extcall token.transfer(user, amount, default_return_value=True)
+                        self.claimed_for[epoch][user][token] = True
+                ts_id += 1
+                if ts_id > max_ts_id:
+                    break
+
+    if save_epoch > 0:
+        self.last_claimed_for[user] = epoch
+
+
+@external
 def extract_token(token: IERC20, receiver: address):
-    self._check_owner()
+    ownable._check_owner()
     amount: uint256 = (staticcall token.balanceOf(self)) - self.token_balances[token]
     if amount > 0:
         assert extcall token.transfer(receiver, amount, default_return_value=True)
