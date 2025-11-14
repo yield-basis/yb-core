@@ -95,7 +95,6 @@ def _fill_epochs():
 @external
 def fill_epochs():
     self._fill_epochs()
-# When claiming all - check ALL tokens in 4 epochs
 
 
 @external
