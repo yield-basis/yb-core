@@ -17,6 +17,11 @@ exports: (
 )
 
 
+interface VotingEscrow:
+    def getPastVotes(account: address, timepoint: uint256) -> uint256: view
+    def getPastTotalSupply(timepoint: uint256) -> uint256: view
+
+
 event FundEpoch:
     epoch: indexed(uint256)
     token: indexed(IERC20)
@@ -31,6 +36,7 @@ WEEK: constant(uint256) = 7 * 86400
 OVER_WEEKS: public(constant(uint256)) = 4
 MAX_TOKENS: public(constant(uint256)) = 100
 INITIAL_EPOCH: public(immutable(uint256))
+VE: public(immutable(VotingEscrow))
 
 
 last_claimed_for: public(HashMap[address, uint256])
@@ -42,8 +48,9 @@ token_balances: public(HashMap[IERC20, uint256])
 
 
 @deploy
-def __init__(token_set: DynArray[IERC20, MAX_TOKENS], owner: address):
+def __init__(token_set: DynArray[IERC20, MAX_TOKENS], ve: VotingEscrow, owner: address):
     INITIAL_EPOCH = (block.timestamp + WEEK) // WEEK * WEEK
+    VE = ve
     self.token_sets[1] = token_set
     self.current_token_set = 1
     log AddTokenSet(token_set_id=1, token_set=token_set)
