@@ -154,6 +154,7 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
         for token: IERC20 in tokens_to_claim:
             amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
             assert extcall token.transfer(user, amount, default_return_value=True)
+            self.token_balances[token] = staticcall token.balanceOf(self)
             log Claim(user=user, token=token, amount=amount)
 
 
