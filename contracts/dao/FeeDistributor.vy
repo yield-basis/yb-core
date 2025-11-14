@@ -5,7 +5,26 @@
 @license GNU Affero General Public License v3.0
 @notice Multi-token fee distribution for Yield Basis
 """
+from snekmate.auth import ownable
 from ethereum.ercs import IERC20
+
+
+initializes: ownable
+
+exports: (
+    ownable.transfer_ownership,
+    ownable.owner
+)
+
+
+event FundEpoch:
+    epoch: indexed(uint256)
+    token: indexed(IERC20)
+    amount: uint256
+
+event AddTokenSet:
+    token_set_id: indexed(uint256)
+    token_set: DynArray[IERC20,MAX_TOKENS]
 
 
 WEEK: constant(uint256) = 7 * 86400
@@ -23,10 +42,14 @@ token_balances: public(HashMap[IERC20, uint256])
 
 
 @deploy
-def __init__(token_set: DynArray[IERC20, MAX_TOKENS]):
+def __init__(token_set: DynArray[IERC20, MAX_TOKENS], owner: address):
     INITIAL_EPOCH = (block.timestamp + WEEK) // WEEK * WEEK
     self.token_sets[1] = token_set
     self.current_token_set = 1
+    log AddTokenSet(token_set_id=1, token_set=token_set)
+
+    ownable.__init__()
+    ownable._transfer_ownership(owner)
 
 
 @internal
@@ -48,9 +71,21 @@ def _fill_epochs():
             balance_per_epoch: uint256 = (balance - old_balance) // OVER_WEEKS
             for epoch: uint256 in epochs:
                 self.balances_for_epoch[epoch][token] += balance_per_epoch
+                log FundEpoch(epoch=epoch, token=token, amount=balance_per_epoch)
 
 
 @external
 def fill_epochs():
     self._fill_epochs()
 # When claiming all - check ALL tokens in 4 epochs
+
+
+@external
+def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
+    ownable._check_owner()
+    self._fill_epochs()
+    current_set_id: uint256 = self.current_token_set
+    current_set_id += 1
+    self.current_token_set = current_set_id
+    self.token_sets[current_set_id] = token_set
+    log AddTokenSet(token_set_id=current_set_id, token_set=token_set)
