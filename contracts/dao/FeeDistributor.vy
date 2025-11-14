@@ -159,7 +159,7 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
 
 
 @external
-def extract_token(token: IERC20, receiver: address):
+def recover_token(token: IERC20, receiver: address):
     ownable._check_owner()
     amount: uint256 = (staticcall token.balanceOf(self)) - self.token_balances[token]
     if amount > 0:
