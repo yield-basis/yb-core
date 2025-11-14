@@ -96,3 +96,11 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
     self.current_token_set = current_set_id
     self.token_sets[current_set_id] = token_set
     log AddTokenSet(token_set_id=current_set_id, token_set=token_set)
+
+
+@external
+def extract_token(token: IERC20, receiver: address):
+    self._check_owner()
+    amount: uint256 = (staticcall token.balanceOf(self)) - self.token_balances[token]
+    if amount > 0:
+        assert extcall token.transfer(receiver, amount, default_return_value=True)
