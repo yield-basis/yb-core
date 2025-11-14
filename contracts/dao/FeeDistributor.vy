@@ -110,7 +110,7 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
 
 
 @external
-def claim_all(user: address = msg.sender, epoch_count: uint256 = 50):
+def claim(user: address = msg.sender, epoch_count: uint256 = 50):
     self._fill_epochs()
 
     epoch: uint256 = self.last_claimed_for[user]
