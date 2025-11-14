@@ -149,6 +149,8 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
                 if ts_id > max_ts_id:
                     break
 
+        epoch += WEEK
+
     if save_epoch > 0:
         self.last_claimed_for[user] = epoch
         for token: IERC20 in tokens_to_claim:
