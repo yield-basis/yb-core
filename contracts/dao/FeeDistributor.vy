@@ -20,6 +20,7 @@ exports: (
 interface VotingEscrow:
     def getPastVotes(account: address, timepoint: uint256) -> uint256: view
     def getPastTotalSupply(timepoint: uint256) -> uint256: view
+    def checkpoint(): nonpayable
 
 
 event FundEpoch:
@@ -112,6 +113,7 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
 @external
 def claim(user: address = msg.sender, epoch_count: uint256 = 50):
     self._fill_epochs()
+    extcall VE.checkpoint()
 
     epoch: uint256 = self.last_claimed_for[user]
     if epoch == 0:
