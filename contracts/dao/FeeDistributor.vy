@@ -51,7 +51,8 @@ initial_set_for_epoch: public(HashMap[uint256, uint256])  # epoch_time -> token_
 max_set_for_epoch: public(HashMap[uint256, uint256])
 balances_for_epoch: public(HashMap[uint256, HashMap[IERC20, uint256]])
 token_balances: public(HashMap[IERC20, uint256])
-claimed_for: public(HashMap[uint256, HashMap[address, HashMap[IERC20, bool]]])
+# claimed_for: public(HashMap[uint256, HashMap[address, HashMap[IERC20, bool]]])
+claimed_epoch_for: public(HashMap[address, HashMap[IERC20, uint256]])
 
 user_claim_id: public(uint256)
 user_claimed_tokens: public(HashMap[address, HashMap[uint256, HashMap[IERC20, uint256]]])
@@ -137,14 +138,14 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
             max_ts_id: uint256 = self.max_set_for_epoch[epoch]
             for j: uint256 in range(50):
                 for token: IERC20 in self.token_sets[ts_id]:
-                    if not self.claimed_for[epoch][user][token]:
+                    if self.claimed_epoch_for[user][token] < epoch:
                         amount: uint256 = self.balances_for_epoch[epoch][token] * votes // total_votes
                         if amount > 0:
                             old_amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
                             if old_amount == 0:
                                 tokens_to_claim.append(token)
                             self.user_claimed_tokens[user][user_claim_id][token] = old_amount + amount
-                        self.claimed_for[epoch][user][token] = True
+                        self.claimed_epoch_for[user][token] = epoch
                 ts_id += 1
                 if ts_id > max_ts_id:
                     break
@@ -152,7 +153,7 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
         epoch += WEEK
 
     if save_epoch > 0:
-        self.last_claimed_for[user] = epoch
+        self.last_claimed_for[user] = save_epoch
         for token: IERC20 in tokens_to_claim:
             amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
             assert extcall token.transfer(user, amount, default_return_value=True)
