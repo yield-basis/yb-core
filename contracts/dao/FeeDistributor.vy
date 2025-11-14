@@ -31,6 +31,11 @@ event AddTokenSet:
     token_set_id: indexed(uint256)
     token_set: DynArray[IERC20,MAX_TOKENS]
 
+event Claim:
+    user: indexed(address)
+    token: indexed(IERC20)
+    amount: uint256
+
 
 WEEK: constant(uint256) = 7 * 86400
 OVER_WEEKS: public(constant(uint256)) = 4
@@ -47,6 +52,9 @@ max_set_for_epoch: public(HashMap[uint256, uint256])
 balances_for_epoch: public(HashMap[uint256, HashMap[IERC20, uint256]])
 token_balances: public(HashMap[IERC20, uint256])
 claimed_for: public(HashMap[uint256, HashMap[address, HashMap[IERC20, bool]]])
+
+user_claim_id: public(uint256)
+user_claimed_tokens: public(HashMap[address, HashMap[uint256, HashMap[IERC20, uint256]]])
 
 
 @deploy
@@ -111,6 +119,11 @@ def claim_all(user: address = msg.sender, epoch_count: uint256 = 50):
     else:
         epoch += WEEK
     save_epoch: uint256 = 0
+    user_claim_id: uint256 = 0
+    if epoch <= block.timestamp:
+        user_claim_id = self.user_claim_id
+        self.user_claim_id = user_claim_id + 1
+    tokens_to_claim: DynArray[IERC20, MAX_TOKENS * 4] = empty(DynArray[IERC20, MAX_TOKENS * 4])
 
     for i: uint256 in range(50):
         if epoch > block.timestamp or i >= epoch_count:
@@ -128,7 +141,10 @@ def claim_all(user: address = msg.sender, epoch_count: uint256 = 50):
                     if not self.claimed_for[epoch][user][token]:
                         amount: uint256 = self.balances_for_epoch[epoch][token] * votes // total_votes
                         if amount > 0:
-                            assert extcall token.transfer(user, amount, default_return_value=True)
+                            old_amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
+                            if old_amount == 0:
+                                tokens_to_claim.append(token)
+                            self.user_claimed_tokens[user][user_claim_id][token] = old_amount + amount
                         self.claimed_for[epoch][user][token] = True
                 ts_id += 1
                 if ts_id > max_ts_id:
@@ -136,6 +152,10 @@ def claim_all(user: address = msg.sender, epoch_count: uint256 = 50):
 
     if save_epoch > 0:
         self.last_claimed_for[user] = epoch
+        for token: IERC20 in tokens_to_claim:
+            amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
+            assert extcall token.transfer(user, amount, default_return_value=True)
+            log Claim(user=user, token=token, amount=amount)
 
 
 @external
