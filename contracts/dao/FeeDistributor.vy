@@ -112,6 +112,7 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
 
 @external
 def claim(user: address = msg.sender, epoch_count: uint256 = 50):
+    assert epoch_count > 0
     self._fill_epochs()
     extcall VE.checkpoint()
 

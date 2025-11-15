@@ -40,3 +40,14 @@ def test_recover(fee_distributor, token_set, admin):
         with boa.env.prank(admin):
             fee_distributor.recover_token(token.address, admin)
             assert token.balanceOf(admin) == amount
+
+
+@given(
+        amounts=st.lists(st.integers(min_value=0, max_value=10**30), min_size=10, max_size=10),
+        epoch_count=st.integers(min_value=1, max_value=51)
+)
+@settings(max_examples=50)
+def test_claim_empty(fee_distributor, token_set, accounts, amounts, epoch_count):
+    for token, amount in zip(token_set, amounts):
+        token._mint_for_testing(fee_distributor.address, amount)
+    fee_distributor.claim(accounts[0], epoch_count)
