@@ -27,3 +27,16 @@ def test_add_set(fee_distributor, token_set, token_ids, admin):
     assert fee_distributor.current_token_set() == 2
     for i, token in enumerate(token_set):
         assert fee_distributor.token_sets(2, i) == token.address
+
+
+def test_recover(fee_distributor, token_set, admin):
+    amounts = [10**18 + i * 10**18 for i in range(len(token_set))]
+    for token, amount in zip(token_set, amounts):
+        token._mint_for_testing(fee_distributor.address, amount)
+
+    for token, amount in zip(token_set, amounts):
+        with boa.reverts():
+            fee_distributor.recover_token(token.address, admin)
+        with boa.env.prank(admin):
+            fee_distributor.recover_token(token.address, admin)
+            assert token.balanceOf(admin) == amount
