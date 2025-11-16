@@ -110,8 +110,8 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
     log AddTokenSet(token_set_id=current_set_id, token_set=token_set)
 
 
-@external
-def claim(user: address = msg.sender, epoch_count: uint256 = 50):
+@internal
+def _claim(user: address, epoch_count: uint256) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
     assert epoch_count > 0
     self._fill_epochs()
     extcall VE.checkpoint()
@@ -127,6 +127,7 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
         user_claim_id = self.user_claim_id
         self.user_claim_id = user_claim_id + 1
     tokens_to_claim: DynArray[IERC20, MAX_TOKENS * 4] = empty(DynArray[IERC20, MAX_TOKENS * 4])
+    amounts_claimed: DynArray[uint256, MAX_TOKENS * 4] = empty(DynArray[uint256, MAX_TOKENS * 4])
 
     for i: uint256 in range(50):
         if epoch > block.timestamp or i >= epoch_count:
@@ -159,9 +160,22 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50):
         self.last_claimed_for[user] = save_epoch
         for token: IERC20 in tokens_to_claim:
             amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
+            amounts_claimed.append(amount)
             assert extcall token.transfer(user, amount, default_return_value=True)
             self.token_balances[token] = staticcall token.balanceOf(self)
             log Claim(user=user, token=token, amount=amount)
+
+    return tokens_to_claim, amounts_claimed
+
+
+@external
+def preview_claim(user: address = msg.sender, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+    return self._claim(user, epoch_count)
+
+
+@external
+def claim(user: address = msg.sender, epoch_count: uint256 = 50):
+    self._claim(user, epoch_count)
 
 
 @external
