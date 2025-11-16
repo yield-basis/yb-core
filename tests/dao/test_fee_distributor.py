@@ -2,6 +2,10 @@ import boa
 import pytest
 from hypothesis import given, settings
 import hypothesis.strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
+
+
+WEEK = 7 * 86400
 
 
 @pytest.fixture(scope="session")
@@ -76,7 +80,7 @@ def test_claim_two_users(fee_distributor, token_set, accounts, admin, amounts, v
     fee_distributor.fill_epochs()
 
     # 5 weeks claims everything distributed
-    boa.env.time_travel(5 * 7 * 86400)
+    boa.env.time_travel(5 * WEEK)
 
     for user, ve_amount in zip(users, ve_amounts):
         with boa.env.prank(user):
@@ -88,3 +92,77 @@ def test_claim_two_users(fee_distributor, token_set, accounts, admin, amounts, v
 
     for token in used_set:
         assert token.balanceOf(fee_distributor.address) <= 8
+
+
+class StatefulFeeDistributor(RuleBasedStateMachine):
+    # Stateful test:
+    # * start with 1 locked user
+    # * add locks
+    # * add new sets (no more often than once a week)
+    # * distribute coins only in the current set
+    # * fill_epochs
+    # * time travel
+    # * time travel and check that almost everything is used up at teardown
+
+    ve_amount = st.integers(min_value=4 * 365 * 86400, max_value=10**9 * 10**18)
+    lock_duration = st.integers(min_value=WEEK, max_value=4 * 365 * 86400)
+    user_id = st.integers(min_value=0, max_value=9)
+    dt = st.integers(min_value=1, max_value=WEEK)
+    set_ids = st.lists(st.integers(min_value=0, max_value=9), min_size=0, max_size=10)
+
+    def __init__(self):
+        super().__init__()
+        self.current_set = [self.token_set[0], self.token_set[1], self.token_set[5], self.token_set[9]]
+        for user in self.accounts:
+            with boa.env.prank(user):
+                self.yb.approve(self.ve_yb.address, 2**256 - 1)
+        with boa.env.prank(self.admin):
+            self.yb.mint(self.accounts[0], 10**18)
+        with boa.env.prank(self.accounts[0]):
+            self.ve_yb.create_lock(10**18, boa.env.evm.patch.timestamp + 4 * 365 * 86400)
+
+    @rule(uid=user_id, amount=ve_amount, duration=lock_duration)
+    def create_lock(self, uid, amount, duration):
+        user = self.accounts[uid]
+        t = boa.env.evm.patch.timestamp + duration
+        if self.ve_yb.locked(user).amount == 0:
+            with boa.env.prank(self.admin):
+                self.yb.mint(user, amount)
+            with boa.env.prank(user):
+                self.ve_yb.create_lock(amount, t)
+
+    @rule(uid=user_id, duration=lock_duration)
+    def extend_lock(self, uid, duration):
+        user = self.accounts[uid]
+        t0 = boa.env.evm.patch.timestamp
+        t = t0 + duration
+        locked = self.ve_yb.locked(user)
+        if locked.amount > 0 and locked.end > t0 and t // WEEK * WEEK > locked.end:
+            with boa.env.prank(user):
+                self.ve_yb.increase_unlock_time(t)
+
+    @rule(dt=dt)
+    def time_travel(self, dt):
+        boa.env.time_travel(dt)
+
+    @rule()
+    def fill_epochs(self):
+        self.fee_distributor.fill_epochs()
+
+    @rule(set_ids=set_ids)
+    def add_set(self, set_ids):
+        token_set = list(set([self.token_set[i] for i in set_ids]))
+        ts_id = self.fee_distributor.current_token_set()
+        with boa.env.prank(self.admin):
+            self.fee_distributor.add_token_set(token_set)
+        ts_id += 1
+        assert self.fee_distributor.current_token_set() == ts_id
+        for i, token in enumerate(token_set):
+            assert self.fee_distributor.token_sets(ts_id, i) == token.address
+
+
+def test_st_fee_distributor(fee_distributor, token_set, accounts, admin, ve_yb, yb):
+    StatefulFeeDistributor.TestCase.settings = settings(max_examples=200, stateful_step_count=100)
+    for k, v in locals().items():
+        setattr(StatefulFeeDistributor, k, v)
+    run_state_machine_as_test(StatefulFeeDistributor)
