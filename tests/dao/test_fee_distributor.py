@@ -108,6 +108,7 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
     lock_duration = st.integers(min_value=WEEK, max_value=4 * 365 * 86400)
     user_id = st.integers(min_value=0, max_value=9)
     dt = st.integers(min_value=1, max_value=WEEK)
+    epoch_count = st.integers(min_value=-1, max_value=51)
     set_ids = st.lists(st.integers(min_value=0, max_value=9), min_size=0, max_size=10)
 
     def __init__(self):
@@ -159,6 +160,18 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
         assert self.fee_distributor.current_token_set() == ts_id
         for i, token in enumerate(token_set):
             assert self.fee_distributor.token_sets(ts_id, i) == token.address
+        self.current_set = token_set
+
+    @rule(uid=user_id, epoch_count=epoch_count)
+    def claim(self, uid, epoch_count):
+        user = self.accounts[uid]
+        if epoch_count < 0:
+            self.fee_distributor.claim(user)
+        elif epoch_count == 0:
+            with boa.reverts():
+                self.fee_distributor.claim(user, 0)
+        else:
+            self.fee_distributor.claim(user, epoch_count)
 
 
 def test_st_fee_distributor(fee_distributor, token_set, accounts, admin, ve_yb, yb):
