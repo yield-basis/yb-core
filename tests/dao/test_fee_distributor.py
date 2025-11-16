@@ -2,7 +2,7 @@ import boa
 import pytest
 from hypothesis import given, settings
 import hypothesis.strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule  # , invariant
+from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule
 
 
 WEEK = 7 * 86400
@@ -103,6 +103,7 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
     # * fill_epochs
     # * time travel
     # * time travel and check that almost everything is used up at teardown
+    # TODO: preivew_claim method!
 
     ve_amount = st.integers(min_value=4 * 365 * 86400, max_value=10**9 * 10**18)
     lock_duration = st.integers(min_value=WEEK, max_value=4 * 365 * 86400)
@@ -180,6 +181,15 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
         for token, amount in zip(self.token_set, amounts):
             if amount > 0 and token in self.current_set:
                 token._mint_for_testing(self.fee_distributor, amount)
+
+    def teardown(self):
+        boa.env.time_travel(5 * WEEK)
+        t_w = boa.env.evm.patch.timestamp // WEEK * WEEK
+        for user in self.accounts:
+            while self.fee_distributor.last_claimed_for(user) < t_w:
+                with boa.env.prank(user):
+                    self.fee_distributor.claim()
+        super().teardown()
 
 
 def test_st_fee_distributor(fee_distributor, token_set, accounts, admin, ve_yb, yb):
