@@ -51,3 +51,40 @@ def test_claim_empty(fee_distributor, token_set, accounts, amounts, epoch_count)
     for token, amount in zip(token_set, amounts):
         token._mint_for_testing(fee_distributor.address, amount)
     fee_distributor.claim(accounts[0], epoch_count)
+
+
+@given(
+        amounts=st.lists(st.integers(min_value=0, max_value=10**30), min_size=4, max_size=4)
+)
+@settings(max_examples=500)
+def test_claim_two_users(fee_distributor, token_set, accounts, admin, amounts, ve_yb, yb):
+    used_set = [token_set[0], token_set[1], token_set[5], token_set[9]]
+    users = accounts[:2]
+    ve_amounts = [10**18, 3 * 10**18]
+    lock_time = boa.env.evm.patch.timestamp + 4 * 365 * 86400
+
+    for user, ve_amount in zip(users, ve_amounts):
+        with boa.env.prank(admin):
+            yb.mint(user, ve_amount)
+        with boa.env.prank(user):
+            yb.approve(ve_yb.address, 2**256 - 1)
+            ve_yb.create_lock(ve_amount, lock_time)
+
+    for token, amount in zip(used_set, amounts):
+        token._mint_for_testing(fee_distributor.address, amount)
+
+    fee_distributor.fill_epochs()
+
+    # 5 weeks claims everything distributed
+    boa.env.time_travel(5 * 7 * 86400)
+
+    for user, ve_amount in zip(users, ve_amounts):
+        with boa.env.prank(user):
+            fee_distributor.claim()
+        for token, amount in zip(used_set, amounts):
+            user_has = token.balanceOf(user)
+            user_expected = amount * ve_amount // sum(ve_amounts)
+            assert abs(user_has - user_expected) <= max(user_expected * 1e-6, 8)
+
+    for token in used_set:
+        assert token.balanceOf(fee_distributor.address) <= 8
