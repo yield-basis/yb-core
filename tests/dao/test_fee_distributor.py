@@ -183,12 +183,15 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
                 token._mint_for_testing(self.fee_distributor, amount)
 
     def teardown(self):
+        self.fee_distributor.fill_epochs()
         boa.env.time_travel(5 * WEEK)
         t_w = boa.env.evm.patch.timestamp // WEEK * WEEK
         for user in self.accounts:
             while self.fee_distributor.last_claimed_for(user) < t_w:
                 with boa.env.prank(user):
                     self.fee_distributor.claim()
+        for token in self.token_set:
+            assert token.balanceOf(self.fee_distributor.address) <= 8 * 100
         super().teardown()
 
 
@@ -197,3 +200,12 @@ def test_st_fee_distributor(fee_distributor, token_set, accounts, admin, ve_yb, 
     for k, v in locals().items():
         setattr(StatefulFeeDistributor, k, v)
     run_state_machine_as_test(StatefulFeeDistributor)
+
+
+def test_st_fee_distributor_too_much_left(fee_distributor, token_set, accounts, admin, ve_yb, yb):
+    StatefulFeeDistributor.TestCase.settings = settings(max_examples=200, stateful_step_count=100)
+    for k, v in locals().items():
+        setattr(StatefulFeeDistributor, k, v)
+    state = StatefulFeeDistributor()
+    state.distribute(amounts=[0, 0, 0, 0, 0, 0, 0, 0, 0, 10**18])
+    state.teardown()
