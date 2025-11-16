@@ -110,10 +110,11 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
     dt = st.integers(min_value=1, max_value=WEEK)
     epoch_count = st.integers(min_value=-1, max_value=51)
     set_ids = st.lists(st.integers(min_value=0, max_value=9), min_size=0, max_size=10)
+    token_amounts = st.lists(st.integers(min_value=0, max_value=10**30), min_size=10, max_size=10)
 
     def __init__(self):
         super().__init__()
-        self.current_set = [self.token_set[0], self.token_set[1], self.token_set[5], self.token_set[9]]
+        self.current_set = set([self.token_set[0], self.token_set[1], self.token_set[5], self.token_set[9]])
         for user in self.accounts:
             with boa.env.prank(user):
                 self.yb.approve(self.ve_yb.address, 2**256 - 1)
@@ -121,6 +122,7 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
             self.yb.mint(self.accounts[0], 10**18)
         with boa.env.prank(self.accounts[0]):
             self.ve_yb.create_lock(10**18, boa.env.evm.patch.timestamp + 4 * 365 * 86400)
+        self.tokens_distributed = {t: 0 for t in self.token_set}
 
     @rule(uid=user_id, amount=ve_amount, duration=lock_duration)
     def create_lock(self, uid, amount, duration):
@@ -160,7 +162,7 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
         assert self.fee_distributor.current_token_set() == ts_id
         for i, token in enumerate(token_set):
             assert self.fee_distributor.token_sets(ts_id, i) == token.address
-        self.current_set = token_set
+        self.current_set = set(token_set)
 
     @rule(uid=user_id, epoch_count=epoch_count)
     def claim(self, uid, epoch_count):
@@ -172,6 +174,12 @@ class StatefulFeeDistributor(RuleBasedStateMachine):
                 self.fee_distributor.claim(user, 0)
         else:
             self.fee_distributor.claim(user, epoch_count)
+
+    @rule(amounts=token_amounts)
+    def distribute(self, amounts):
+        for token, amount in zip(self.token_set, amounts):
+            if amount > 0 and token in self.current_set:
+                token._mint_for_testing(self.fee_distributor, amount)
 
 
 def test_st_fee_distributor(fee_distributor, token_set, accounts, admin, ve_yb, yb):
