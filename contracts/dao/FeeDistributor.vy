@@ -100,6 +100,27 @@ def fill_epochs():
 
 
 @external
+@view
+def preview_distribution(week_shift: uint256 = 0) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+    epoch: uint256 = (block.timestamp // WEEK - week_shift) * WEEK
+    out_tokens: DynArray[IERC20, MAX_TOKENS * 4] = empty(DynArray[IERC20, MAX_TOKENS * 4])
+    out_amounts: DynArray[uint256, MAX_TOKENS * 4] = empty(DynArray[uint256, MAX_TOKENS * 4])
+
+    ts_id: uint256 = self.initial_set_for_epoch[epoch]
+    max_ts_id: uint256 = self.max_set_for_epoch[epoch]
+    for j: uint256 in range(50):
+        for token: IERC20 in self.token_sets[ts_id]:
+            if token not in out_tokens:  # <- not a scalable check, quadratic on tokens in epoch
+                out_tokens.append(token)
+                out_amounts.append(self.balances_for_epoch[epoch][token])
+        ts_id += 1
+        if ts_id > max_ts_id:
+            break
+
+    return out_tokens, out_amounts
+
+
+@external
 def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
     ownable._check_owner()
     self._fill_epochs()
