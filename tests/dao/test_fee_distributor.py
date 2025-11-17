@@ -17,7 +17,7 @@ def token_set(token_mock):
 @pytest.fixture(scope="session")
 def fee_distributor(token_set, ve_yb, admin):
     initial_set = [token_set[0], token_set[1], token_set[5], token_set[9]]
-    return boa.load('contracts/dao/FeeDistributor.vy', initial_set, ve_yb, admin)
+    return boa.load('contracts/dao/FeeDistributor.vy', initial_set, ve_yb, [], admin)
 
 
 @given(token_ids=st.lists(st.integers(min_value=0, max_value=9), min_size=0, max_size=9))

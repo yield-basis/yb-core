@@ -22,6 +22,9 @@ interface VotingEscrow:
     def getPastTotalSupply(timepoint: uint256) -> uint256: view
     def checkpoint(): nonpayable
 
+interface VestingEscrow:
+    def recipient_to_cliff(user: address) -> address: view
+
 
 event FundEpoch:
     epoch: indexed(uint256)
@@ -43,6 +46,7 @@ OVER_WEEKS: public(constant(uint256)) = 4
 MAX_TOKENS: public(constant(uint256)) = 100
 INITIAL_EPOCH: public(immutable(uint256))
 VE: public(immutable(VotingEscrow))
+VESTING_ESCROWS: public(immutable(DynArray[VestingEscrow, 5]))
 
 
 last_claimed_for: public(HashMap[address, uint256])
@@ -60,9 +64,11 @@ user_claimed_tokens: public(HashMap[address, HashMap[uint256, HashMap[IERC20, ui
 
 
 @deploy
-def __init__(token_set: DynArray[IERC20, MAX_TOKENS], ve: VotingEscrow, owner: address):
+def __init__(token_set: DynArray[IERC20, MAX_TOKENS], ve: VotingEscrow,
+             vesting_escrows: DynArray[VestingEscrow, 5], owner: address):
     INITIAL_EPOCH = (block.timestamp + WEEK) // WEEK * WEEK
     VE = ve
+    VESTING_ESCROWS = vesting_escrows
     self.token_sets[1] = token_set
     self.current_token_set = 1
     log AddTokenSet(token_set_id=1, token_set=token_set)
@@ -132,7 +138,7 @@ def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
 
 
 @internal
-def _claim(user: address, epoch_count: uint256) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+def _claim(user: address, epoch_count: uint256, _for: address) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
     assert epoch_count > 0
     self._fill_epochs()
     extcall VE.checkpoint()
@@ -182,7 +188,7 @@ def _claim(user: address, epoch_count: uint256) -> (DynArray[IERC20, MAX_TOKENS 
         for token: IERC20 in tokens_to_claim:
             amount: uint256 = self.user_claimed_tokens[user][user_claim_id][token]
             amounts_claimed.append(amount)
-            assert extcall token.transfer(user, amount, default_return_value=True)
+            assert extcall token.transfer(_for, amount, default_return_value=True)
             self.token_balances[token] = staticcall token.balanceOf(self)
             log Claim(user=user, token=token, amount=amount)
 
@@ -191,12 +197,19 @@ def _claim(user: address, epoch_count: uint256) -> (DynArray[IERC20, MAX_TOKENS 
 
 @external
 def preview_claim(user: address = msg.sender, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
-    return self._claim(user, epoch_count)
+    return self._claim(user, epoch_count, user)
 
 
 @external
-def claim(user: address = msg.sender, epoch_count: uint256 = 50):
-    self._claim(user, epoch_count)
+def claim(user: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
+    _user: address = user
+    if use_vest:
+        for vest: VestingEscrow in VESTING_ESCROWS:
+            cliff: address = staticcall vest.recipient_to_cliff(user)
+            if cliff != empty(address):
+                _user = cliff
+                break
+    self._claim(_user, epoch_count, user)
 
 
 @external
