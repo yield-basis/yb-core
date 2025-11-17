@@ -19,6 +19,7 @@ DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 INITIAL_TOKEN_SET = ["0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
                      "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
                      "0x18084fba666a33d37592fa2633fd49a74dd93a88"]
+VESTING_ESCROWS = ["0x11988547B064CaBF65c431c14Ef1b7435084602e", "0x93Eb25E380229bFED6AB4bf843E5f670c12785e3"]
 VE = "0x8235c179E9e84688FBd8B12295EfC26834dAC211"
 ADMIN = DEPLOYER
 
@@ -56,7 +57,7 @@ if __name__ == '__main__':
         admin = account_load('yb-deployer')
         boa.env.add_account(admin)
 
-    fee_distributor = boa.load('contracts/dao/FeeDistributor.vy', INITIAL_TOKEN_SET, VE, ADMIN)
+    fee_distributor = boa.load('contracts/dao/FeeDistributor.vy', INITIAL_TOKEN_SET, VE, VESTING_ESCROWS, ADMIN)
     if not FORK:
         verify(fee_distributor, etherscan, wait=True)
 
