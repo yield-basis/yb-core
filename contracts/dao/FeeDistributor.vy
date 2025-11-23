@@ -208,36 +208,61 @@ def _claim(user: address, epoch_count: uint256, _for: address) -> (DynArray[IERC
     return tokens_to_claim, amounts_claimed
 
 
+@internal
+@view
+def _similar_to_cliff_escrow(vest: address) -> bool:
+    if vest.is_contract:
+        success: bool = False
+        res: Bytes[32] = empty(Bytes[32])
+        success, res = raw_call(
+            vest,
+            method_id("VE()"),
+            max_outsize=32, is_static_call=True, revert_on_failure=False)
+        if success:
+            return convert(res, address) == VE.address
+        else:
+            return False
+    else:
+        return False
+
+
 @external
-def preview_claim(user: address = msg.sender, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+def preview_claim(receiver: address, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
     """
     @notice Amounts of tokens claimable by a given user
     @dev This method MUST be renamed to view in ABI (despite compiler making it transacting)- otherwise it is useless
-    @param user User who will be receiving the claim
+    @param receiver User who will be receiving the claim
     @param epoch_count Number of epochs to claim
     @return [tokens], [amounts]
     """
-    # XXX make it so that others cannot claim into vest!!!
-    return self._claim(user, epoch_count, user)
+    assert not self._similar_to_cliff_escrow(receiver), "Might be a vest"
+    return self._claim(receiver, epoch_count, receiver)
 
 
 @external
-def claim(user: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
+def claim(receiver: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
     """
     @notice Amounts of tokens claimable by a given user
-    @param user User who will be receiving the claim
+    @param receiver User who will be receiving the claim
     @param epoch_count Number of epochs to claim
     @param use_vest Claim for a user in one of the vests
     """
-    # XXX make it so that others cannot claim into vest!!!
-    _user: address = user
+    owner: address = receiver
+    cliff: address = empty(address)
     if use_vest:
         for vest: VestingEscrow in VESTING_ESCROWS:
-            cliff: address = staticcall vest.recipient_to_cliff(user)
+            cliff = staticcall vest.recipient_to_cliff(receiver)
             if cliff != empty(address):
-                _user = cliff
                 break
-    self._claim(_user, epoch_count, user)
+    if cliff != empty(address):
+        owner = cliff
+    else:
+        # We are not sure if receiver is not someone's cliff!
+        if receiver != msg.sender:
+            # If it is msg.sender who runs the claim - it's not a cliff
+            # but otherwise we need to check that it's not a smart contract who claims
+            assert not self._similar_to_cliff_escrow(receiver), "Might be a vest"
+    self._claim(owner, epoch_count, receiver)
 
 
 @external
