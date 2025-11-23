@@ -1,4 +1,5 @@
 # @version 0.4.3
+# pragma nonreentrancy on
 """
 @title FeeDistributor
 @author Yield Basis
@@ -56,7 +57,6 @@ initial_set_for_epoch: public(HashMap[uint256, uint256])  # epoch_time -> token_
 max_set_for_epoch: public(HashMap[uint256, uint256])
 balances_for_epoch: public(HashMap[uint256, HashMap[IERC20, uint256]])
 token_balances: public(HashMap[IERC20, uint256])
-# claimed_for: public(HashMap[uint256, HashMap[address, HashMap[IERC20, bool]]])
 claimed_epoch_for: public(HashMap[address, HashMap[IERC20, uint256]])
 
 user_claim_id: public(uint256)
@@ -102,12 +102,21 @@ def _fill_epochs():
 
 @external
 def fill_epochs():
+    """
+    @notice Distribute newly arrived tokens across several (4) future epochs
+    """
     self._fill_epochs()
 
 
 @external
 @view
 def preview_distribution(week_shift: uint256 = 0) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+    """
+    @notice Check amount of tokens claimable in a given week by all users
+    @param week_shift Which week we should check for (0 = current, 1 = last etc)
+    @return [tokens], [amounts]
+    """
+    # XXX need to go to the future
     epoch: uint256 = (block.timestamp // WEEK - week_shift) * WEEK
     out_tokens: DynArray[IERC20, MAX_TOKENS * 4] = empty(DynArray[IERC20, MAX_TOKENS * 4])
     out_amounts: DynArray[uint256, MAX_TOKENS * 4] = empty(DynArray[uint256, MAX_TOKENS * 4])
@@ -128,6 +137,10 @@ def preview_distribution(week_shift: uint256 = 0) -> (DynArray[IERC20, MAX_TOKEN
 
 @external
 def add_token_set(token_set: DynArray[IERC20, MAX_TOKENS]):
+    """
+    @notice Add token set for distribution. These tokens will be tracked and added as revenues
+    @param token_set Array with token addresses
+    """
     ownable._check_owner()
     self._fill_epochs()
     current_set_id: uint256 = self.current_token_set
@@ -197,11 +210,26 @@ def _claim(user: address, epoch_count: uint256, _for: address) -> (DynArray[IERC
 
 @external
 def preview_claim(user: address = msg.sender, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+    """
+    @notice Amounts of tokens claimable by a given user
+    @dev This method MUST be renamed to view in ABI (despite compiler making it transacting)- otherwise it is useless
+    @param user User who will be receiving the claim
+    @param epoch_count Number of epochs to claim
+    @return [tokens], [amounts]
+    """
+    # XXX make it so that others cannot claim into vest!!!
     return self._claim(user, epoch_count, user)
 
 
 @external
 def claim(user: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
+    """
+    @notice Amounts of tokens claimable by a given user
+    @param user User who will be receiving the claim
+    @param epoch_count Number of epochs to claim
+    @param use_vest Claim for a user in one of the vests
+    """
+    # XXX make it so that others cannot claim into vest!!!
     _user: address = user
     if use_vest:
         for vest: VestingEscrow in VESTING_ESCROWS:
@@ -214,6 +242,11 @@ def claim(user: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool 
 
 @external
 def recover_token(token: IERC20, receiver: address):
+    """
+    @notice Recover any token which did not go for distribution already (only by the owner)
+    @param token Token address to recover
+    @param receiver Who to send it to
+    """
     ownable._check_owner()
     amount: uint256 = (staticcall token.balanceOf(self)) - self.token_balances[token]
     if amount > 0:
