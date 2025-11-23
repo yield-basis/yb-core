@@ -110,27 +110,27 @@ def fill_epochs():
 
 @external
 @view
-def preview_distribution(week_shift: uint256 = 0) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+def preview_distribution(week_shift: int256 = 0) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
     """
     @notice Check amount of tokens claimable in a given week by all users
-    @param week_shift Which week we should check for (0 = current, 1 = last etc)
+    @param week_shift Which week we should check for (0 = current, 1 = next, -1 = last etc)
     @return [tokens], [amounts]
     """
-    # XXX need to go to the future
-    epoch: uint256 = (block.timestamp // WEEK - week_shift) * WEEK
+    epoch: uint256 = convert(convert(block.timestamp // WEEK, int256) + week_shift, uint256) * WEEK
     out_tokens: DynArray[IERC20, MAX_TOKENS * 4] = empty(DynArray[IERC20, MAX_TOKENS * 4])
     out_amounts: DynArray[uint256, MAX_TOKENS * 4] = empty(DynArray[uint256, MAX_TOKENS * 4])
 
     ts_id: uint256 = self.initial_set_for_epoch[epoch]
-    max_ts_id: uint256 = self.max_set_for_epoch[epoch]
-    for j: uint256 in range(50):
-        for token: IERC20 in self.token_sets[ts_id]:
-            if token not in out_tokens:  # <- not a scalable check, quadratic on tokens in epoch
-                out_tokens.append(token)
-                out_amounts.append(self.balances_for_epoch[epoch][token])
-        ts_id += 1
-        if ts_id > max_ts_id:
-            break
+    if ts_id > 0:
+        max_ts_id: uint256 = self.max_set_for_epoch[epoch]
+        for j: uint256 in range(50):
+            for token: IERC20 in self.token_sets[ts_id]:
+                if token not in out_tokens:  # <- not a scalable check, quadratic on tokens in epoch
+                    out_tokens.append(token)
+                    out_amounts.append(self.balances_for_epoch[epoch][token])
+            ts_id += 1
+            if ts_id > max_ts_id:
+                break
 
     return out_tokens, out_amounts
 
