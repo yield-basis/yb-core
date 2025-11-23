@@ -94,6 +94,14 @@ def test_claim_two_users(fee_distributor, token_set, accounts, admin, amounts, v
         assert token.balanceOf(fee_distributor.address) <= 8
 
 
+def test_cliff_distribution_block(fee_distributor, ve_yb):
+    ce = boa.load('contracts/dao/CliffEscrow.vy', ve_yb.address, ve_yb.address, ve_yb.address)  # mock
+    with boa.reverts("Might be a vest"):
+        fee_distributor.claim(ce.address)
+    with boa.reverts("Might be a vest"):
+        fee_distributor.preview_claim(ce.address)
+
+
 class StatefulFeeDistributor(RuleBasedStateMachine):
     # Stateful test:
     # * start with 1 locked user
