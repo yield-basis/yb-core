@@ -226,27 +226,8 @@ def _similar_to_cliff_escrow(vest: address) -> bool:
         return False
 
 
-@external
-def preview_claim(receiver: address, epoch_count: uint256 = 50) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
-    """
-    @notice Amounts of tokens claimable by a given user
-    @dev This method MUST be renamed to view in ABI (despite compiler making it transacting)- otherwise it is useless
-    @param receiver User who will be receiving the claim
-    @param epoch_count Number of epochs to claim
-    @return [tokens], [amounts]
-    """
-    assert not self._similar_to_cliff_escrow(receiver), "Might be a vest"
-    return self._claim(receiver, epoch_count, receiver)
-
-
-@external
-def claim(receiver: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
-    """
-    @notice Amounts of tokens claimable by a given user
-    @param receiver User who will be receiving the claim
-    @param epoch_count Number of epochs to claim
-    @param use_vest Claim for a user in one of the vests
-    """
+@internal
+def _execute_claim(receiver: address, epoch_count: uint256, use_vest: bool) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
     owner: address = receiver
     cliff: address = empty(address)
     if use_vest:
@@ -262,7 +243,31 @@ def claim(receiver: address = msg.sender, epoch_count: uint256 = 50, use_vest: b
             # If it is msg.sender who runs the claim - it's not a cliff
             # but otherwise we need to check that it's not a smart contract who claims
             assert not self._similar_to_cliff_escrow(receiver), "Might be a vest"
-    self._claim(owner, epoch_count, receiver)
+    return self._claim(owner, epoch_count, receiver)
+
+
+@external
+def preview_claim(receiver: address, epoch_count: uint256 = 50, use_vest: bool = False) -> (DynArray[IERC20, MAX_TOKENS * 4], DynArray[uint256, MAX_TOKENS * 4]):
+    """
+    @notice Amounts of tokens claimable by a given user
+    @dev This method MUST be renamed to view in ABI (despite compiler making it transacting)- otherwise it is useless
+    @param receiver User who will be receiving the claim
+    @param epoch_count Number of epochs to claim
+    @param use_vest Claim for a user in one of the vests
+    @return [tokens], [amounts]
+    """
+    return self._execute_claim(receiver, epoch_count, use_vest)
+
+
+@external
+def claim(receiver: address = msg.sender, epoch_count: uint256 = 50, use_vest: bool = False):
+    """
+    @notice Amounts of tokens claimable by a given user
+    @param receiver User who will be receiving the claim
+    @param epoch_count Number of epochs to claim
+    @param use_vest Claim for a user in one of the vests
+    """
+    self._execute_claim(receiver, epoch_count, use_vest)
 
 
 @external
