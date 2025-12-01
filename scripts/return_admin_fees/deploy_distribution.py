@@ -15,8 +15,11 @@ from boa.verifiers import verify
 
 FORK = True
 TOKEN = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"  # WBTC
+# Total to send: 6.02448982 == 602448982 WBTC for 2187 users
 # TOKEN = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"  # cbBTC
+# Total to send: 20.24372557 == 2024372557 cbBTC for 343 users
 # TOKEN = "0x18084fbA666a33d37592fA2633fD49a74DD93a88"  # tBTC
+# Total to send: 18.53837754089672 == 18538377540896722592 tBTC for 593 users
 DEPLOYER = "0xa41074e0472E4e014c655dD143E9f5b87784a9DF"
 DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 BATCH_SIZE = 100
@@ -46,10 +49,10 @@ if __name__ == '__main__':
         admin = DEPLOYER
         boa.env.eoa = admin
     else:
-        admin = account_load('ADMIN')
+        admin = account_load('???')
         boa.env.add_account(admin)
 
-    deployed_multisend_filename = os.path.dirname(__file__) + "/multisend-{TOKEN}.json"
+    deployed_multisend_filename = os.path.dirname(__file__) + f"/multisend-{TOKEN}.json"
     multisend_deployer = boa.load_partial('contracts/dao/Multisend.vy')
 
     erc20 = boa.load_abi(os.path.dirname(__file__) + '/erc20.abi.json')
@@ -85,7 +88,7 @@ if __name__ == '__main__':
     users = {u: int(v * 10**token.decimals()) for u, v in users.items()}
     users = {u: v for u, v in users.items() if v > 0}
     print(f"Total in file: {sum_amount} {token.symbol()}")
-    print(f"Total to send: {sum(users.values())/10**token.decimals()} {token.symbol()} for {len(users)} users")
+    print(f"Total to send: {sum(users.values())/10**token.decimals()} == {sum(users.values())} {token.symbol()} for {len(users)} users")
 
     items = list(users.items())
 
