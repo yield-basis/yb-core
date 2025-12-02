@@ -41,6 +41,9 @@ event Claim:
     token: indexed(IERC20)
     amount: uint256
 
+event Kill:
+    is_killed: bool
+
 
 WEEK: constant(uint256) = 7 * 86400
 OVER_WEEKS: public(constant(uint256)) = 4
@@ -62,6 +65,8 @@ claimed_epoch_for: public(HashMap[address, HashMap[IERC20, uint256]])
 user_claim_id: public(uint256)
 user_claimed_tokens: public(HashMap[address, HashMap[uint256, HashMap[IERC20, uint256]]])
 
+is_killed: public(bool)
+
 
 @deploy
 def __init__(token_set: DynArray[IERC20, MAX_TOKENS], ve: VotingEscrow,
@@ -79,6 +84,8 @@ def __init__(token_set: DynArray[IERC20, MAX_TOKENS], ve: VotingEscrow,
 
 @internal
 def _fill_epochs():
+    assert not self.is_killed, "Ded"
+
     set_id: uint256 = self.current_token_set
     token_set: DynArray[IERC20, MAX_TOKENS] = self.token_sets[set_id]
     cursor: uint256 = (block.timestamp + WEEK) // WEEK * WEEK
@@ -278,6 +285,18 @@ def recover_token(token: IERC20, receiver: address):
     @param receiver Who to send it to
     """
     ownable._check_owner()
-    amount: uint256 = (staticcall token.balanceOf(self)) - self.token_balances[token]
+    amount: uint256 = staticcall token.balanceOf(self)
+    if not self.is_killed:
+        amount -= self.token_balances[token]
     if amount > 0:
         assert extcall token.transfer(receiver, amount, default_return_value=True)
+
+
+@external
+def kill_toggle(is_killed: bool):
+    """
+    @notice Kill or unkill the contract
+    """
+    ownable._check_owner()
+    self.is_killed = is_killed
+    log Kill(is_killed=is_killed)
