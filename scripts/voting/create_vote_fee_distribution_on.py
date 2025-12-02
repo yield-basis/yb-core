@@ -81,6 +81,7 @@ if __name__ == '__main__':
 
     voting = boa.load_abi(os.path.dirname(__file__) + '/TokenVoting.abi.json', name="AragonVoting").at(VOTING_PLUGIN)
     factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
+    factory_owner = boa.load_partial('contracts/MigrationFactoryOwner.vy').at(factory.admin())
     fee_distributor = boa.load_partial('contracts/dao/FeeDistributor.vy').at(FEE_DISTRIBUTOR)
     lt_interface = boa.load_partial('contracts/LT.vy')
     lts = [lt_interface.at(factory.markets(i).lt) for i in [3, 4, 5]]
@@ -122,8 +123,8 @@ if __name__ == '__main__':
 
     actions.append(
         Action(
-            to=factory.address, value=0,
-            data=factory.set_fee_receiver.prepare_calldata(FEE_DISTRIBUTOR)
+            to=factory_owner.address, value=0,
+            data=factory_owner.set_fee_receiver.prepare_calldata(FEE_DISTRIBUTOR)
         ))
 
     actions.append(
@@ -131,6 +132,14 @@ if __name__ == '__main__':
             to=token_sender.address, value=0,
             data=token_sender.send.prepare_calldata()
         ))
+
+    for t in list(token_set):
+        token = erc20.at(t)
+        actions.append(
+            Action(
+                to=token.address, value=0,
+                data=token.approve.prepare_calldata(token_sender.address, 0)
+            ))
 
     actions.append(
         Action(
@@ -151,3 +160,17 @@ if __name__ == '__main__':
         tryEarlyExecution=True
     ))
     print(proposal_id)
+
+    if FORK:
+        print("Simulating execution")
+        with boa.env.prank(DAO):
+            for i, action in enumerate(actions):
+                print(i + 1, 'out of', len(actions))
+                boa.env.raw_call(to_address=action.to, data=action.data)
+
+        print("Values after execution:")
+        print(f"Fee receiver is set to {factory.fee_receiver()} which is the same as {FEE_DISTRIBUTOR}")
+        print(f"Token balances in fee receiver:")
+        for t in list(token_set):
+            token = erc20.at(t)
+            print(f'  - {token.symbol()}: {token.balanceOf(FEE_DISTRIBUTOR) / 10**token.decimals()}')
