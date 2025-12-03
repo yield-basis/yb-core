@@ -171,6 +171,26 @@ if __name__ == '__main__':
         print("Values after execution:")
         print(f"Fee receiver is set to {factory.fee_receiver()} which is the same as {FEE_DISTRIBUTOR}")
         print(f"Token balances in fee receiver:")
-        for t in list(token_set):
-            token = erc20.at(t)
+        tokens = [erc20.at(t) for t in list(token_set)]
+        for token in tokens:
             print(f'  - {token.symbol()}: {token.balanceOf(FEE_DISTRIBUTOR) / 10**token.decimals()}')
+
+        print("Claim after time travel")
+        test_user = "0x7a16fF8270133F063aAb6C9977183D9e72835428"
+        print("Before")
+        print("User balances")
+        for token in tokens:
+            print(token.address, token.balanceOf(test_user))
+        with boa.env.prank(test_user):
+            ttokens, amounts = fee_distributor.preview_claim(test_user, 50, True)
+            for t, a in zip(ttokens, amounts):
+                print(t, a)
+        boa.env.time_travel(7 * 86400)
+        print("After")
+        with boa.env.prank(test_user):
+            ttokens, amounts = fee_distributor.preview_claim(test_user, 50, True)
+            for t, a in zip(ttokens, amounts):
+                print(t, a)
+        print("User balances")
+        for token in tokens:
+            print(token.address, token.balanceOf(test_user))
