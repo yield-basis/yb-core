@@ -16,7 +16,7 @@ from boa.verifiers import verify as boa_verify
 from networks import ETHERSCAN_API_KEY
 
 
-FORK = True
+FORK = False
 EXTRA_TIMEOUT = 10
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -170,7 +170,7 @@ if __name__ == '__main__':
 
         print("Values after execution:")
         print(f"Fee receiver is set to {factory.fee_receiver()} which is the same as {FEE_DISTRIBUTOR}")
-        print(f"Token balances in fee receiver:")
+        print("Token balances in fee receiver:")
         tokens = [erc20.at(t) for t in list(token_set)]
         for token in tokens:
             print(f'  - {token.symbol()}: {token.balanceOf(FEE_DISTRIBUTOR) / 10**token.decimals()}')
