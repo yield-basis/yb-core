@@ -17,22 +17,12 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 
-CURVE_POOL = "0x6e5492F8ea2370844EE098A56DD88e1717e4A9C2"
-AMM_FEE = int(1.4 * 10**16)  # 1.4%
-RATE = int(2 * 0.005 * 1e18 / (365 * 86400))
-
-
 FORK = False
-EXTRA_TIMEOUT = 10
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
-DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
-GAUGE_CONTROLLER = "0x1Be14811A3a06F6aF4fA64310a636e1Df04c1c21"
-FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
-CURVE_FACTORY = "0x98EE851a00abeE0d95D08cF4CA2BdCE32aeaAF7F"
+USER = "0xeAfD26ffA47a9e387FB7409A456c4f7c4EF31ad8"
 
-USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
+EXTRA_TIMEOUT = 10
+
 
 Proposal = namedtuple("Proposal", ["metadata", "actions", "allowFailureMap", "startDate", "endDate", "voteOption",
                                    "tryEarlyExecution"])
@@ -82,32 +72,26 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer')
+        USER = account_load('yb-deployer-2')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
     voting = boa.load_abi(os.path.dirname(__file__) + '/TokenVoting.abi.json', name="AragonVoting").at(VOTING_PLUGIN)
-    factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
-    gauge_controller = boa.load_partial('contracts/dao/GaugeController.vy').at(GAUGE_CONTROLLER)
-    factory_owner = boa.load_partial('contracts/MigrationFactoryOwner.vy').at(factory.admin())
+    factory = boa.load_abi(os.path.dirname(__file__) + '/Factory.abi.json', name="Factory").at("0x370a449FeBb9411c95bf897021377fe0B7D100c0")
+    gc = boa.load_abi(os.path.dirname(__file__) + '/GC.abi.json', name="GC").at(factory.gauge_controller())
 
-    actions = [
-        Action(to=factory_owner.address, value=0,
-               data=factory_owner.add_market.prepare_calldata(
-                   CURVE_POOL,
-                   AMM_FEE,
-                   RATE,
-                   2 * 25_000_000 * 10**18
-                   )
-               )
-    ]
+    gauges = [factory.markets(6).staker]
+    print(gauges)
 
     proposal_id = voting.createProposal(*Proposal(
         metadata=pin_to_ipfs({
-            'title': 'Create a pool with WETH',
-            'summary': 'Create yb-WETH pool with $25M cap',
+            'title': 'Add gauge for WETH pool to GaugeController',
+            'summary': 'Allow WETH pool on YieldBasis to get YB emissions',
             'resources': []}).encode(),
-        actions=actions,
+        actions=[
+            Action(to=gc.address, value=0, data=gc.add_gauge.prepare_calldata(g))
+            for g in gauges
+        ],
         allowFailureMap=0,
         startDate=0,
         endDate=0,
@@ -115,10 +99,3 @@ if __name__ == '__main__':
         tryEarlyExecution=True
     ))
     print(proposal_id)
-
-    if FORK:
-        print("Simulating execution")
-        with boa.env.prank(DAO):
-            for i, action in enumerate(actions):
-                print(i + 1, 'out of', len(actions))
-                boa.env.raw_call(to_address=action.to, data=action.data)
