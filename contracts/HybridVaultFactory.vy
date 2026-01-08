@@ -20,17 +20,22 @@ event VaultCreated:
 event SetVaultImpl:
     impl: address
 
+event SetStablecoinFraction:
+    stablecoin_fraction: uint256
+
 
 FACTORY: public(immutable(Factory))
 vault_impl: public(address)
 user_to_vault: public(HashMap[address, HybridVault])
 vault_to_user: public(HashMap[HybridVault, address])
+stablecoin_fraction: public(uint256)
 
 
 @deploy
 def __init__(factory: Factory, impl: address):
     FACTORY = factory
     self.vault_impl = impl
+    self.stablecoin_fraction = 4 * 10**17
 
 
 @external
@@ -52,3 +57,10 @@ def set_vault_impl(impl: address):
     assert msg.sender == staticcall FACTORY.admin(), "Access"
     self.vault_impl = impl
     log SetVaultImpl(impl=impl)
+
+
+@external
+def set_stablecoin_fraction(frac: uint256):
+    assert msg.sender == staticcall FACTORY.admin(), "Access"
+    self.stablecoin_fraction = frac
+    log SetStablecoinFraction(stablecoin_fraction=frac)
