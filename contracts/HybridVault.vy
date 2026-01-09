@@ -77,6 +77,7 @@ used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
 @deploy
 def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
+    # XXX add factory owner also
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
     GC = staticcall factory.gauge_controller()
