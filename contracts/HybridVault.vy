@@ -31,6 +31,8 @@ struct LiquidityValues:
 interface IERC4626:
     def balanceOf(user: address) -> uint256: view
     def previewRedeem(shares: uint256) -> uint256: view
+    def deposit(assets: uint256, receiver: address) -> uint256: nonpayable
+    def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
 
 interface CurveCryptoPool:
     def price_scale() -> uint256: view
@@ -152,12 +154,13 @@ def claim_rewards():
 
 @external
 def deposit_crvusd(assets: uint256) -> uint256:
-    return 0
+    extcall CRVUSD.transferFrom(msg.sender, self, assets)
+    return extcall CRVUSD_VAULT.deposit(assets, self)
 
 
 @external
-def withdraw_crvusd(shares: uint256) -> uint256:
-    return 0
+def redeem_crvusd(shares: uint256) -> uint256:
+    return extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
 
 
 @external
