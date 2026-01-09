@@ -50,6 +50,7 @@ interface AMM:
     def max_debt() -> uint256: view
     def get_debt() -> uint256: view
     def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
+    def value_oracle() -> uint256: view
 
 interface GaugeController:
     def is_killed(gauge: address) -> bool: view
@@ -106,13 +107,13 @@ def _crvusd_available() -> uint256:
 
 @internal
 def _required_crvusd() -> uint256:
-    total_used_debt: uint256 = 0
+    total_crvusd: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         pool: Market = self._pool(pool_id, False)
         lt_shares: uint256 = staticcall pool.lt.balanceOf(self) + staticcall pool.staker.previewRedeem(staticcall pool.staker.balanceOf(self))
         lt_total: uint256 = staticcall pool.lt.totalSupply()
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
-        used_debt: uint256 = staticcall pool.amm.get_debt()
-        used_debt = used_debt * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
-        total_used_debt += used_debt
-    return total_used_debt * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+        crvusd_amount: uint256 = staticcall pool.amm.value_oracle()
+        crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
+        total_crvusd += crvusd_amount
+    return total_crvusd * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
