@@ -62,6 +62,7 @@ interface Factory:
 
 interface VaultFactory:
     def stablecoin_fraction() -> uint256: view
+    def pool_limits(pool_id: uint256) -> uint256: view
 
 
 MAX_VAULTS: public(constant(uint256)) = 16
@@ -128,6 +129,11 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 @external
 def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
     return 0
+
+
+@external
+def claim_rewards():
+    pass
 
 
 @external
