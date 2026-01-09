@@ -82,3 +82,8 @@ def _pool(pool_id: uint256, fail_on_kill: bool) -> Market:
     if fail_on_kill:
         assert not staticcall GC.is_killed(market.staker.address), "Gauge is killed"
     return market
+
+
+@internal
+def _crvusd_available() -> uint256:
+    return staticcall CRVUSD_VAULT.previewRedeem(staticcall IERC20(CRVUSD_VAULT.address).balanceOf(self))
