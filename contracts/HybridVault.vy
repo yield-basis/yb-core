@@ -114,11 +114,24 @@ def _required_crvusd() -> uint256:
     return total_crvusd * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
 
 
+@internal
+@view
+def _required_crvusd_for(amm: AMM, collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
+    value_before: uint256 = (staticcall amm.value_change(0, 0, True)).value
+    value_after: uint256 = (staticcall amm.value_change(collateral_amount, borrowed_amount, True)).value
+    return (value_after - value_before) * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+
+
 @external
 @view
-def required_crvusd(pool_id: uint256 = max_value(uint256)) -> uint256:
-    # XXX add per pool
+def required_crvusd() -> uint256:
     return self._required_crvusd()
+
+
+@external
+@view
+def required_crvusd_for(pool_id: uint256, collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
+    return self._required_crvusd_for((staticcall FACTORY.markets(pool_id)).amm, collateral_amount, borrowed_amount)
 
 
 @external
