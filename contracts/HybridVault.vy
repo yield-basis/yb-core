@@ -93,23 +93,16 @@ def initialize(user: address) -> bool:
 
 
 @internal
-def _pool(pool_id: uint256, fail_on_kill: bool) -> Market:
-    market: Market = staticcall FACTORY.markets(pool_id)
-    if fail_on_kill:
-        assert not staticcall GC.is_killed(market.staker.address), "Gauge is killed"
-    return market
-
-
-@internal
 def _crvusd_available() -> uint256:
     return staticcall CRVUSD_VAULT.previewRedeem(staticcall CRVUSD_VAULT.balanceOf(self))
 
 
 @internal
+@view
 def _required_crvusd() -> uint256:
     total_crvusd: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
-        pool: Market = self._pool(pool_id, False)
+        pool: Market = staticcall FACTORY.markets(pool_id)
         lt_shares: uint256 = staticcall pool.lt.balanceOf(self) + staticcall pool.staker.previewRedeem(staticcall pool.staker.balanceOf(self))
         lt_total: uint256 = staticcall pool.lt.totalSupply()
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
@@ -117,3 +110,41 @@ def _required_crvusd() -> uint256:
         crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
         total_crvusd += crvusd_amount
     return total_crvusd * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+
+
+@external
+@view
+def required_crvusd(pool_id: uint256 = max_value(uint256)) -> uint256:
+    # XXX add per pool
+    return self._required_crvusd()
+
+
+@external
+def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
+    # When deposit: raise cap, deposit, reduce cap
+    return 0
+
+
+@external
+def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
+    return 0
+
+
+@external
+def deposit_crvusd(assets: uint256) -> uint256:
+    return 0
+
+
+@external
+def withdraw_crvusd(shares: uint256) -> uint256:
+    return 0
+
+
+@external
+def deposit_scrvusd(assets: uint256) -> uint256:
+    return 0
+
+
+@external
+def withdraw_scrvusd(shares: uint256) -> uint256:
+    return 0
