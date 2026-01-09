@@ -23,19 +23,31 @@ event SetVaultImpl:
 event SetStablecoinFraction:
     stablecoin_fraction: uint256
 
+event SetPoolLimit:
+    pool_id: uint256
+    limit: uint256
+
 
 FACTORY: public(immutable(Factory))
 vault_impl: public(address)
 user_to_vault: public(HashMap[address, HybridVault])
 vault_to_user: public(HashMap[HybridVault, address])
 stablecoin_fraction: public(uint256)
+pool_limits: public(HashMap[uint256, uint256])
 
 
 @deploy
-def __init__(factory: Factory, impl: address):
+def __init__(factory: Factory, impl: address, pool_ids: DynArray[uint256, 10], pool_limits: DynArray[uint256, 10]):
     FACTORY = factory
     self.vault_impl = impl
     self.stablecoin_fraction = 4 * 10**17
+    for i: uint256 in range(10):
+        if i > len(pool_ids):
+            break
+        pool_id: uint256 = pool_ids[i]
+        pool_limit: uint256 = pool_limits[i]
+        self.pool_limits[pool_id] = pool_limit
+        log SetPoolLimit(pool_id=pool_id, limit=pool_limit)
 
 
 @external
@@ -64,3 +76,10 @@ def set_stablecoin_fraction(frac: uint256):
     assert msg.sender == staticcall FACTORY.admin(), "Access"
     self.stablecoin_fraction = frac
     log SetStablecoinFraction(stablecoin_fraction=frac)
+
+
+@external
+def set_pool_limit(pool_id: uint256, pool_limit: uint256):
+    assert msg.sender == staticcall FACTORY.admin(), "Access"
+    self.pool_limits[pool_id] = pool_limit
+    log SetPoolLimit(pool_id=pool_id, limit=pool_limit)
