@@ -35,6 +35,8 @@ interface IERC4626:
     def previewRedeem(shares: uint256) -> uint256: view
     def deposit(assets: uint256, receiver: address) -> uint256: nonpayable
     def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
+    def claim(reward: IERC20, user: address) -> uint256: nonpayable
+    def preview_claim(reward: IERC20, user: address) -> uint256: view
 
 interface CurveCryptoPool:
     def price_scale() -> uint256: view
@@ -63,7 +65,6 @@ interface GaugeController:
 
 interface Factory:
     def admin() -> address: view
-    def gauge_controller() -> GaugeController: view
     def markets(idx: uint256) -> Market: view
 
 interface VaultFactory:
@@ -73,7 +74,6 @@ interface VaultFactory:
 
 MAX_VAULTS: public(constant(uint256)) = 16
 FACTORY: public(immutable(Factory))
-GC: public(immutable(GaugeController))
 CRVUSD: public(immutable(IERC20))
 CRVUSD_VAULT: public(immutable(IERC4626))
 owner: public(address)
@@ -88,7 +88,6 @@ def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
     # XXX add factory owner also
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
-    GC = staticcall factory.gauge_controller()
     CRVUSD = crvusd
     CRVUSD_VAULT = crvusd_vault
 
@@ -202,8 +201,24 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
 
 @external
-def claim_rewards():
-    pass
+@view
+def preview_claim_reward(token: IERC20) -> uint256:
+    total: uint256 = 0
+    for pool_id: uint256 in self.used_vaults:
+        market: Market = staticcall FACTORY.markets(pool_id)
+        total += staticcall market.staker.preview_claim(token, self)
+    return total
+
+
+@external
+def claim_reward(token: IERC20) -> uint256:
+    total: uint256 = 0
+    for pool_id: uint256 in self.used_vaults:
+        market: Market = staticcall FACTORY.markets(pool_id)
+        total += extcall market.staker.claim(token, self)
+    if total > 0:
+        assert extcall token.transfer(self.owner, total, default_return_value=True)
+    return total
 
 
 @external
