@@ -146,6 +146,24 @@ def required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uin
     return self._required_crvusd_for(market.lt, market.amm, assets, debt)
 
 
+@internal
+def _add_to_used(pool_id: uint256):
+    used_vaults: DynArray[uint256, MAX_VAULTS] = self.used_vaults
+    if pool_id not in used_vaults:
+        used_vaults.append(pool_id)
+        self.used_vaults = used_vaults
+
+
+@internal
+def _remove_from_used(pool_id: uint256):
+    used_vaults: DynArray[uint256, MAX_VAULTS] = self.used_vaults
+    new_used_vaults: DynArray[uint256, MAX_VAULTS] = empty(DynArray[uint256, MAX_VAULTS])
+    for p: uint256 in used_vaults:
+        if p != pool_id:
+            new_used_vaults.append(p)
+    self.used_vaults = new_used_vaults
+
+
 @external
 def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
     assert self.owner == msg.sender, "Access"
@@ -163,7 +181,8 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     if stake:
         lt_receiver = self
 
-    # XXX add to used tokens
+    if assets > 0:
+        self._add_to_used(pool_id)
 
     assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
     lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares, lt_receiver)
