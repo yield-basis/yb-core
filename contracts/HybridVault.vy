@@ -48,6 +48,7 @@ interface PriceOracle:
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address) -> uint256: nonpayable
     def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
+    def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
     def agg() -> PriceOracle: view
     def balanceOf(user: address) -> uint256: view
     def approve(_for: address, amount: uint256) -> bool: nonpayable
@@ -84,6 +85,7 @@ vault_factory: public(VaultFactory)
 used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
 pool_approved: HashMap[uint256, bool]
+stablecoin_allocation: public(uint256)
 
 
 @deploy
@@ -208,6 +210,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     # Reduce cap to what it should be
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
+    self.stablecoin_allocation += 2 * additional_crvusd
 
     if not stake:
         return lt_shares
@@ -218,7 +221,24 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
 @external
 def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
-    return 0
+    assert self.owner == msg.sender, "Access"
+    market: Market = staticcall FACTORY.markets(pool_id)
+
+    required_before: uint256 = self._required_crvusd()
+
+    lt_shares: uint256 = shares
+    if unstake:
+        lt_shares = extcall market.staker.redeem(shares, self, self)
+    assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, msg.sender)
+
+    required_after: uint256 = self._required_crvusd()
+    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+    reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)
+    self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+    self.stablecoin_allocation -= reduction
+
+    return assets
+
 
 
 @external
