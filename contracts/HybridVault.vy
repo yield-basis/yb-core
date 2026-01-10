@@ -45,8 +45,10 @@ interface PriceOracle:
 
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address) -> uint256: nonpayable
+    def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
     def agg() -> PriceOracle: view
     def balanceOf(user: address) -> uint256: view
+    def approve(_for: address, amount: uint256) -> bool: nonpayable
     def totalSupply() -> uint256: view
     def liquidity() -> LiquidityValues: view
 
@@ -54,7 +56,7 @@ interface AMM:
     def max_debt() -> uint256: view
     def get_debt() -> uint256: view
     def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
-    def value_oracle() -> uint256: view
+    def value_oracle() -> OraclizedValue: view
 
 interface GaugeController:
     def is_killed(gauge: address) -> bool: view
@@ -77,6 +79,8 @@ CRVUSD_VAULT: public(immutable(IERC4626))
 owner: public(address)
 vault_factory: public(VaultFactory)
 used_vaults: public(DynArray[uint256, MAX_VAULTS])
+
+pool_approved: HashMap[uint256, bool]
 
 
 @deploy
@@ -112,7 +116,7 @@ def _required_crvusd() -> uint256:
         lt_shares: uint256 = staticcall pool.lt.balanceOf(self) + staticcall pool.staker.previewRedeem(staticcall pool.staker.balanceOf(self))
         lt_total: uint256 = staticcall pool.lt.totalSupply()
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
-        crvusd_amount: uint256 = staticcall pool.amm.value_oracle()
+        crvusd_amount: uint256 = (staticcall pool.amm.value_oracle()).value
         crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
         total_crvusd += crvusd_amount
     return total_crvusd * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
@@ -120,10 +124,13 @@ def _required_crvusd() -> uint256:
 
 @internal
 @view
-def _required_crvusd_for(amm: AMM, collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
-    value_before: uint256 = (staticcall amm.value_change(0, 0, True)).value
-    value_after: uint256 = (staticcall amm.value_change(collateral_amount, borrowed_amount, True)).value
-    return (value_after - value_before) * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> uint256:
+    # Only works when lt_supply > 0
+    # Also probably make ceil div?
+    lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
+    lt_supply: uint256 = staticcall lt.totalSupply()
+    value_in_amm: uint256 = (staticcall amm.value_oracle()).value
+    return value_in_amm * lt_shares // lt_supply * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
 
 
 @external
@@ -134,14 +141,40 @@ def required_crvusd() -> uint256:
 
 @external
 @view
-def required_crvusd_for(pool_id: uint256, collateral_amount: uint256, borrowed_amount: uint256) -> uint256:
-    return self._required_crvusd_for((staticcall FACTORY.markets(pool_id)).amm, collateral_amount, borrowed_amount)
+def required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+    market: Market = staticcall FACTORY.markets(pool_id)
+    return self._required_crvusd_for(market.lt, market.amm, assets, debt)
 
 
 @external
 def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
-    # When deposit: raise cap, deposit, reduce cap
-    return 0
+    assert self.owner == msg.sender, "Access"
+    market: Market = staticcall FACTORY.markets(pool_id)
+    if not self.pool_approved[pool_id]:
+        assert extcall market.asset_token.approve(market.lt.address, max_value(uint256), default_return_value=True)
+        extcall market.lt.approve(market.staker.address, max_value(uint256))
+        self.pool_approved[pool_id] = True
+
+    assert self._crvusd_available() >= self._required_crvusd() + self._required_crvusd_for(market.lt, market.amm, assets, debt), "Not enough crvUSD"
+
+    # XXX increase cap
+
+    lt_receiver: address = receiver
+    if stake:
+        lt_receiver = self
+
+    # XXX add to used tokens
+
+    assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
+    lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares, lt_receiver)
+    #
+    # XXX reduce cap
+
+    if not stake:
+        return lt_shares
+
+    else:
+        return extcall market.staker.deposit(lt_shares, receiver)
 
 
 @external
