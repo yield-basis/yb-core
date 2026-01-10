@@ -108,6 +108,12 @@ def _crvusd_available() -> uint256:
 
 @internal
 @view
+def _downscale(amount: uint256) -> uint256:
+    return amount * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+
+
+@internal
+@view
 def _required_crvusd() -> uint256:
     total_crvusd: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
@@ -118,7 +124,7 @@ def _required_crvusd() -> uint256:
         crvusd_amount: uint256 = (staticcall pool.amm.value_oracle()).value
         crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
         total_crvusd += crvusd_amount
-    return total_crvusd * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+    return total_crvusd
 
 
 @internal
@@ -129,20 +135,20 @@ def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> ui
     lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
     lt_supply: uint256 = staticcall lt.totalSupply()
     value_in_amm: uint256 = (staticcall amm.value_oracle()).value
-    return value_in_amm * lt_shares // lt_supply * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+    return value_in_amm * lt_shares // lt_supply
 
 
 @external
 @view
 def required_crvusd() -> uint256:
-    return self._required_crvusd()
+    return self._downscale(self._required_crvusd())
 
 
 @external
 @view
 def required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
     market: Market = staticcall FACTORY.markets(pool_id)
-    return self._required_crvusd_for(market.lt, market.amm, assets, debt)
+    return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt))
 
 
 @internal
@@ -172,7 +178,8 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
         extcall market.lt.approve(market.staker.address, max_value(uint256))
         self.pool_approved[pool_id] = True
 
-    assert self._crvusd_available() >= self._required_crvusd() + self._required_crvusd_for(market.lt, market.amm, assets, debt), "Not enough crvUSD"
+    additional_crvusd: uint256 = self._required_crvusd_for(market.lt, market.amm, assets, debt)
+    assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
 
     # XXX increase cap
 
@@ -245,7 +252,7 @@ def deposit_crvusd(assets: uint256) -> uint256:
 def redeem_crvusd(shares: uint256) -> uint256:
     assert self.owner == msg.sender, "Access"
     withdrawn: uint256 = extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
-    assert self._crvusd_available() >= self._required_crvusd(), "Not enough crvUSD left"
+    assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return withdrawn
 
 
@@ -258,4 +265,4 @@ def deposit_scrvusd(shares: uint256):
 def withdraw_scrvusd(shares: uint256):
     assert self.owner == msg.sender, "Access"
     extcall CRVUSD_VAULT.transfer(msg.sender, shares)
-    assert self._crvusd_available() >= self._required_crvusd(), "Not enough crvUSD left"
+    assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
