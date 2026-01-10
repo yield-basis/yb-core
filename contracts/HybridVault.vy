@@ -201,6 +201,20 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
 
 @external
+def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
+    assert self.owner == msg.sender, "Access"
+    market: Market = staticcall FACTORY.markets(pool_id)
+    return extcall market.staker.deposit(pool_shares, self)
+
+
+@external
+def unstake(pool_id: uint256, gauge_shares: uint256) -> uint256:
+    assert self.owner == msg.sender, "Access"
+    market: Market = staticcall FACTORY.markets(pool_id)
+    return extcall market.staker.redeem(gauge_shares, self, self)
+
+
+@external
 @view
 def preview_claim_reward(token: IERC20) -> uint256:
     total: uint256 = 0
