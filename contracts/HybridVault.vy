@@ -53,6 +53,9 @@ interface LT:
     def approve(_for: address, amount: uint256) -> bool: nonpayable
     def totalSupply() -> uint256: view
     def liquidity() -> LiquidityValues: view
+    def stablecoin_allocation() -> uint256: view
+    def stablecoin_allocated() -> uint256: view
+    def allocate_stablecoins(limit: uint256): nonpayable
 
 interface AMM:
     def max_debt() -> uint256: view
@@ -169,6 +172,14 @@ def _remove_from_used(pool_id: uint256):
     self.used_vaults = new_used_vaults
 
 
+@internal
+def _allocate_stablecoins(lt: LT, limit: uint256):
+    # XXX
+    # Call permitted stablecoin allocation via ownership proxy
+    # For now, this is a stub
+    pass
+
+
 @external
 def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
     assert self.owner == msg.sender, "Access"
@@ -181,7 +192,9 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     additional_crvusd: uint256 = self._required_crvusd_for(market.lt, market.amm, assets, debt)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
 
-    # XXX increase cap
+    # Temporarily make the cap bigger than necessary
+    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+    self._allocate_stablecoins(market.lt, previous_allocation + 4 * additional_crvusd)
 
     lt_receiver: address = receiver
     if stake:
@@ -192,8 +205,9 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
     lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares, lt_receiver)
-    #
-    # XXX reduce cap
+
+    # Reduce cap to what it should be
+    self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
 
     if not stake:
         return lt_shares
