@@ -30,6 +30,8 @@ struct LiquidityValues:
 
 interface IERC4626:
     def balanceOf(user: address) -> uint256: view
+    def transfer(receiver: address, amount: uint256) -> bool: nonpayable
+    def transferFrom(owner: address, receiver: address, amount: uint256) -> bool: nonpayable
     def previewRedeem(shares: uint256) -> uint256: view
     def deposit(assets: uint256, receiver: address) -> uint256: nonpayable
     def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
@@ -160,14 +162,19 @@ def deposit_crvusd(assets: uint256) -> uint256:
 
 @external
 def redeem_crvusd(shares: uint256) -> uint256:
-    return extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
+    assert self.owner == msg.sender, "Access"
+    withdrawn: uint256 = extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
+    assert self._crvusd_available() >= self._required_crvusd(), "Not enough crvUSD left"
+    return withdrawn
 
 
 @external
-def deposit_scrvusd(assets: uint256) -> uint256:
-    return 0
+def deposit_scrvusd(shares: uint256):
+    extcall CRVUSD_VAULT.transferFrom(msg.sender, self, shares)
 
 
 @external
-def withdraw_scrvusd(shares: uint256) -> uint256:
-    return 0
+def withdraw_scrvusd(shares: uint256):
+    assert self.owner == msg.sender, "Access"
+    extcall CRVUSD_VAULT.transfer(msg.sender, shares)
+    assert self._crvusd_available() >= self._required_crvusd(), "Not enough crvUSD left"
