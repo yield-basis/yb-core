@@ -74,6 +74,7 @@ interface Factory:
 interface VaultFactory:
     def stablecoin_fraction() -> uint256: view
     def pool_limits(pool_id: uint256) -> uint256: view
+    def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
 
 
 MAX_VAULTS: public(constant(uint256)) = 16
@@ -90,7 +91,6 @@ stablecoin_allocation: public(uint256)
 
 @deploy
 def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
-    # XXX add factory owner also
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
     CRVUSD = crvusd
@@ -176,16 +176,14 @@ def _remove_from_used(pool_id: uint256):
 
 @internal
 def _allocate_stablecoins(lt: LT, limit: uint256):
-    # XXX
-    # Call permitted stablecoin allocation via ownership proxy
-    # For now, this is a stub
-    pass
+    extcall self.vault_factory.lt_allocate_stablecoins(lt, limit)
 
 
 @external
 def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
+    assert market.lt.address != empty(address)
     if not self.pool_approved[pool_id]:
         assert extcall market.asset_token.approve(market.lt.address, max_value(uint256), default_return_value=True)
         extcall market.lt.approve(market.staker.address, max_value(uint256))
@@ -223,6 +221,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
+    assert market.lt.address != empty(address)
 
     required_before: uint256 = self._required_crvusd()
 
@@ -245,6 +244,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
+    assert market.lt.address != empty(address)
     return extcall market.staker.deposit(pool_shares, self)
 
 
@@ -252,6 +252,7 @@ def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
 def unstake(pool_id: uint256, gauge_shares: uint256) -> uint256:
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
+    assert market.lt.address != empty(address)
     return extcall market.staker.redeem(gauge_shares, self, self)
 
 

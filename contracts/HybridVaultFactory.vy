@@ -9,8 +9,12 @@
 interface HybridVault:
     def initialize(user: address) -> bool: nonpayable
 
+interface FactoryOwner:
+    def ADMIN() -> address: view
+    def lt_allocate_stablecoins(lt: address, limit: uint256): nonpayable
+
 interface Factory:
-    def admin() -> address: view
+    def admin() -> FactoryOwner: view
 
 
 event VaultCreated:
@@ -29,6 +33,7 @@ event SetPoolLimit:
 
 
 FACTORY: public(immutable(Factory))
+ADMIN: public(immutable(address))
 vault_impl: public(address)
 user_to_vault: public(HashMap[address, HybridVault])
 vault_to_user: public(HashMap[HybridVault, address])
@@ -39,6 +44,7 @@ pool_limits: public(HashMap[uint256, uint256])
 @deploy
 def __init__(factory: Factory, impl: address, pool_ids: DynArray[uint256, 10], pool_limits: DynArray[uint256, 10]):
     FACTORY = factory
+    ADMIN = staticcall (staticcall factory.admin()).ADMIN()
     self.vault_impl = impl
     self.stablecoin_fraction = 4 * 10**17
     for i: uint256 in range(10):
@@ -66,20 +72,26 @@ def create_vault() -> HybridVault:
 
 @external
 def set_vault_impl(impl: address):
-    assert msg.sender == staticcall FACTORY.admin(), "Access"
+    assert msg.sender == ADMIN, "Access"
     self.vault_impl = impl
     log SetVaultImpl(impl=impl)
 
 
 @external
 def set_stablecoin_fraction(frac: uint256):
-    assert msg.sender == staticcall FACTORY.admin(), "Access"
+    assert msg.sender == ADMIN, "Access"
     self.stablecoin_fraction = frac
     log SetStablecoinFraction(stablecoin_fraction=frac)
 
 
 @external
 def set_pool_limit(pool_id: uint256, pool_limit: uint256):
-    assert msg.sender == staticcall FACTORY.admin(), "Access"
+    assert msg.sender == ADMIN, "Access"
     self.pool_limits[pool_id] = pool_limit
     log SetPoolLimit(pool_id=pool_id, limit=pool_limit)
+
+
+@external
+def lt_allocate_stablecoins(lt: address, limit: uint256):
+    assert self.vault_to_user[HybridVault(msg.sender)] != empty(address), "Only vaults can call"
+    extcall (staticcall FACTORY.admin()).lt_allocate_stablecoins(lt, limit)
