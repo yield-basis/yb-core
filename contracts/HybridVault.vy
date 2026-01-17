@@ -109,6 +109,7 @@ def initialize(user: address) -> bool:
 
 
 @internal
+@view
 def _crvusd_available() -> uint256:
     return staticcall CRVUSD_VAULT.previewRedeem(staticcall CRVUSD_VAULT.balanceOf(self))
 
@@ -153,9 +154,18 @@ def required_crvusd() -> uint256:
 
 @external
 @view
-def required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
     market: Market = staticcall FACTORY.markets(pool_id)
     return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
+
+
+@external
+@view
+def crvusd_for_deposit(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+    market: Market = staticcall FACTORY.markets(pool_id)
+    available: uint256 = self._crvusd_available()
+    required: uint256 = self._downscale(self._required_crvusd() + self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
+    return required - min(required, available)
 
 
 @internal
@@ -182,7 +192,7 @@ def _allocate_stablecoins(lt: LT, limit: uint256):
 
 
 @external
-def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False) -> uint256:
+def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, deposit_stablecoins: bool = False) -> uint256:
     assert self.owner == msg.sender, "Access"  # XXX should we allow others to deposit for us? Seems safe?
 
     market: Market = staticcall FACTORY.markets(pool_id)
@@ -222,7 +232,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
 
 @external
-def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
+def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender, withdraw_stablecoins: bool = False) -> uint256:
     assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
