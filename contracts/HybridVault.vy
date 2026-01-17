@@ -134,13 +134,13 @@ def _required_crvusd() -> uint256:
 
 @internal
 @view
-def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> uint256:
+def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (uint256, uint256):
     # Only works when lt_supply > 0
     # Also probably make ceil div?
     lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
     lt_supply: uint256 = staticcall lt.totalSupply()
     value_in_amm: uint256 = (staticcall amm.value_oracle()).value
-    return value_in_amm * lt_shares // lt_supply
+    return value_in_amm, value_in_amm * lt_shares // lt_supply
 
 
 @external
@@ -153,7 +153,7 @@ def required_crvusd() -> uint256:
 @view
 def required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
     market: Market = staticcall FACTORY.markets(pool_id)
-    return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt))
+    return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
 
 
 @internal
@@ -190,13 +190,14 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
         extcall market.lt.approve(market.staker.address, max_value(uint256))
         self.pool_approved[pool_id] = True
 
-    additional_crvusd: uint256 = self._required_crvusd_for(market.lt, market.amm, assets, debt)
+    pool_value: uint256 = 0
+    additional_crvusd: uint256 = 0
+    pool_value, additional_crvusd = self._required_crvusd_for(market.lt, market.amm, assets, debt)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
 
     # Temporarily make the cap bigger than necessary
-    # XXX do MAX?
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    self._allocate_stablecoins(market.lt, previous_allocation + 4 * additional_crvusd)
+    self._allocate_stablecoins(market.lt, max(pool_value * 2, previous_allocation) + 4 * additional_crvusd)
 
     if assets > 0:
         self._add_to_used(pool_id)
