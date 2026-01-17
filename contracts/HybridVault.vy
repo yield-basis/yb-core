@@ -207,7 +207,13 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
     pool_value, additional_crvusd = self._required_crvusd_for(market.lt, market.amm, assets, debt)
-    assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
+    crvusd_available: uint256 = self._crvusd_available()
+    crvusd_required: uint256 = self._downscale(self._required_crvusd() + additional_crvusd)
+    if crvusd_available < crvusd_required:
+        if deposit_stablecoins:
+            self._deposit_crvusd(crvusd_required - crvusd_available)
+        else:
+            raise "Not enough crvUSD"
     assert pool_value + additional_crvusd <= staticcall self.vault_factory.pool_limits(pool_id), "Beyond pool limit"
 
     # Temporarily make the cap bigger than necessary
@@ -292,10 +298,15 @@ def claim_reward(token: IERC20) -> uint256:
     return total
 
 
-@external
-def deposit_crvusd(assets: uint256) -> uint256:
+@internal
+def _deposit_crvusd(assets: uint256) -> uint256:
     extcall CRVUSD.transferFrom(msg.sender, self, assets)
     return extcall CRVUSD_VAULT.deposit(assets, self)
+
+
+@external
+def deposit_crvusd(assets: uint256) -> uint256:
+    return self._deposit_crvusd(assets)
 
 
 @external
