@@ -252,6 +252,10 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, msg.sender)
 
     required_after: uint256 = self._required_crvusd()
+
+    if required_before > required_after and withdraw_stablecoins:
+        self._redeem_crvusd(required_before - required_after)
+
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)
     self._allocate_stablecoins(market.lt, previous_allocation - reduction)
@@ -309,12 +313,17 @@ def deposit_crvusd(assets: uint256) -> uint256:
     return self._deposit_crvusd(assets)
 
 
-@external
-def redeem_crvusd(shares: uint256) -> uint256:
-    assert self.owner == msg.sender, "Access"
+@internal
+def _redeem_crvusd(shares: uint256) -> uint256:
     withdrawn: uint256 = extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return withdrawn
+
+
+@external
+def redeem_crvusd(shares: uint256) -> uint256:
+    assert self.owner == msg.sender, "Access"
+    return self._redeem_crvusd(shares)
 
 
 @external
