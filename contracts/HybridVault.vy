@@ -201,7 +201,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     # Temporarily make the cap bigger than necessary
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    self._allocate_stablecoins(market.lt, max(pool_value * 2, previous_allocation) + 4 * additional_crvusd)
+    self._allocate_stablecoins(market.lt, max(pool_value * 2 + 21 * additional_crvusd // 10, previous_allocation))
 
     if assets > 0:
         self._add_to_used(pool_id)
