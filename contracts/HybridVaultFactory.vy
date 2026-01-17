@@ -48,7 +48,7 @@ def __init__(factory: Factory, impl: address, pool_ids: DynArray[uint256, 10], p
     self.vault_impl = impl
     self.stablecoin_fraction = 4 * 10**17
     for i: uint256 in range(10):
-        if i > len(pool_ids):
+        if i >= len(pool_ids):
             break
         pool_id: uint256 = pool_ids[i]
         pool_limit: uint256 = pool_limits[i]
