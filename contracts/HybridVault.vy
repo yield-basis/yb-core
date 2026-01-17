@@ -46,7 +46,7 @@ interface PriceOracle:
     def price() -> uint256: view
 
 interface LT:
-    def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address) -> uint256: nonpayable
+    def deposit(assets: uint256, debt: uint256, min_shares: uint256) -> uint256: nonpayable
     def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
     def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
     def agg() -> PriceOracle: view
@@ -180,8 +180,9 @@ def _allocate_stablecoins(lt: LT, limit: uint256):
 
 
 @external
-def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, receiver: address = msg.sender) -> uint256:
-    assert self.owner == msg.sender, "Access"
+def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False) -> uint256:
+    assert self.owner == msg.sender, "Access"  # XXX should we allow others to deposit for us? Seems safe?
+
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address)
     if not self.pool_approved[pool_id]:
@@ -193,18 +194,15 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
 
     # Temporarily make the cap bigger than necessary
+    # XXX do MAX?
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     self._allocate_stablecoins(market.lt, previous_allocation + 4 * additional_crvusd)
-
-    lt_receiver: address = receiver
-    if stake:
-        lt_receiver = self
 
     if assets > 0:
         self._add_to_used(pool_id)
 
     assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
-    lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares, lt_receiver)
+    lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares)
 
     # Reduce cap to what it should be
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
@@ -214,12 +212,13 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
         return lt_shares
 
     else:
-        return extcall market.staker.deposit(lt_shares, receiver)
+        return extcall market.staker.deposit(lt_shares, self)
 
 
 @external
 def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender) -> uint256:
     assert self.owner == msg.sender, "Access"
+
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address)
 
