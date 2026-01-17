@@ -1,4 +1,5 @@
 # @version 0.4.3
+# pragma nonreentrancy on
 """
 @title HybridVaultFactory
 @notice Factory for vaults which keep both YB vaults and scrvUSD
@@ -86,6 +87,7 @@ vault_factory: public(VaultFactory)
 used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
 pool_approved: HashMap[uint256, bool]
+token_in_use: HashMap[address, bool]
 stablecoin_allocation: public(uint256)
 
 
@@ -189,6 +191,8 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
         assert extcall market.asset_token.approve(market.lt.address, max_value(uint256), default_return_value=True)
         extcall market.lt.approve(market.staker.address, max_value(uint256))
         self.pool_approved[pool_id] = True
+        self.token_in_use[market.lt.address] = True
+        self.token_in_use[market.staker.address] = True
 
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
@@ -301,3 +305,10 @@ def withdraw_scrvusd(shares: uint256):
     assert self.owner == msg.sender, "Access"
     extcall CRVUSD_VAULT.transfer(msg.sender, shares)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
+
+
+@external
+def recover_tokens(token: IERC20):
+    assert self.owner == msg.sender, "Access"
+    assert not self.token_in_use[token.address], "Token not allowed"
+    assert extcall token.transfer(msg.sender, staticcall token.balanceOf(self), default_return_value=True)
