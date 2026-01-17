@@ -198,6 +198,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     additional_crvusd: uint256 = 0
     pool_value, additional_crvusd = self._required_crvusd_for(market.lt, market.amm, assets, debt)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd() + additional_crvusd), "Not enough crvUSD"
+    assert pool_value + additional_crvusd <= staticcall self.vault_factory.pool_limits(pool_id), "Beyond pool limit"
 
     # Temporarily make the cap bigger than necessary
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
