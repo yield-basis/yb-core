@@ -57,25 +57,39 @@ def dao(hybrid_factory_owner):
 def funded_account(forked_env):
     """Generate a random account and fund it with WETH, WBTC, and crvUSD."""
     account = boa.env.generate_address()
-    boa.deal(WETH, account, 100 * 10**18)
-    boa.deal(WBTC, account, 10 * 10**8)
-    boa.deal(CRVUSD, account, 1_000_000 * 10**18)
+    erc20 = boa.load_partial("contracts/testing/ERC20Mock.vy")
+
+    # WETH: give ETH and wrap it
+    boa.env.set_balance(account, 100 * 10**18)
+    weth = boa.load_partial("contracts/testing/WETH.vy").at(WETH)
+    with boa.env.prank(account):
+        weth.deposit(value=100 * 10**18)
+
+    # WBTC and crvUSD: use boa.deal
+    boa.deal(erc20.at(WBTC), account, 10 * 10**8)
+    boa.deal(erc20.at(CRVUSD), account, 1_000_000 * 10**18)
     return account
 
 
 @pytest.fixture(scope="module")
-def hybrid_vault_factory(factory, hybrid_factory_owner):
-    """Deploy HybridVaultFactory with pools 3 and 6, each with 50M limit."""
+def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
+    """Deploy HybridVaultFactory with pools 3 and 6, each with 300M limit."""
     vault_impl = boa.load(
         "contracts/HybridVault.vy",
         factory.address,
         CRVUSD,
         SCRVUSD
     )
-    return boa.load(
+    vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
         factory.address,
         vault_impl.address,
         [3, 6],
-        [50_000_000 * 10**18, 50_000_000 * 10**18]
+        [300_000_000 * 10**18, 300_000_000 * 10**18]
     )
+
+    # Add HybridVaultFactory as limit_setter in HybridFactoryOwner
+    with boa.env.prank(dao):
+        hybrid_factory_owner.set_limit_setter(vault_factory.address, True)
+
+    return vault_factory
