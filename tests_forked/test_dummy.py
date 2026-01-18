@@ -6,3 +6,9 @@ def test_forked_network(forked_env):
     # Check that we can query the chain
     block_number = boa.env.evm.patch.block_number
     assert block_number > 0, "Should be connected to a forked network with blocks"
+
+
+def test_hybrid_factory_owner(factory, hybrid_factory_owner):
+    """Verify HybridFactoryOwner is set up correctly."""
+    assert factory.admin() == hybrid_factory_owner.address
+    assert hybrid_factory_owner.FACTORY() == factory.address
