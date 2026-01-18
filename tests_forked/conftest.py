@@ -6,9 +6,6 @@ from tests_forked.networks import NETWORK
 FACTORY_ADDRESS = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
-# Aave V3 aToken contracts (hold underlying tokens)
-WETH_WHALE = "0x4d5F47FA6A74757f35C14fD3a6Ef8E3C9BC514E8"  # aWETH
-WBTC_WHALE = "0x5Ee5bf7ae06D1Be5997A1A72006FE6C607eC6DE8"  # aWBTC
 CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
 SCRVUSD = "0x0655977FEb2f289A4aB78af67BAB0d17aAb84367"
 
@@ -58,24 +55,11 @@ def dao(hybrid_factory_owner):
 
 @pytest.fixture(scope="module")
 def funded_account(forked_env):
-    """
-    Generate a random account and fund it with WETH and WBTC
-    by impersonating Aave aToken contracts.
-    """
+    """Generate a random account and fund it with WETH, WBTC, and crvUSD."""
     account = boa.env.generate_address()
-    erc20 = boa.load_partial("contracts/testing/ERC20Mock.vy")
-
-    weth = erc20.at(WETH)
-    wbtc = erc20.at(WBTC)
-
-    # Steal 100 WETH from aWETH contract
-    with boa.env.prank(WETH_WHALE):
-        weth.transfer(account, 100 * 10**18)
-
-    # Steal 10 WBTC from aWBTC contract
-    with boa.env.prank(WBTC_WHALE):
-        wbtc.transfer(account, 10 * 10**8)
-
+    boa.deal(WETH, account, 100 * 10**18)
+    boa.deal(WBTC, account, 10 * 10**8)
+    boa.deal(CRVUSD, account, 1_000_000 * 10**18)
     return account
 
 
