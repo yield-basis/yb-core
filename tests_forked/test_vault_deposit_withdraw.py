@@ -58,9 +58,16 @@ def test_deposit_withdraw_wbtc(
     market = factory.markets(pool_id)
     assume(market.asset_token == WBTC)
 
+    # Calculate debt as half the USD value of assets
+    # WBTC has 8 decimals, price_scale is 18 decimals
+    cryptopool = boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy").at(market.cryptopool)
+    price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
+    usd_value = assets * price // 10**8  # adjust for WBTC decimals
+    debt = usd_value // 2
+
     with boa.env.prank(funded_account):
         # Check how much crvUSD is needed for this deposit
-        crvusd_needed = vault.crvusd_for_deposit(pool_id, assets, 0)
+        crvusd_needed = vault.crvusd_for_deposit(pool_id, assets, debt)
 
         # Reset crvUSD balance to the test amount
         current_balance = crvusd.balanceOf(funded_account)
@@ -70,7 +77,7 @@ def test_deposit_withdraw_wbtc(
 
         if crvusd_amount >= crvusd_needed:
             # Should succeed
-            shares = vault.deposit(pool_id, assets, 0, 0, False, True)
+            shares = vault.deposit(pool_id, assets, debt, 0, False, True)
             assert shares > 0
 
             # Withdraw all shares
@@ -78,7 +85,7 @@ def test_deposit_withdraw_wbtc(
         else:
             # Should fail due to insufficient crvUSD
             with boa.reverts():
-                vault.deposit(pool_id, assets, 0, 0, False, True)
+                vault.deposit(pool_id, assets, debt, 0, False, True)
 
 
 @settings(max_examples=20, deadline=None)
@@ -96,9 +103,16 @@ def test_deposit_withdraw_weth(
     market = factory.markets(pool_id)
     assume(market.asset_token == WETH)
 
+    # Calculate debt as half the USD value of assets
+    # WETH has 18 decimals, price_scale is 18 decimals
+    cryptopool = boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy").at(market.cryptopool)
+    price = cryptopool.price_scale()  # price of WETH in crvUSD (18 decimals)
+    usd_value = assets * price // 10**18  # adjust for WETH decimals
+    debt = usd_value // 2
+
     with boa.env.prank(funded_account):
         # Check how much crvUSD is needed for this deposit
-        crvusd_needed = vault.crvusd_for_deposit(pool_id, assets, 0)
+        crvusd_needed = vault.crvusd_for_deposit(pool_id, assets, debt)
 
         # Reset crvUSD balance to the test amount
         current_balance = crvusd.balanceOf(funded_account)
@@ -108,7 +122,7 @@ def test_deposit_withdraw_weth(
 
         if crvusd_amount >= crvusd_needed:
             # Should succeed
-            shares = vault.deposit(pool_id, assets, 0, 0, False, True)
+            shares = vault.deposit(pool_id, assets, debt, 0, False, True)
             assert shares > 0
 
             # Withdraw all shares
@@ -116,4 +130,4 @@ def test_deposit_withdraw_weth(
         else:
             # Should fail due to insufficient crvUSD
             with boa.reverts():
-                vault.deposit(pool_id, assets, 0, 0, False, True)
+                vault.deposit(pool_id, assets, debt, 0, False, True)
