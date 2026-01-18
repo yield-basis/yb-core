@@ -93,6 +93,13 @@ stablecoin_allocation: public(uint256)
 
 @deploy
 def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
+    """
+    @notice Initialize the HybridVault implementation contract
+    @dev Sets owner to 0x01 to prevent initialization of the factory itself
+    @param factory The YB factory contract address
+    @param crvusd The crvUSD token address
+    @param crvusd_vault The scrvUSD vault address
+    """
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
     CRVUSD = crvusd
@@ -101,6 +108,12 @@ def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
 
 @external
 def initialize(user: address) -> bool:
+    """
+    @notice Initialize a cloned vault instance for a user
+    @dev Can only be called once; sets the vault owner and approves crvUSD spending
+    @param user The address that will own this vault
+    @return True if initialization succeeded
+    """
     assert self.owner == empty(address), "Already initialized"
     self.owner = user
     self.vault_factory = VaultFactory(msg.sender)
@@ -149,12 +162,23 @@ def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (u
 @external
 @view
 def required_crvusd() -> uint256:
+    """
+    @notice Calculate total crvUSD required to back all vault positions
+    @return The downscaled amount of crvUSD required
+    """
     return self._downscale(self._required_crvusd())
 
 
 @external
 @view
 def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+    """
+    @notice Calculate crvUSD required for a potential deposit
+    @param pool_id The market pool identifier
+    @param assets Amount of collateral assets to deposit
+    @param debt Amount of debt to take on
+    @return The downscaled crvUSD amount required for this deposit
+    """
     market: Market = staticcall FACTORY.markets(pool_id)
     return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
 
@@ -162,6 +186,13 @@ def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) ->
 @external
 @view
 def crvusd_for_deposit(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+    """
+    @notice Calculate additional crvUSD needed from user for a deposit
+    @param pool_id The market pool identifier
+    @param assets Amount of collateral assets to deposit
+    @param debt Amount of debt to take on
+    @return The additional crvUSD the user must provide (0 if sufficient balance)
+    """
     market: Market = staticcall FACTORY.markets(pool_id)
     available: uint256 = self._crvusd_available()
     required: uint256 = self._downscale(self._required_crvusd() + self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
@@ -193,6 +224,17 @@ def _allocate_stablecoins(lt: LT, limit: uint256):
 
 @external
 def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint256, stake: bool = False, deposit_stablecoins: bool = False) -> uint256:
+    """
+    @notice Deposit assets into a YB market through this vault
+    @dev Approves tokens on first use; manages stablecoin allocation limits
+    @param pool_id The market pool identifier
+    @param assets Amount of assets to deposit
+    @param debt Amount of debt to take on
+    @param min_shares Minimum LT shares to receive (slippage protection)
+    @param stake If True, automatically stake LT shares in the gauge
+    @param deposit_stablecoins If True, pull additional crvUSD from sender if needed
+    @return LT shares received (or staked shares if stake=True)
+    """
     assert self.owner == msg.sender, "Access"  # XXX should we allow others to deposit for us? Seems safe?
 
     market: Market = staticcall FACTORY.markets(pool_id)
@@ -239,6 +281,16 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
 @external
 def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bool = False, receiver: address = msg.sender, withdraw_stablecoins: bool = False) -> uint256:
+    """
+    @notice Withdraw assets from a YB market
+    @param pool_id The market pool identifier
+    @param shares LT shares (or staked shares if unstake=True) to withdraw
+    @param min_assets Minimum assets to receive (slippage protection)
+    @param unstake If True, unstake from gauge before withdrawing
+    @param receiver Address to receive the withdrawn assets
+    @param withdraw_stablecoins If True, return excess crvUSD to sender
+    @return Amount of assets withdrawn
+    """
     assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
@@ -267,6 +319,12 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
 @external
 def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
+    """
+    @notice Stake LT shares in the market's gauge
+    @param pool_id The market pool identifier
+    @param pool_shares Amount of LT shares to stake
+    @return Amount of staked (gauge) shares received
+    """
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address)
@@ -275,6 +333,12 @@ def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
 
 @external
 def unstake(pool_id: uint256, gauge_shares: uint256) -> uint256:
+    """
+    @notice Unstake shares from the market's gauge
+    @param pool_id The market pool identifier
+    @param gauge_shares Amount of staked shares to unstake
+    @return Amount of LT shares received
+    """
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address)
@@ -284,6 +348,11 @@ def unstake(pool_id: uint256, gauge_shares: uint256) -> uint256:
 @external
 @view
 def preview_claim_reward(token: IERC20) -> uint256:
+    """
+    @notice Preview claimable rewards across all staked positions
+    @param token The reward token to query
+    @return Total claimable amount of the reward token
+    """
     total: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         market: Market = staticcall FACTORY.markets(pool_id)
@@ -293,6 +362,11 @@ def preview_claim_reward(token: IERC20) -> uint256:
 
 @external
 def claim_reward(token: IERC20) -> uint256:
+    """
+    @notice Claim rewards from all staked positions and send to owner
+    @param token The reward token to claim
+    @return Total amount claimed and transferred to owner
+    """
     total: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         market: Market = staticcall FACTORY.markets(pool_id)
@@ -310,6 +384,11 @@ def _deposit_crvusd(assets: uint256) -> uint256:
 
 @external
 def deposit_crvusd(assets: uint256) -> uint256:
+    """
+    @notice Deposit crvUSD into scrvUSD vault to back positions
+    @param assets Amount of crvUSD to deposit
+    @return Amount of scrvUSD shares received
+    """
     return self._deposit_crvusd(assets)
 
 
@@ -322,17 +401,32 @@ def _redeem_crvusd(shares: uint256) -> uint256:
 
 @external
 def redeem_crvusd(shares: uint256) -> uint256:
+    """
+    @notice Redeem scrvUSD shares for crvUSD (owner only)
+    @dev Reverts if withdrawal would leave insufficient backing
+    @param shares Amount of scrvUSD shares to redeem
+    @return Amount of crvUSD withdrawn
+    """
     assert self.owner == msg.sender, "Access"
     return self._redeem_crvusd(shares)
 
 
 @external
 def deposit_scrvusd(shares: uint256):
+    """
+    @notice Deposit scrvUSD shares directly into the vault
+    @param shares Amount of scrvUSD shares to transfer in
+    """
     extcall CRVUSD_VAULT.transferFrom(msg.sender, self, shares)
 
 
 @external
 def withdraw_scrvusd(shares: uint256):
+    """
+    @notice Withdraw scrvUSD shares from the vault (owner only)
+    @dev Reverts if withdrawal would leave insufficient backing
+    @param shares Amount of scrvUSD shares to withdraw
+    """
     assert self.owner == msg.sender, "Access"
     extcall CRVUSD_VAULT.transfer(msg.sender, shares)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
@@ -340,6 +434,11 @@ def withdraw_scrvusd(shares: uint256):
 
 @external
 def recover_tokens(token: IERC20):
+    """
+    @notice Recover accidentally sent tokens (owner only)
+    @dev Cannot recover LT or staker tokens that are actively in use
+    @param token The token to recover
+    """
     assert self.owner == msg.sender, "Access"
     assert not self.token_in_use[token.address], "Token not allowed"
     assert extcall token.transfer(msg.sender, staticcall token.balanceOf(self), default_return_value=True)
