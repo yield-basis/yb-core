@@ -1,0 +1,10 @@
+NETWORK = "https://rpc.ankr.com/eth/<your-api-key>"
+# NETWORK = "http://localhost:8545"
+ARBITRUM = "https://arb1.arbitrum.io/rpc"
+OPTIMISM = "https://mainnet.optimism.io"
+FRAXTAL = "https://rpc.frax.com"
+SONIC = "https://rpc.soniclabs.com"
+
+ARBISCAN_API_KEY = "<your-arbiscan-api-key>"
+ETHERSCAN_API_KEY = "<your-etherscan-api-key>"
+PINATA_TOKEN = "<your-pinata-token>"
