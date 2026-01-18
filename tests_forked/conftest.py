@@ -9,6 +9,8 @@ WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
 # Aave V3 aToken contracts (hold underlying tokens)
 WETH_WHALE = "0x4d5F47FA6A74757f35C14fD3a6Ef8E3C9BC514E8"  # aWETH
 WBTC_WHALE = "0x5Ee5bf7ae06D1Be5997A1A72006FE6C607eC6DE8"  # aWBTC
+CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
+SCRVUSD = "0x0655977FEb2f289A4aB78af67BAB0d17aAb84367"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -75,3 +77,21 @@ def funded_account(forked_env):
         wbtc.transfer(account, 10 * 10**8)
 
     return account
+
+
+@pytest.fixture(scope="module")
+def hybrid_vault_factory(factory, hybrid_factory_owner):
+    """Deploy HybridVaultFactory with pools 3 and 6, each with 50M limit."""
+    vault_impl = boa.load(
+        "contracts/HybridVault.vy",
+        factory.address,
+        CRVUSD,
+        SCRVUSD
+    )
+    return boa.load(
+        "contracts/HybridVaultFactory.vy",
+        factory.address,
+        vault_impl.address,
+        [3, 6],
+        [50_000_000 * 10**18, 50_000_000 * 10**18]
+    )
