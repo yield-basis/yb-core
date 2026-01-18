@@ -41,3 +41,9 @@ def hybrid_factory_owner(factory):
         factory.set_admin(hybrid_owner.address, emergency_admin)
 
     return hybrid_owner
+
+
+@pytest.fixture(scope="module")
+def dao(hybrid_factory_owner):
+    """Extract DAO address from HybridFactoryOwner."""
+    return hybrid_factory_owner.ADMIN()
