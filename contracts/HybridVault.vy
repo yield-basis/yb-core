@@ -60,7 +60,6 @@ interface LT:
     def allocate_stablecoins(limit: uint256): nonpayable
 
 interface AMM:
-    def max_debt() -> uint256: view
     def get_debt() -> uint256: view
     def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
     def value_oracle() -> OraclizedValue: view
@@ -260,7 +259,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     # Temporarily make the cap bigger than necessary
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    self._allocate_stablecoins(market.lt, max(pool_value * 2 + 21 * additional_crvusd // 10, previous_allocation))
+    self._allocate_stablecoins(market.lt, max(2 * pool_value + 25 * additional_crvusd // 10, previous_allocation))
 
     if assets > 0:
         self._add_to_used(pool_id)
