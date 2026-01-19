@@ -82,6 +82,9 @@ def test_deposit_withdraw_wbtc(
 
             # Withdraw all shares
             vault.withdraw(pool_id, shares, 0, False, funded_account, False)
+
+            # Verify no crvUSD is required after full withdrawal
+            assert vault.required_crvusd() == 0
         else:
             # Should fail due to insufficient crvUSD
             with boa.reverts():
@@ -127,6 +130,9 @@ def test_deposit_withdraw_weth(
 
             # Withdraw all shares
             vault.withdraw(pool_id, shares, 0, False, funded_account, False)
+
+            # Verify no crvUSD is required after full withdrawal
+            assert vault.required_crvusd() == 0
         else:
             # Should fail due to insufficient crvUSD
             with boa.reverts():
