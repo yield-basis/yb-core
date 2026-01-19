@@ -170,6 +170,20 @@ def required_crvusd() -> uint256:
 
 @external
 @view
+def withdrawable_crvusd_for(pool_id: uint256, shares: uint256, is_staked: bool) -> uint256:
+    market: Market = staticcall FACTORY.markets(pool_id)
+    lt_shares: uint256 = shares
+    if is_staked:
+        lt_shares = staticcall market.staker.previewRedeem(shares)
+    released_value: uint256 = (staticcall market.amm.value_oracle()).value
+    required_value: uint256 = self._required_crvusd()
+    required_value = self._downscale(required_value - min(required_value, released_value))
+    crvusd_available: uint256 = self._crvusd_available()
+    return max(crvusd_available, required_value) - required_value
+
+
+@external
+@view
 def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
     """
     @notice Calculate crvUSD required for a potential deposit
