@@ -171,6 +171,13 @@ def required_crvusd() -> uint256:
 @external
 @view
 def withdrawable_crvusd_for(pool_id: uint256, shares: uint256, is_staked: bool) -> uint256:
+    """
+    @notice Calculate crvUSD that can be freed up by withdrawing shares from a vault
+    @param pool_id The market pool identifier
+    @param shares Amount of shares to withdraw
+    @param is_staked Whether the shares are staked to earn YB
+    @return The amount of crvUSD that becomes withdrawable after burning these shares
+    """
     market: Market = staticcall FACTORY.markets(pool_id)
     lt_shares: uint256 = shares
     if is_staked:
