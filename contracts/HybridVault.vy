@@ -258,8 +258,9 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     assert pool_value + additional_crvusd <= staticcall self.vault_factory.pool_limits(pool_id), "Beyond pool limit"
 
     # Temporarily make the cap bigger than necessary
+    assert debt <= 11 * additional_crvusd // 10, "Debt made too high"
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    self._allocate_stablecoins(market.lt, max(2 * pool_value + 25 * additional_crvusd // 10, previous_allocation))
+    self._allocate_stablecoins(market.lt, max((pool_value + additional_crvusd) * 22 // 10, previous_allocation))
 
     if assets > 0:
         self._add_to_used(pool_id)
