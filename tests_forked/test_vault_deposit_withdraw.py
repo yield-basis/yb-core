@@ -49,7 +49,7 @@ def setup_approvals(vault, funded_account, wbtc, weth, crvusd):
     crvusd_amount=st.integers(min_value=0, max_value=1_000_000 * 10**18)
 )
 def test_deposit_withdraw_wbtc(
-    vault, funded_account, wbtc, crvusd, setup_approvals, factory, assets, crvusd_amount
+    vault, funded_account, wbtc, crvusd, setup_approvals, factory, twocrypto, assets, crvusd_amount
 ):
     """Test deposit and withdraw with WBTC (pool 3) using random amounts."""
     pool_id = 3
@@ -60,7 +60,7 @@ def test_deposit_withdraw_wbtc(
 
     # Calculate debt as half the USD value of assets
     # WBTC has 8 decimals, price_scale is 18 decimals
-    cryptopool = boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy").at(market.cryptopool)
+    cryptopool = twocrypto.at(market.cryptopool)
     price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
     usd_value = assets * price // 10**8  # adjust for WBTC decimals
     debt = usd_value // 2
@@ -94,7 +94,7 @@ def test_deposit_withdraw_wbtc(
     crvusd_amount=st.integers(min_value=0, max_value=1_000_000 * 10**18)
 )
 def test_deposit_withdraw_weth(
-    vault, funded_account, weth, crvusd, setup_approvals, factory, assets, crvusd_amount
+    vault, funded_account, weth, crvusd, setup_approvals, factory, twocrypto, assets, crvusd_amount
 ):
     """Test deposit and withdraw with WETH (pool 6) using random amounts."""
     pool_id = 6
@@ -105,7 +105,7 @@ def test_deposit_withdraw_weth(
 
     # Calculate debt as half the USD value of assets
     # WETH has 18 decimals, price_scale is 18 decimals
-    cryptopool = boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy").at(market.cryptopool)
+    cryptopool = twocrypto.at(market.cryptopool)
     price = cryptopool.price_scale()  # price of WETH in crvUSD (18 decimals)
     usd_value = assets * price // 10**18  # adjust for WETH decimals
     debt = usd_value // 2

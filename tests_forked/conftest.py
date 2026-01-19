@@ -93,3 +93,9 @@ def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
         hybrid_factory_owner.set_limit_setter(vault_factory.address, True)
 
     return vault_factory
+
+
+@pytest.fixture(scope="module")
+def twocrypto(forked_env):
+    """Twocrypto interface for cryptopool interactions."""
+    return boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy")
