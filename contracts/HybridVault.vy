@@ -72,9 +72,15 @@ interface Factory:
     def markets(idx: uint256) -> Market: view
 
 interface VaultFactory:
+    def ADMIN() -> address: view
     def stablecoin_fraction() -> uint256: view
     def pool_limits(pool_id: uint256) -> uint256: view
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
+
+
+event SetPersonalLimit:
+    pool_id: uint256
+    limit: uint256
 
 
 MAX_VAULTS: public(constant(uint256)) = 16
@@ -88,6 +94,7 @@ used_vaults: public(DynArray[uint256, MAX_VAULTS])
 pool_approved: HashMap[uint256, bool]
 token_in_use: HashMap[address, bool]
 stablecoin_allocation: public(uint256)
+personal_limit: public(HashMap[uint256, uint256])
 
 
 @deploy
@@ -120,6 +127,18 @@ def initialize(user: address) -> bool:
     return True
 
 
+@external
+def set_personal_limit(pool_id: uint256, limit: uint256):
+    """
+    @notice Set a personal pool limit for this vault
+    @param pool_id The market pool identifier
+    @param limit The personal limit to set (actual limit will be max of this and global pool limit)
+    """
+    assert msg.sender == staticcall self.vault_factory.ADMIN(), "Only admin"
+    self.personal_limit[pool_id] = limit
+    log SetPersonalLimit(pool_id=pool_id, limit=limit)
+
+
 @internal
 @view
 def _crvusd_available() -> uint256:
@@ -130,6 +149,12 @@ def _crvusd_available() -> uint256:
 @view
 def _downscale(amount: uint256) -> uint256:
     return amount * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+
+
+@internal
+@view
+def _pool_limits(pool_id: uint256) -> uint256:
+    return max(self.personal_limit[pool_id], staticcall self.vault_factory.pool_limits(pool_id))
 
 
 @internal
@@ -276,7 +301,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
             self._deposit_crvusd(crvusd_required - crvusd_available)
         else:
             raise "Not enough crvUSD"
-    assert pool_value + additional_crvusd <= staticcall self.vault_factory.pool_limits(pool_id), "Beyond pool limit"
+    assert pool_value + additional_crvusd <= self._pool_limits(pool_id), "Beyond pool limit"
 
     # Temporarily make the cap bigger than necessary
     assert debt <= 11 * additional_crvusd // 10, "Debt made too high"
