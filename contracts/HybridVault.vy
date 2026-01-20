@@ -75,12 +75,16 @@ interface VaultFactory:
     def ADMIN() -> address: view
     def stablecoin_fraction() -> uint256: view
     def pool_limits(pool_id: uint256) -> uint256: view
+    def allowed_crvusd_vaults(vault: address) -> bool: view
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
 
 
 event SetPersonalLimit:
     pool_id: uint256
     limit: uint256
+
+event SetCrvusdVault:
+    vault: IERC4626
 
 
 MAX_VAULTS: public(constant(uint256)) = 16
@@ -137,6 +141,21 @@ def set_personal_limit(pool_id: uint256, limit: uint256):
     assert msg.sender == staticcall self.vault_factory.ADMIN(), "Only admin"
     self.personal_limit[pool_id] = limit
     log SetPersonalLimit(pool_id=pool_id, limit=limit)
+
+
+@external
+def set_crvusd_vault(new_vault: IERC4626):
+    """
+    @notice Change the crvUSD vault used by this HybridVault
+    @dev Only callable by owner when current vault has no deposits
+    @param new_vault The new crvUSD vault to use (must be in allowed list)
+    """
+    assert msg.sender == self.owner, "Only owner"
+    assert staticcall self.vault_factory.allowed_crvusd_vaults(new_vault.address), "Vault not allowed"
+    assert staticcall self.crvusd_vault.balanceOf(self) == 0, "Current vault not empty"
+    self.crvusd_vault = new_vault
+    extcall CRVUSD.approve(new_vault.address, max_value(uint256))
+    log SetCrvusdVault(vault=new_vault)
 
 
 @internal
