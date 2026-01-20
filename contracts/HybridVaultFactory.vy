@@ -7,7 +7,7 @@
 """
 
 interface HybridVault:
-    def initialize(user: address) -> bool: nonpayable
+    def initialize(user: address, crvusd_vault: address) -> bool: nonpayable
 
 interface FactoryOwner:
     def ADMIN() -> address: view
@@ -31,6 +31,10 @@ event SetPoolLimit:
     pool_id: uint256
     limit: uint256
 
+event SetAllowedCrvusdVault:
+    vault: address
+    allowed: bool
+
 
 FACTORY: public(immutable(Factory))
 ADMIN: public(immutable(address))
@@ -39,6 +43,7 @@ user_to_vault: public(HashMap[address, HybridVault])
 vault_to_user: public(HashMap[HybridVault, address])
 stablecoin_fraction: public(uint256)
 pool_limits: public(HashMap[uint256, uint256])
+allowed_crvusd_vaults: public(HashMap[address, bool])
 
 
 @deploy
@@ -64,17 +69,19 @@ def __init__(factory: Factory, impl: address, pool_ids: DynArray[uint256, 10], p
 
 
 @external
-def create_vault() -> HybridVault:
+def create_vault(crvusd_vault: address) -> HybridVault:
     """
     @notice Create a new HybridVault for the caller
     @dev Deploys a minimal proxy pointing to vault_impl and initializes it.
          Each address can only create one vault.
+    @param crvusd_vault The crvUSD vault (e.g., scrvUSD) to use for this vault
     @return The newly created HybridVault instance
     """
     assert self.user_to_vault[msg.sender] == empty(HybridVault), "Already created"
+    assert self.allowed_crvusd_vaults[crvusd_vault], "Vault not allowed"
 
     vault: HybridVault = HybridVault(create_minimal_proxy_to(self.vault_impl))
-    extcall vault.initialize(msg.sender)
+    extcall vault.initialize(msg.sender, crvusd_vault)
 
     self.user_to_vault[msg.sender] = vault
     self.vault_to_user[vault] = msg.sender
@@ -118,6 +125,19 @@ def set_pool_limit(pool_id: uint256, pool_limit: uint256):
     assert msg.sender == ADMIN, "Access"
     self.pool_limits[pool_id] = pool_limit
     log SetPoolLimit(pool_id=pool_id, limit=pool_limit)
+
+
+@external
+def set_allowed_crvusd_vault(vault: address, allowed: bool):
+    """
+    @notice Enable or disable a crvUSD vault for use
+    @dev Only callable by ADMIN
+    @param vault The crvUSD vault address
+    @param allowed Whether the vault is allowed
+    """
+    assert msg.sender == ADMIN, "Access"
+    self.allowed_crvusd_vaults[vault] = allowed
+    log SetAllowedCrvusdVault(vault=vault, allowed=allowed)
 
 
 @external

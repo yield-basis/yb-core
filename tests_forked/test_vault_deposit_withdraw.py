@@ -2,14 +2,14 @@ import boa
 import pytest
 from hypothesis import given, settings, assume
 from hypothesis import strategies as st
-from tests_forked.conftest import WBTC, WETH, CRVUSD
+from tests_forked.conftest import WBTC, WETH, CRVUSD, SCRVUSD
 
 
 @pytest.fixture(scope="module")
 def vault(hybrid_vault_factory, funded_account, factory):
     """Create a HybridVault for the funded_account."""
     with boa.env.prank(funded_account):
-        vault_addr = hybrid_vault_factory.create_vault()
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
     return boa.load_partial("contracts/HybridVault.vy").at(vault_addr)
 
 

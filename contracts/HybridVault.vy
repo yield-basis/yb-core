@@ -86,8 +86,8 @@ event SetPersonalLimit:
 MAX_VAULTS: public(constant(uint256)) = 16
 FACTORY: public(immutable(Factory))
 CRVUSD: public(immutable(IERC20))
-CRVUSD_VAULT: public(immutable(IERC4626))
 owner: public(address)
+crvusd_vault: public(IERC4626)
 vault_factory: public(VaultFactory)
 used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
@@ -98,32 +98,32 @@ personal_limit: public(HashMap[uint256, uint256])
 
 
 @deploy
-def __init__(factory: Factory, crvusd: IERC20, crvusd_vault: IERC4626):
+def __init__(factory: Factory, crvusd: IERC20):
     """
     @notice Initialize the HybridVault implementation contract
     @dev Sets owner to 0x01 to prevent initialization of the factory itself
     @param factory The YB factory contract address
     @param crvusd The crvUSD token address
-    @param crvusd_vault The scrvUSD vault address
     """
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
     CRVUSD = crvusd
-    CRVUSD_VAULT = crvusd_vault
 
 
 @external
-def initialize(user: address) -> bool:
+def initialize(user: address, crvusd_vault: IERC4626) -> bool:
     """
     @notice Initialize a cloned vault instance for a user
     @dev Can only be called once; sets the vault owner and approves crvUSD spending
     @param user The address that will own this vault
+    @param crvusd_vault The crvUSD vault (e.g., scrvUSD) to use for this vault
     @return True if initialization succeeded
     """
     assert self.owner == empty(address), "Already initialized"
     self.owner = user
     self.vault_factory = VaultFactory(msg.sender)
-    extcall CRVUSD.approve(CRVUSD_VAULT.address, max_value(uint256))
+    self.crvusd_vault = crvusd_vault
+    extcall CRVUSD.approve(crvusd_vault.address, max_value(uint256))
     return True
 
 
@@ -142,7 +142,7 @@ def set_personal_limit(pool_id: uint256, limit: uint256):
 @internal
 @view
 def _crvusd_available() -> uint256:
-    return staticcall CRVUSD_VAULT.previewRedeem(staticcall CRVUSD_VAULT.balanceOf(self))
+    return staticcall self.crvusd_vault.previewRedeem(staticcall self.crvusd_vault.balanceOf(self))
 
 
 @internal
@@ -425,7 +425,7 @@ def claim_reward(token: IERC20) -> uint256:
 @internal
 def _deposit_crvusd(assets: uint256) -> uint256:
     extcall CRVUSD.transferFrom(msg.sender, self, assets)
-    return extcall CRVUSD_VAULT.deposit(assets, self)
+    return extcall self.crvusd_vault.deposit(assets, self)
 
 
 @external
@@ -440,7 +440,7 @@ def deposit_crvusd(assets: uint256) -> uint256:
 
 @internal
 def _redeem_crvusd(shares: uint256) -> uint256:
-    withdrawn: uint256 = extcall CRVUSD_VAULT.redeem(shares, msg.sender, self)
+    withdrawn: uint256 = extcall self.crvusd_vault.redeem(shares, msg.sender, self)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return withdrawn
 
@@ -463,7 +463,7 @@ def deposit_scrvusd(shares: uint256):
     @notice Deposit scrvUSD shares directly into the vault
     @param shares Amount of scrvUSD shares to transfer in
     """
-    extcall CRVUSD_VAULT.transferFrom(msg.sender, self, shares)
+    extcall self.crvusd_vault.transferFrom(msg.sender, self, shares)
 
 
 @external
@@ -474,7 +474,7 @@ def withdraw_scrvusd(shares: uint256):
     @param shares Amount of scrvUSD shares to withdraw
     """
     assert self.owner == msg.sender, "Access"
-    extcall CRVUSD_VAULT.transfer(msg.sender, shares)
+    extcall self.crvusd_vault.transfer(msg.sender, shares)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
 
 

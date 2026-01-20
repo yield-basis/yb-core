@@ -77,8 +77,7 @@ def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
     vault_impl = boa.load(
         "contracts/HybridVault.vy",
         factory.address,
-        CRVUSD,
-        SCRVUSD
+        CRVUSD
     )
     vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
@@ -91,6 +90,7 @@ def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
     # Add HybridVaultFactory as limit_setter in HybridFactoryOwner
     with boa.env.prank(dao):
         hybrid_factory_owner.set_limit_setter(vault_factory.address, True)
+        vault_factory.set_allowed_crvusd_vault(SCRVUSD, True)
 
     return vault_factory
 
