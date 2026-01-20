@@ -35,6 +35,7 @@ interface IERC4626:
     def transferFrom(owner: address, receiver: address, amount: uint256) -> bool: nonpayable
     def previewRedeem(shares: uint256) -> uint256: view
     def deposit(assets: uint256, receiver: address) -> uint256: nonpayable
+    def withdraw(assets: uint256, receiver: address, owner: address) -> uint256: nonpayable
     def redeem(shares: uint256, receiver: address, owner: address) -> uint256: nonpayable
     def claim(reward: IERC20, user: address) -> uint256: nonpayable
     def preview_claim(reward: IERC20, user: address) -> uint256: view
@@ -383,7 +384,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     required_after: uint256 = self._required_crvusd()
 
     if required_before > required_after and withdraw_stablecoins:
-        self._redeem_crvusd(required_before - required_after)
+        self._withdraw_crvusd(self._downscale(required_before - required_after))
 
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)
@@ -467,6 +468,16 @@ def deposit_crvusd(assets: uint256) -> uint256:
     @return Amount of scrvUSD shares received
     """
     return self._deposit_crvusd(assets)
+
+
+@internal
+def _withdraw_crvusd(assets: uint256) -> uint256:
+    to_withdraw: uint256 = min(assets, self._crvusd_available())
+    if to_withdraw == 0:
+        return 0
+    shares_burned: uint256 = extcall self.crvusd_vault.withdraw(to_withdraw, msg.sender, self)
+    assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
+    return shares_burned
 
 
 @internal
