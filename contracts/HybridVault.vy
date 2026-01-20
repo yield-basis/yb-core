@@ -176,6 +176,18 @@ def _pool_limits(pool_id: uint256) -> uint256:
     return max(self.personal_limit[pool_id], staticcall self.vault_factory.pool_limits(pool_id))
 
 
+@external
+@view
+def pool_limits(pool_id: uint256) -> uint256:
+    """
+    @notice Get the effective pool limit for a specific market
+    @dev Returns the maximum of personal limit and global factory limit
+    @param pool_id The market pool identifier
+    @return The effective pool limit in crvUSD value
+    """
+    return self._pool_limits(pool_id)
+
+
 @internal
 @view
 def _required_crvusd() -> uint256:
