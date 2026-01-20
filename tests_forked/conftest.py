@@ -99,3 +99,41 @@ def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
 def twocrypto(forked_env):
     """Twocrypto interface for cryptopool interactions."""
     return boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy")
+
+
+@pytest.fixture(scope="module")
+def vault(hybrid_vault_factory, funded_account):
+    """Create a HybridVault for the funded_account."""
+    with boa.env.prank(funded_account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    return boa.load_partial("contracts/HybridVault.vy").at(vault_addr)
+
+
+@pytest.fixture(scope="module")
+def erc20(forked_env):
+    """ERC20 interface for token interactions."""
+    return boa.load_partial("contracts/testing/ERC20Mock.vy")
+
+
+@pytest.fixture(scope="module")
+def wbtc(erc20):
+    return erc20.at(WBTC)
+
+
+@pytest.fixture(scope="module")
+def weth(erc20):
+    return erc20.at(WETH)
+
+
+@pytest.fixture(scope="module")
+def crvusd(erc20):
+    return erc20.at(CRVUSD)
+
+
+@pytest.fixture(scope="module")
+def setup_approvals(vault, funded_account, wbtc, weth, crvusd):
+    """Approve vault to spend user's tokens."""
+    with boa.env.prank(funded_account):
+        wbtc.approve(vault.address, 2**256 - 1)
+        weth.approve(vault.address, 2**256 - 1)
+        crvusd.approve(vault.address, 2**256 - 1)
