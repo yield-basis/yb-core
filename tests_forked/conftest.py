@@ -102,11 +102,17 @@ def twocrypto(forked_env):
 
 
 @pytest.fixture(scope="module")
-def vault(hybrid_vault_factory, funded_account):
+def hybrid_vault_deployer(forked_env):
+    """HybridVault contract interface for deploying/loading vaults."""
+    return boa.load_partial("contracts/HybridVault.vy")
+
+
+@pytest.fixture(scope="module")
+def vault(hybrid_vault_factory, hybrid_vault_deployer, funded_account):
     """Create a HybridVault for the funded_account."""
     with boa.env.prank(funded_account):
         vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
-    return boa.load_partial("contracts/HybridVault.vy").at(vault_addr)
+    return hybrid_vault_deployer.at(vault_addr)
 
 
 @pytest.fixture(scope="module")

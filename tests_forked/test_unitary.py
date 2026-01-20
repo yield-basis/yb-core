@@ -1,12 +1,5 @@
 import boa
-import pytest
 from tests_forked.conftest import WBTC, SCRVUSD
-
-
-@pytest.fixture(scope="module")
-def hybrid_vault_deployer(forked_env):
-    """HybridVault contract interface for deploying/loading vaults."""
-    return boa.load_partial("contracts/HybridVault.vy")
 
 
 def test_stake_unstake_wbtc(
@@ -50,15 +43,21 @@ def test_stake_unstake_wbtc(
 
 
 def test_deposit_withdraw_crvusd_from_wallet(
-    hybrid_vault_factory, hybrid_vault_deployer, funded_account, wbtc, crvusd, factory, twocrypto
+    hybrid_vault_factory, hybrid_vault_deployer, wbtc, crvusd, factory, twocrypto, erc20
 ):
     """
     Test depositing 1 WBTC where crvUSD is pulled from user's wallet during deposit,
     and returned to user's wallet during withdraw.
     Uses a fresh vault with no pre-deposited crvUSD.
     """
+    # Create a fresh account for this test (separate from funded_account which already has a vault)
+    from tests_forked.conftest import WBTC, CRVUSD
+    account = boa.env.generate_address()
+    boa.deal(erc20.at(WBTC), account, 10 * 10**8)
+    boa.deal(erc20.at(CRVUSD), account, 1_000_000 * 10**18)
+
     # Create a fresh vault for this test
-    with boa.env.prank(funded_account):
+    with boa.env.prank(account):
         vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
     vault = hybrid_vault_deployer.at(vault_addr)
 
@@ -75,7 +74,7 @@ def test_deposit_withdraw_crvusd_from_wallet(
     usd_value = assets * price // 10**8  # adjust for WBTC decimals
     debt = usd_value // 2
 
-    with boa.env.prank(funded_account):
+    with boa.env.prank(account):
         # Approve vault to spend user's tokens
         wbtc.approve(vault.address, 2**256 - 1)
         crvusd.approve(vault.address, 2**256 - 1)
@@ -84,7 +83,7 @@ def test_deposit_withdraw_crvusd_from_wallet(
         assert vault.required_crvusd() == 0, "Vault should start with no crvUSD requirement"
 
         # Record initial crvUSD balance
-        initial_crvusd_balance = crvusd.balanceOf(funded_account)
+        initial_crvusd_balance = crvusd.balanceOf(account)
 
         # Calculate how much crvUSD will be needed
         crvusd_needed = vault.crvusd_for_deposit(pool_id, assets, debt)
@@ -96,7 +95,7 @@ def test_deposit_withdraw_crvusd_from_wallet(
         assert lt_shares > 0, "Should receive LT shares"
 
         # Verify exactly crvusd_needed was pulled from user's wallet
-        balance_after_deposit = crvusd.balanceOf(funded_account)
+        balance_after_deposit = crvusd.balanceOf(account)
         crvusd_used = initial_crvusd_balance - balance_after_deposit
         assert crvusd_used == crvusd_needed, f"Should use exactly {crvusd_needed}, but used {crvusd_used}"
 
@@ -104,10 +103,10 @@ def test_deposit_withdraw_crvusd_from_wallet(
         assert vault.required_crvusd() > 0, "Vault should now require crvUSD"
 
         # Withdraw all shares with withdraw_stablecoins=True (returns crvUSD to wallet)
-        vault.withdraw(pool_id, lt_shares, 0, False, funded_account, True)
+        vault.withdraw(pool_id, lt_shares, 0, False, account, True)
 
         # Verify all crvUSD was returned to user's wallet
-        final_crvusd_balance = crvusd.balanceOf(funded_account)
+        final_crvusd_balance = crvusd.balanceOf(account)
         crvusd_returned = final_crvusd_balance - balance_after_deposit
         assert crvusd_returned == crvusd_needed, f"Should return exactly {crvusd_needed}, but returned {crvusd_returned}"
 
