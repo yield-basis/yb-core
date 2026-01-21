@@ -7,6 +7,7 @@
 @license GNU Affero General Public License v3.0
 """
 from ethereum.ercs import IERC20
+from ethereum.ercs import IERC20Detailed
 
 
 struct Market:
@@ -42,6 +43,7 @@ interface IERC4626:
 
 interface CurveCryptoPool:
     def price_scale() -> uint256: view
+    def price_oracle() -> uint256: view
 
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
@@ -537,3 +539,39 @@ def recover_tokens(token: IERC20):
     assert self.owner == msg.sender, "Access"
     assert not self.token_in_use[token.address], "Token not allowed"
     assert extcall token.transfer(msg.sender, staticcall token.balanceOf(self), default_return_value=True)
+
+
+@external
+@view
+def assets_for_crvusd(pool_id: uint256, crvusd_amount: uint256) -> uint256:
+    """
+    @notice Calculate assets amount for a given crvUSD amount
+    @dev Uses _required_crvusd_for with debt = assets * price_oracle / 10**18 to compute ratio.
+         Accounts for any excess crvUSD already available in the vault.
+    @param pool_id The market pool identifier
+    @param crvusd_amount The crvUSD amount to deposit
+    @return The corresponding assets amount
+    """
+    market: Market = staticcall FACTORY.markets(pool_id)
+
+    # Account for excess crvusd already available in the vault
+    available: uint256 = self._crvusd_available() + crvusd_amount
+    required: uint256 = self._downscale(self._required_crvusd())
+    effective_crvusd: uint256 = available - min(available, required)
+
+    # Get price from cryptopool's price_oracle
+    # test_debt = p_o, test_assets == 1.0
+    test_debt: uint256 = staticcall market.cryptopool.price_oracle()
+
+    # Use 1 unit of assets (based on actual decimals) to compute ratio
+    # debt = assets * p_o / 1.0 = p_o
+    asset_decimals: uint256 = convert(staticcall IERC20Detailed(market.asset_token.address).decimals(), uint256)
+    test_assets: uint256 = 10**asset_decimals
+
+    # Get crvusd required for test_assets
+    crvusd_for_test: uint256 = self._required_crvusd_for(market.lt, market.amm, test_assets, test_debt)[1]
+
+    # Scale to get assets for effective_crvusd
+    # crvusd_for_test / test_assets = effective_crvusd / assets
+    # assets = effective_crvusd * test_assets / crvusd_for_test
+    return effective_crvusd * test_assets // crvusd_for_test
