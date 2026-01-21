@@ -179,3 +179,82 @@ def test_uninitialized_impl_matches_empty_vault(
     tolerance = max(product_from_crvusd_for_deposit, product_from_assets_for_crvusd) // 1000  # 0.1% tolerance
     assert abs(product_from_crvusd_for_deposit - product_from_assets_for_crvusd) <= tolerance, \
         f"Ratio mismatch: crvusd_for_deposit gives {product_from_crvusd_for_deposit}, assets_for_crvusd gives {product_from_assets_for_crvusd}"
+
+
+def test_recover_tokens(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
+):
+    """
+    Test that recover_tokens prevents recovering protected tokens but allows
+    recovering accidentally sent tokens.
+    """
+    pool_id = 3
+    assets = 1 * 10**8  # 1 WBTC (8 decimals)
+
+    # Create a fresh account and vault
+    account = boa.env.generate_address()
+    wbtc_token = erc20.at(WBTC)
+    crvusd_token = erc20.at(CRVUSD)
+    scrvusd_token = erc20.at(SCRVUSD)
+    boa.deal(wbtc_token, account, 10 * 10**8)
+    boa.deal(crvusd_token, account, 1_000_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault = hybrid_vault_deployer.at(vault_addr)
+
+    # Get market info
+    market = factory.markets(pool_id)
+    lt_address = market.lt
+    staker_address = market.staker
+
+    # Calculate debt and make a deposit to initialize the pool (marks LT and staker as in_use)
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()
+    usd_value = assets * price // 10**8
+    debt = usd_value
+
+    with boa.env.prank(account):
+        wbtc_token.approve(vault.address, 2**256 - 1)
+        crvusd_token.approve(vault.address, 2**256 - 1)
+        vault.deposit(pool_id, assets, debt, 0, False, True)
+
+    # Accidentally send some WBTC and crvUSD to the vault
+    accidental_wbtc = 10**7  # 0.1 WBTC
+    accidental_crvusd = 100 * 10**18  # 100 crvUSD
+    with boa.env.prank(account):
+        wbtc_token.transfer(vault.address, accidental_wbtc)
+        crvusd_token.transfer(vault.address, accidental_crvusd)
+
+    # --- Test that protected tokens cannot be recovered ---
+
+    # LT token cannot be recovered
+    with boa.env.prank(account):
+        with boa.reverts("Token not allowed"):
+            vault.recover_tokens(lt_address)
+
+    # Staker token cannot be recovered
+    with boa.env.prank(account):
+        with boa.reverts("Token not allowed"):
+            vault.recover_tokens(staker_address)
+
+    # scrvUSD (crvusd_vault) cannot be recovered
+    with boa.env.prank(account):
+        with boa.reverts("Token not allowed"):
+            vault.recover_tokens(SCRVUSD)
+
+    # --- Test that accidentally sent tokens can be recovered ---
+
+    # WBTC can be recovered
+    wbtc_balance_before = wbtc_token.balanceOf(account)
+    with boa.env.prank(account):
+        vault.recover_tokens(WBTC)
+    wbtc_balance_after = wbtc_token.balanceOf(account)
+    assert wbtc_balance_after - wbtc_balance_before == accidental_wbtc, "Should recover accidental WBTC"
+
+    # crvUSD can be recovered
+    crvusd_balance_before = crvusd_token.balanceOf(account)
+    with boa.env.prank(account):
+        vault.recover_tokens(CRVUSD)
+    crvusd_balance_after = crvusd_token.balanceOf(account)
+    assert crvusd_balance_after - crvusd_balance_before == accidental_crvusd, "Should recover accidental crvUSD"
