@@ -384,7 +384,10 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     required_after: uint256 = self._required_crvusd()
 
     if required_before > required_after and withdraw_stablecoins:
-        self._withdraw_crvusd(self._downscale(required_before - required_after))
+        if required_after > 0:
+            self._withdraw_crvusd(self._downscale(required_before - required_after))
+        else:
+            self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self))
 
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)

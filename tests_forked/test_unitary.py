@@ -109,7 +109,11 @@ def test_deposit_withdraw_crvusd_from_wallet(
         final_crvusd_balance = crvusd.balanceOf(account)
         crvusd_returned = final_crvusd_balance - balance_after_deposit
         # Allow small difference due to vault mechanics and rounding
-        assert crvusd_returned >= crvusd_needed * 999 // 1000, f"Should return ~{crvusd_needed}, but returned {crvusd_returned}"
+        assert abs(crvusd_returned - crvusd_needed) <= 10, f"Should return ~{crvusd_needed}, but returned {crvusd_returned}"
 
         # Verify no crvUSD is required after full withdrawal
         assert vault.required_crvusd() == 0, "Vault should have no crvUSD requirement after withdrawal"
+
+        # Verify HybridVault has 0 scrvUSD left
+        scrvusd = erc20.at(SCRVUSD)
+        assert scrvusd.balanceOf(vault.address) == 0, "HybridVault should have 0 scrvUSD after full withdrawal"
