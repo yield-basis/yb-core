@@ -85,27 +85,27 @@ def main():
     assert factory.admin() == hybrid_factory_owner.address, "Factory admin should be HybridFactoryOwner"
     print(f"Factory admin after HybridFactoryOwner: {factory.admin()}")
 
-    # Deploy HybridVault implementation
-    print("Deploying HybridVault implementation...")
-    vault_impl = boa.load("contracts/HybridVault.vy", factory.address, CRVUSD)
-    print(f"HybridVault implementation deployed at: {vault_impl.address}")
-
-    # Deploy HybridVaultFactory
+    # Deploy HybridVaultFactory first (without impl)
     print("Deploying HybridVaultFactory...")
     print(f"  Pool IDs: {POOL_IDS}")
     print(f"  Pool limits: {[l // 10**18 for l in POOL_LIMITS]} crvUSD")
     hybrid_vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
         factory.address,
-        vault_impl.address,
         POOL_IDS,
         POOL_LIMITS,
     )
     print(f"HybridVaultFactory deployed at: {hybrid_vault_factory.address}")
 
-    # Add HybridVaultFactory as limit_setter in HybridFactoryOwner
-    print("Setting HybridVaultFactory as limit_setter...")
+    # Deploy HybridVault implementation with vault_factory address
+    print("Deploying HybridVault implementation...")
+    vault_impl = boa.load("contracts/HybridVault.vy", factory.address, CRVUSD, hybrid_vault_factory.address)
+    print(f"HybridVault implementation deployed at: {vault_impl.address}")
+
+    # Set vault impl on factory and configure permissions
+    print("Setting vault implementation and permissions...")
     with boa.env.prank(DAO):
+        hybrid_vault_factory.set_vault_impl(vault_impl.address)
         hybrid_factory_owner.set_limit_setter(hybrid_vault_factory.address, True)
 
     assert hybrid_factory_owner.limit_setters(hybrid_vault_factory.address), "HybridVaultFactory should be limit_setter"

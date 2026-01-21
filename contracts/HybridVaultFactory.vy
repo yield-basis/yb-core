@@ -47,17 +47,16 @@ allowed_crvusd_vaults: public(HashMap[address, bool])
 
 
 @deploy
-def __init__(factory: Factory, impl: address, pool_ids: DynArray[uint256, 10], pool_limits: DynArray[uint256, 10]):
+def __init__(factory: Factory, pool_ids: DynArray[uint256, 10], pool_limits: DynArray[uint256, 10]):
     """
     @notice Initialize the HybridVaultFactory with configuration parameters
+    @dev vault_impl must be set via set_vault_impl before creating vaults
     @param factory The main Yield Basis factory contract
-    @param impl The initial vault implementation address for minimal proxies
     @param pool_ids Array of pool identifiers to configure limits for
     @param pool_limits Array of deposit limits corresponding to each pool_id
     """
     FACTORY = factory
     ADMIN = staticcall (staticcall factory.admin()).ADMIN()
-    self.vault_impl = impl
     self.stablecoin_fraction = 4 * 10**17
     for i: uint256 in range(10):
         if i >= len(pool_ids):
@@ -79,6 +78,7 @@ def create_vault(crvusd_vault: address) -> HybridVault:
     """
     assert self.user_to_vault[msg.sender] == empty(HybridVault), "Already created"
     assert self.allowed_crvusd_vaults[crvusd_vault], "Vault not allowed"
+    assert self.vault_impl != empty(address), "Vault impl not set"
 
     vault: HybridVault = HybridVault(create_minimal_proxy_to(self.vault_impl))
     extcall vault.initialize(msg.sender, crvusd_vault)

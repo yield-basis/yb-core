@@ -91,9 +91,9 @@ event SetCrvusdVault:
 MAX_VAULTS: public(constant(uint256)) = 16
 FACTORY: public(immutable(Factory))
 CRVUSD: public(immutable(IERC20))
+VAULT_FACTORY: public(immutable(VaultFactory))
 owner: public(address)
 crvusd_vault: public(IERC4626)
-vault_factory: public(VaultFactory)
 used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
 pool_approved: HashMap[uint256, bool]
@@ -103,16 +103,18 @@ personal_limit: public(HashMap[uint256, uint256])
 
 
 @deploy
-def __init__(factory: Factory, crvusd: IERC20):
+def __init__(factory: Factory, crvusd: IERC20, vault_factory: VaultFactory):
     """
     @notice Initialize the HybridVault implementation contract
     @dev Sets owner to 0x01 to prevent initialization of the factory itself
     @param factory The YB factory contract address
     @param crvusd The crvUSD token address
+    @param vault_factory The HybridVaultFactory contract address
     """
     self.owner = 0x0000000000000000000000000000000000000001  # To prevent initializing the factory itself
     FACTORY = factory
     CRVUSD = crvusd
+    VAULT_FACTORY = vault_factory
 
 
 @external
@@ -126,7 +128,6 @@ def initialize(user: address, crvusd_vault: IERC4626) -> bool:
     """
     assert self.owner == empty(address), "Already initialized"
     self.owner = user
-    self.vault_factory = VaultFactory(msg.sender)
     self.crvusd_vault = crvusd_vault
     extcall CRVUSD.approve(crvusd_vault.address, max_value(uint256))
     return True
@@ -139,7 +140,7 @@ def set_personal_limit(pool_id: uint256, limit: uint256):
     @param pool_id The market pool identifier
     @param limit The personal limit to set (actual limit will be max of this and global pool limit)
     """
-    assert msg.sender == staticcall self.vault_factory.ADMIN(), "Only admin"
+    assert msg.sender == staticcall VAULT_FACTORY.ADMIN(), "Only admin"
     self.personal_limit[pool_id] = limit
     log SetPersonalLimit(pool_id=pool_id, limit=limit)
 
@@ -152,7 +153,7 @@ def set_crvusd_vault(new_vault: IERC4626):
     @param new_vault The new crvUSD vault to use (must be in allowed list)
     """
     assert msg.sender == self.owner, "Only owner"
-    assert staticcall self.vault_factory.allowed_crvusd_vaults(new_vault.address), "Vault not allowed"
+    assert staticcall VAULT_FACTORY.allowed_crvusd_vaults(new_vault.address), "Vault not allowed"
     assert staticcall self.crvusd_vault.balanceOf(self) == 0, "Current vault not empty"
     self.crvusd_vault = new_vault
     extcall CRVUSD.approve(new_vault.address, max_value(uint256))
@@ -162,19 +163,22 @@ def set_crvusd_vault(new_vault: IERC4626):
 @internal
 @view
 def _crvusd_available() -> uint256:
-    return staticcall self.crvusd_vault.previewRedeem(staticcall self.crvusd_vault.balanceOf(self))
+    if self.crvusd_vault != empty(IERC4626):
+        return staticcall self.crvusd_vault.previewRedeem(staticcall self.crvusd_vault.balanceOf(self))
+    else:
+        return 0
 
 
 @internal
 @view
 def _downscale(amount: uint256) -> uint256:
-    return amount * (staticcall self.vault_factory.stablecoin_fraction()) // 10**18
+    return amount * (staticcall VAULT_FACTORY.stablecoin_fraction()) // 10**18
 
 
 @internal
 @view
 def _pool_limits(pool_id: uint256) -> uint256:
-    return max(self.personal_limit[pool_id], staticcall self.vault_factory.pool_limits(pool_id))
+    return max(self.personal_limit[pool_id], staticcall VAULT_FACTORY.pool_limits(pool_id))
 
 
 @external
@@ -296,7 +300,7 @@ def _remove_from_used(pool_id: uint256):
 
 @internal
 def _allocate_stablecoins(lt: LT, limit: uint256):
-    extcall self.vault_factory.lt_allocate_stablecoins(lt, limit)
+    extcall VAULT_FACTORY.lt_allocate_stablecoins(lt, limit)
 
 
 @external

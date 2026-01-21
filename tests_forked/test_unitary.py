@@ -117,3 +117,49 @@ def test_deposit_withdraw_crvusd_from_wallet(
         # Verify HybridVault has 0 scrvUSD left
         scrvusd = erc20.at(SCRVUSD)
         assert scrvusd.balanceOf(vault.address) == 0, "HybridVault should have 0 scrvUSD after full withdrawal"
+
+
+def test_uninitialized_impl_matches_empty_vault(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
+):
+    """
+    Test that uninitialized implementation contract gives the same crvusd_for_deposit
+    result as a freshly-initialized empty HybridVault.
+    """
+    from tests_forked.conftest import WBTC, CRVUSD
+
+    # Get the uninitialized implementation contract
+    impl_addr = hybrid_vault_factory.vault_impl()
+    impl = hybrid_vault_deployer.at(impl_addr)
+
+    # Create a fresh account and vault for comparison
+    account = boa.env.generate_address()
+    boa.deal(erc20.at(CRVUSD), account, 1_000_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    empty_vault = hybrid_vault_deployer.at(vault_addr)
+
+    # Verify the implementation is uninitialized (owner is 0x01)
+    assert impl.owner() == "0x0000000000000000000000000000000000000001", "Impl should have owner 0x01"
+
+    # Verify the empty vault is initialized but empty
+    assert empty_vault.owner() == account, "Empty vault should have owner set"
+    assert empty_vault.required_crvusd() == 0, "Empty vault should require no crvUSD"
+
+    pool_id = 3
+    assets = 1 * 10**8  # 1 WBTC (8 decimals)
+
+    # Calculate debt as half the USD value of assets
+    market = factory.markets(pool_id)
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()
+    usd_value = assets * price // 10**8
+    debt = usd_value // 2
+
+    # Call crvusd_for_deposit on both contracts
+    impl_result = impl.crvusd_for_deposit(pool_id, assets, debt)
+    empty_vault_result = empty_vault.crvusd_for_deposit(pool_id, assets, debt)
+
+    # Both should return the same result
+    assert impl_result == empty_vault_result, f"Impl returned {impl_result}, empty vault returned {empty_vault_result}"

@@ -74,21 +74,25 @@ def funded_account(forked_env):
 @pytest.fixture(scope="module")
 def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
     """Deploy HybridVaultFactory with pools 3 and 6, each with 300M limit."""
-    vault_impl = boa.load(
-        "contracts/HybridVault.vy",
-        factory.address,
-        CRVUSD
-    )
+    # Deploy factory first (without impl)
     vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
         factory.address,
-        vault_impl.address,
         [3, 6],
         [300_000_000 * 10**18, 300_000_000 * 10**18]
     )
 
-    # Add HybridVaultFactory as limit_setter in HybridFactoryOwner
+    # Deploy vault impl with vault_factory address
+    vault_impl = boa.load(
+        "contracts/HybridVault.vy",
+        factory.address,
+        CRVUSD,
+        vault_factory.address
+    )
+
+    # Set vault impl on factory
     with boa.env.prank(dao):
+        vault_factory.set_vault_impl(vault_impl.address)
         hybrid_factory_owner.set_limit_setter(vault_factory.address, True)
         vault_factory.set_allowed_crvusd_vault(SCRVUSD, True)
 
