@@ -569,7 +569,7 @@ def assets_for_crvusd(pool_id: uint256, crvusd_amount: uint256) -> uint256:
     test_assets: uint256 = 10**asset_decimals
 
     # Get crvusd required for test_assets
-    crvusd_for_test: uint256 = self._required_crvusd_for(market.lt, market.amm, test_assets, test_debt)[1]
+    crvusd_for_test: uint256 = self._downscale(self._required_crvusd_for(market.lt, market.amm, test_assets, test_debt)[1])
 
     # Scale to get assets for effective_crvusd
     # crvusd_for_test / test_assets = effective_crvusd / assets

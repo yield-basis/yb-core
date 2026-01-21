@@ -1,5 +1,5 @@
 import boa
-from tests_forked.conftest import WBTC, SCRVUSD
+from tests_forked.conftest import WBTC, SCRVUSD, CRVUSD
 
 
 def test_stake_unstake_wbtc(
@@ -17,7 +17,7 @@ def test_stake_unstake_wbtc(
     cryptopool = twocrypto.at(market.cryptopool)
     price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
     usd_value = assets * price // 10**8  # adjust for WBTC decimals
-    debt = usd_value // 2
+    debt = usd_value
 
     with boa.env.prank(funded_account):
         # Deposit 1 WBTC without staking
@@ -51,7 +51,6 @@ def test_deposit_withdraw_crvusd_from_wallet(
     Uses a fresh vault with no pre-deposited crvUSD.
     """
     # Create a fresh account for this test (separate from funded_account which already has a vault)
-    from tests_forked.conftest import WBTC, CRVUSD
     account = boa.env.generate_address()
     boa.deal(erc20.at(WBTC), account, 10 * 10**8)
     boa.deal(erc20.at(CRVUSD), account, 1_000_000 * 10**18)
@@ -126,7 +125,6 @@ def test_uninitialized_impl_matches_empty_vault(
     Test that uninitialized implementation contract gives the same crvusd_for_deposit
     result as a freshly-initialized empty HybridVault.
     """
-    from tests_forked.conftest import WBTC, CRVUSD
 
     # Get the uninitialized implementation contract
     impl_addr = hybrid_vault_factory.vault_impl()
@@ -155,11 +153,29 @@ def test_uninitialized_impl_matches_empty_vault(
     cryptopool = twocrypto.at(market.cryptopool)
     price = cryptopool.price_scale()
     usd_value = assets * price // 10**8
-    debt = usd_value // 2
+    debt = usd_value
 
     # Call crvusd_for_deposit on both contracts
-    impl_result = impl.crvusd_for_deposit(pool_id, assets, debt)
-    empty_vault_result = empty_vault.crvusd_for_deposit(pool_id, assets, debt)
+    impl_crvusd_result = impl.crvusd_for_deposit(pool_id, assets, debt)
+    vault_crvusd_result = empty_vault.crvusd_for_deposit(pool_id, assets, debt)
 
     # Both should return the same result
-    assert impl_result == empty_vault_result, f"Impl returned {impl_result}, empty vault returned {empty_vault_result}"
+    assert impl_crvusd_result == vault_crvusd_result, f"Impl returned {impl_crvusd_result}, empty vault returned {vault_crvusd_result}"
+
+    # Call assets_for_crvusd on both contracts
+    crvusd_amount = 10_000 * 10**18  # 10k crvUSD
+    impl_assets_result = impl.assets_for_crvusd(pool_id, crvusd_amount)
+    vault_assets_result = empty_vault.assets_for_crvusd(pool_id, crvusd_amount)
+
+    # Both should return the same result
+    assert impl_assets_result == vault_assets_result, f"assets_for_crvusd: Impl returned {impl_assets_result}, empty vault returned {vault_assets_result}"
+
+    # Verify ratio consistency: crvusd_for_deposit / assets ≈ crvusd_amount / assets_for_crvusd
+    # Cross-multiply: crvusd_for_deposit_result * assets_for_crvusd_result ≈ crvusd_amount * assets
+    crvusd_for_deposit_result = impl_crvusd_result
+    assets_for_crvusd_result = impl_assets_result
+    product_from_crvusd_for_deposit = crvusd_for_deposit_result * assets_for_crvusd_result
+    product_from_assets_for_crvusd = crvusd_amount * assets
+    tolerance = max(product_from_crvusd_for_deposit, product_from_assets_for_crvusd) // 1000  # 0.1% tolerance
+    assert abs(product_from_crvusd_for_deposit - product_from_assets_for_crvusd) <= tolerance, \
+        f"Ratio mismatch: crvusd_for_deposit gives {product_from_crvusd_for_deposit}, assets_for_crvusd gives {product_from_assets_for_crvusd}"
