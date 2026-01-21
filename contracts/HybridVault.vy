@@ -537,7 +537,7 @@ def recover_tokens(token: IERC20):
     @param token The token to recover
     """
     assert self.owner == msg.sender, "Access"
-    assert not self.token_in_use[token.address], "Token not allowed"
+    assert not self.token_in_use[token.address] and token.address != self.crvusd_vault.address, "Token not allowed"
     assert extcall token.transfer(msg.sender, staticcall token.balanceOf(self), default_return_value=True)
 
 
