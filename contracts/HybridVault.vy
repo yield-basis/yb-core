@@ -180,7 +180,7 @@ def _downscale(amount: uint256) -> uint256:
 @internal
 @view
 def _pool_limits(pool_id: uint256) -> uint256:
-    return max(self.personal_limit[pool_id], staticcall VAULT_FACTORY.pool_limits(pool_id))
+    return self.personal_limit[pool_id] + staticcall VAULT_FACTORY.pool_limits(pool_id)
 
 
 @external
