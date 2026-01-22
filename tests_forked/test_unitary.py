@@ -258,3 +258,72 @@ def test_recover_tokens(
         vault.recover_tokens(CRVUSD)
     crvusd_balance_after = crvusd_token.balanceOf(account)
     assert crvusd_balance_after - crvusd_balance_before == accidental_crvusd, "Should recover accidental crvUSD"
+
+
+def test_deposit_redeem_crvusd_and_scrvusd(
+    hybrid_vault_factory, hybrid_vault_deployer, erc20
+):
+    """
+    Test deposit_crvusd/redeem_crvusd and deposit_scrvusd/withdraw_scrvusd
+    on an empty vault (no YB positions).
+    """
+    # Create a fresh account and vault
+    account = boa.env.generate_address()
+    crvusd_token = erc20.at(CRVUSD)
+    scrvusd_token = erc20.at(SCRVUSD)
+    boa.deal(crvusd_token, account, 100_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault = hybrid_vault_deployer.at(vault_addr)
+
+    # --- Test deposit_crvusd and redeem_crvusd ---
+    deposit_amount = 1000 * 10**18  # 1000 crvUSD
+
+    with boa.env.prank(account):
+        crvusd_token.approve(vault.address, 2**256 - 1)
+
+        # Deposit crvUSD
+        crvusd_before = crvusd_token.balanceOf(account)
+        scrvusd_shares = vault.deposit_crvusd(deposit_amount)
+        crvusd_after = crvusd_token.balanceOf(account)
+
+        assert scrvusd_shares > 0, "Should receive scrvUSD shares"
+        assert crvusd_before - crvusd_after == deposit_amount, "Should transfer exact crvUSD amount"
+        assert scrvusd_token.balanceOf(vault.address) == scrvusd_shares, "Vault should hold scrvUSD shares"
+
+        # Redeem all scrvUSD shares
+        crvusd_before = crvusd_token.balanceOf(account)
+        crvusd_redeemed = vault.redeem_crvusd(scrvusd_shares)
+        crvusd_after = crvusd_token.balanceOf(account)
+
+        assert crvusd_after - crvusd_before == crvusd_redeemed, "Should receive redeemed crvUSD"
+        assert abs(crvusd_redeemed - deposit_amount) <= 10, "Should redeem approximately deposited amount"
+        assert scrvusd_token.balanceOf(vault.address) == 0, "Vault should have no scrvUSD left"
+
+    # --- Test deposit_scrvusd and withdraw_scrvusd ---
+    # First, get some scrvUSD by depositing crvUSD directly to scrvUSD vault
+    scrvusd_vault = boa.load_partial("contracts/dao/erc4626.vy").at(SCRVUSD)
+
+    with boa.env.prank(account):
+        crvusd_token.approve(SCRVUSD, 2**256 - 1)
+        scrvusd_shares = scrvusd_vault.deposit(deposit_amount, account)
+
+        # Approve vault to transfer scrvUSD
+        scrvusd_token.approve(vault.address, 2**256 - 1)
+
+        # Deposit scrvUSD directly
+        scrvusd_before = scrvusd_token.balanceOf(account)
+        vault.deposit_scrvusd(scrvusd_shares)
+        scrvusd_after = scrvusd_token.balanceOf(account)
+
+        assert scrvusd_before - scrvusd_after == scrvusd_shares, "Should transfer exact scrvUSD amount"
+        assert scrvusd_token.balanceOf(vault.address) == scrvusd_shares, "Vault should hold scrvUSD shares"
+
+        # Withdraw scrvUSD directly
+        scrvusd_before = scrvusd_token.balanceOf(account)
+        vault.withdraw_scrvusd(scrvusd_shares)
+        scrvusd_after = scrvusd_token.balanceOf(account)
+
+        assert scrvusd_after - scrvusd_before == scrvusd_shares, "Should receive withdrawn scrvUSD"
+        assert scrvusd_token.balanceOf(vault.address) == 0, "Vault should have no scrvUSD left"
