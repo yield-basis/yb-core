@@ -327,3 +327,57 @@ def test_deposit_redeem_crvusd_and_scrvusd(
 
         assert scrvusd_after - scrvusd_before == scrvusd_shares, "Should receive withdrawn scrvUSD"
         assert scrvusd_token.balanceOf(vault.address) == 0, "Vault should have no scrvUSD left"
+
+
+def test_claim_reward(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
+):
+    """
+    Test that claim_reward is callable for YB token on a staked position.
+    """
+    pool_id = 3
+    assets = 1 * 10**8  # 1 WBTC (8 decimals)
+
+    # Create a fresh account and vault
+    account = boa.env.generate_address()
+    wbtc_token = erc20.at(WBTC)
+    crvusd_token = erc20.at(CRVUSD)
+    boa.deal(wbtc_token, account, 10 * 10**8)
+    boa.deal(crvusd_token, account, 1_000_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault = hybrid_vault_deployer.at(vault_addr)
+
+    # Get market info and YB token address
+    market = factory.markets(pool_id)
+    gauge_controller = boa.load_partial("contracts/dao/GaugeController.vy").at(factory.gauge_controller())
+    yb_token_address = gauge_controller.TOKEN()
+    yb_token = erc20.at(yb_token_address)
+
+    # Calculate debt and make a deposit with staking
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()
+    usd_value = assets * price // 10**8
+    debt = usd_value
+
+    with boa.env.prank(account):
+        wbtc_token.approve(vault.address, 2**256 - 1)
+        crvusd_token.approve(vault.address, 2**256 - 1)
+
+        # Deposit with stake=True to stake the LT shares in the gauge
+        staked_shares = vault.deposit(pool_id, assets, debt, 0, True, True)
+        assert staked_shares > 0, "Should receive staked shares"
+
+    # Preview claimable rewards (may be 0 if no time has passed)
+    preview_amount = vault.preview_claim_reward(yb_token_address)
+
+    # Claim rewards - should be callable without reverting
+    yb_balance_before = yb_token.balanceOf(account)
+    with boa.env.prank(account):
+        claimed = vault.claim_reward(yb_token_address)
+    yb_balance_after = yb_token.balanceOf(account)
+
+    # Verify claimed amount matches balance change and preview
+    assert yb_balance_after - yb_balance_before == claimed, "Claimed amount should match balance change"
+    assert claimed == preview_amount, "Claimed amount should match preview amount"
