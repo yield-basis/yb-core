@@ -195,7 +195,6 @@ def test_recover_tokens(
     account = boa.env.generate_address()
     wbtc_token = erc20.at(WBTC)
     crvusd_token = erc20.at(CRVUSD)
-    scrvusd_token = erc20.at(SCRVUSD)
     boa.deal(wbtc_token, account, 10 * 10**8)
     boa.deal(crvusd_token, account, 1_000_000 * 10**18)
 
@@ -381,3 +380,62 @@ def test_claim_reward(
     # Verify claimed amount matches balance change and preview
     assert yb_balance_after - yb_balance_before == claimed, "Claimed amount should match balance change"
     assert claimed == preview_amount, "Claimed amount should match preview amount"
+
+
+def test_set_personal_limit(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20, dao
+):
+    """
+    Test that set_personal_limit allows deposits when global pool limit is zero
+    but personal limit is set.
+    """
+    pool_id = 3
+    assets = 1 * 10**8  # 1 WBTC (8 decimals)
+
+    # Create a fresh account and vault
+    account = boa.env.generate_address()
+    wbtc_token = erc20.at(WBTC)
+    crvusd_token = erc20.at(CRVUSD)
+    boa.deal(wbtc_token, account, 10 * 10**8)
+    boa.deal(crvusd_token, account, 1_000_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault = hybrid_vault_deployer.at(vault_addr)
+
+    # Get current pool value and set global limit to that value (so any new deposit would exceed it)
+    market = factory.markets(pool_id)
+    # Actually we need the AMM value - let's use a small deposit to get the pool_value
+    amm = boa.load_partial("contracts/AMM.vy").at(market.amm)
+    current_pool_value = amm.value_oracle()[1]  # value field from OraclizedValue
+
+    with boa.env.prank(dao):
+        hybrid_vault_factory.set_pool_limit(pool_id, current_pool_value)
+
+    # Calculate debt for deposit
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()
+    usd_value = assets * price // 10**8
+    debt = usd_value
+
+    # Verify deposit fails with zero global limit and no personal limit
+    with boa.env.prank(account):
+        wbtc_token.approve(vault.address, 2**256 - 1)
+        crvusd_token.approve(vault.address, 2**256 - 1)
+
+        with boa.reverts("Beyond pool limit"):
+            vault.deposit(pool_id, assets, debt, 0, False, True)
+
+    # Set personal limit for this vault (enough for the deposit)
+    personal_limit = 200_000 * 10**18  # 200k USD limit
+    with boa.env.prank(dao):
+        vault.set_personal_limit(pool_id, personal_limit)
+
+    # Verify personal limit is set
+    assert vault.personal_limit(pool_id) == personal_limit, "Personal limit should be set"
+    assert vault.pool_limits(pool_id) == current_pool_value + personal_limit, "Effective pool limit should be personal limit"
+
+    # Now deposit should succeed within personal limit
+    with boa.env.prank(account):
+        lt_shares = vault.deposit(pool_id, assets, debt, 0, False, True)
+        assert lt_shares > 0, "Should receive LT shares"
