@@ -318,7 +318,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     @param deposit_stablecoins If True, pull additional crvUSD from sender if needed
     @return LT shares received (or staked shares if stake=True)
     """
-    assert self.owner == msg.sender, "Access"  # XXX should we allow others to deposit for us? Seems safe?
+    assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address)
