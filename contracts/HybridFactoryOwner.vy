@@ -91,7 +91,7 @@ def lt_set_rate(lt: LT, rate: uint256):
 
 
 @external
-def lt_set_amm_rate(lt: LT, fee: uint256):
+def lt_set_amm_fee(lt: LT, fee: uint256):
     """
     @notice Set the AMM fee for a specific LT market
     @param lt Address of the LT contract
