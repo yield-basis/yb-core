@@ -141,7 +141,7 @@ def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
          When limit = 0: Admin can disable LT; anyone can deallocate a disabled LT
          down to available reserves (must be >= 75% of oracle value)
     @param lt Address of the LT contract
-    @param limit New stablecoin allocation limit (0 to deallocate, max_value for unlimited)
+    @param limit New stablecoin allocation limit (0 to deallocate, max_value for trying to reach current allocation)
     """
     if limit != 0:
         assert msg.sender == ADMIN or self.limit_setters[msg.sender], "Access"
