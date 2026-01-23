@@ -385,15 +385,15 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     lt_shares: uint256 = shares
     if unstake:
         lt_shares = extcall market.staker.redeem(shares, self, self)
-    assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, msg.sender)
+    assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, receiver)
 
     required_after: uint256 = self._required_crvusd()
 
     if required_before > required_after and withdraw_stablecoins:
         if required_after > 0:
-            self._withdraw_crvusd(self._downscale(required_before - required_after))
+            self._withdraw_crvusd(self._downscale(required_before - required_after), receiver)
         else:
-            self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self))
+            self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
 
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)
@@ -480,18 +480,18 @@ def deposit_crvusd(assets: uint256) -> uint256:
 
 
 @internal
-def _withdraw_crvusd(assets: uint256) -> uint256:
+def _withdraw_crvusd(assets: uint256, receiver: address) -> uint256:
     to_withdraw: uint256 = min(assets, self._crvusd_available())
     if to_withdraw == 0:
         return 0
-    shares_burned: uint256 = extcall self.crvusd_vault.withdraw(to_withdraw, msg.sender, self)
+    shares_burned: uint256 = extcall self.crvusd_vault.withdraw(to_withdraw, receiver, self)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return shares_burned
 
 
 @internal
-def _redeem_crvusd(shares: uint256) -> uint256:
-    withdrawn: uint256 = extcall self.crvusd_vault.redeem(shares, msg.sender, self)
+def _redeem_crvusd(shares: uint256, receiver: address) -> uint256:
+    withdrawn: uint256 = extcall self.crvusd_vault.redeem(shares, receiver, self)
     assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return withdrawn
 
@@ -505,7 +505,7 @@ def redeem_crvusd(shares: uint256) -> uint256:
     @return Amount of crvUSD withdrawn
     """
     assert self.owner == msg.sender, "Access"
-    return self._redeem_crvusd(shares)
+    return self._redeem_crvusd(shares, msg.sender)
 
 
 @external
