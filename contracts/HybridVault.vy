@@ -245,7 +245,8 @@ def withdrawable_crvusd_for(pool_id: uint256, shares: uint256, is_staked: bool) 
     lt_shares: uint256 = shares
     if is_staked:
         lt_shares = staticcall market.staker.previewRedeem(shares)
-    released_value: uint256 = (staticcall market.amm.value_oracle()).value
+    lt_supply: uint256 = staticcall market.lt.totalSupply()
+    released_value: uint256 = (staticcall market.amm.value_oracle()).value * lt_shares // lt_supply
     required_value: uint256 = self._required_crvusd()
     required_value = self._downscale(required_value - min(required_value, released_value))
     crvusd_available: uint256 = self._crvusd_available()
