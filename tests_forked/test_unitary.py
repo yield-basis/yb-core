@@ -439,3 +439,83 @@ def test_set_personal_limit(
     with boa.env.prank(account):
         lt_shares = vault.deposit(pool_id, assets, debt, 0, False, True)
         assert lt_shares > 0, "Should receive LT shares"
+
+
+def test_withdrawable_crvusd_for(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
+):
+    """
+    Test withdrawable_crvusd_for: deposit a lot of crvUSD, a little bit of WBTC,
+    check withdrawable_crvusd_for and actually withdraw that amount of crvUSD.
+    """
+    pool_id = 3
+    small_wbtc_amount = 10**6  # 0.01 WBTC (8 decimals)
+    large_crvusd_amount = 500_000 * 10**18  # 500k crvUSD
+
+    # Create a fresh account and vault
+    account = boa.env.generate_address()
+    wbtc_token = erc20.at(WBTC)
+    crvusd_token = erc20.at(CRVUSD)
+    boa.deal(wbtc_token, account, 10 * 10**8)
+    boa.deal(crvusd_token, account, 1_000_000 * 10**18)
+
+    with boa.env.prank(account):
+        vault_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault = hybrid_vault_deployer.at(vault_addr)
+
+    # Get market info
+    market = factory.markets(pool_id)
+    assert market.asset_token == WBTC, "Pool 3 should use WBTC"
+
+    # Calculate debt for small WBTC deposit
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
+    usd_value = small_wbtc_amount * price // 10**8  # adjust for WBTC decimals
+    debt = usd_value
+
+    with boa.env.prank(account):
+        wbtc_token.approve(vault.address, 2**256 - 1)
+        crvusd_token.approve(vault.address, 2**256 - 1)
+
+        # Step 1: Deposit a lot of crvUSD first
+        scrvusd_shares = vault.deposit_crvusd(large_crvusd_amount)
+        assert scrvusd_shares > 0, "Should receive scrvUSD shares"
+
+        # Step 2: Deposit a small amount of WBTC
+        lt_shares = vault.deposit(pool_id, small_wbtc_amount, debt, 0, False, False)
+        assert lt_shares > 0, "Should receive LT shares"
+
+    # Step 3: Check withdrawable_crvusd_for
+    # With a lot of crvUSD deposited and only a small WBTC position,
+    # most of the crvUSD should be withdrawable
+    withdrawable = vault.withdrawable_crvusd_for(pool_id, lt_shares, False)
+
+    # Verify withdrawable amount is reasonable
+    required_crvusd = vault.required_crvusd()
+    scrvusd_token = erc20.at(SCRVUSD)
+    scrvusd_vault = boa.load_partial("contracts/dao/erc4626.vy").at(SCRVUSD)
+    crvusd_in_vault = scrvusd_vault.previewRedeem(scrvusd_token.balanceOf(vault.address))
+
+    # After withdrawing the LT shares, no crvUSD would be required,
+    # so all crvUSD should become withdrawable
+    assert withdrawable > 0, "Should have some withdrawable crvUSD"
+    # withdrawable should be approximately all the crvUSD in the vault (since position is small)
+    assert withdrawable <= crvusd_in_vault, "Withdrawable should not exceed available crvUSD"
+
+    # Step 4: Actually withdraw that amount of crvUSD
+    # First, withdraw the LT shares with withdraw_stablecoins=True
+    crvusd_balance_before = crvusd_token.balanceOf(account)
+
+    with boa.env.prank(account):
+        vault.withdraw(pool_id, lt_shares, 0, False, account, True)
+
+    crvusd_balance_after = crvusd_token.balanceOf(account)
+    crvusd_received = crvusd_balance_after - crvusd_balance_before
+
+    # The crvUSD received should be approximately equal to withdrawable
+    # Allow some tolerance for rounding and vault mechanics
+    assert abs(crvusd_received - withdrawable) <= withdrawable // 100 + 10, \
+        f"Received {crvusd_received}, expected ~{withdrawable}"
+
+    # Verify vault state after withdrawal
+    assert vault.required_crvusd() == 0, "No crvUSD should be required after full withdrawal"
