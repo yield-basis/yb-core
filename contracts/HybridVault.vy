@@ -42,36 +42,22 @@ interface IERC4626:
     def preview_claim(reward: IERC20, user: address) -> uint256: view
 
 interface CurveCryptoPool:
-    def price_scale() -> uint256: view
     def price_oracle() -> uint256: view
-
-interface PriceOracle:
-    def price_w() -> uint256: nonpayable
-    def price() -> uint256: view
 
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256) -> uint256: nonpayable
     def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
     def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
-    def agg() -> PriceOracle: view
     def balanceOf(user: address) -> uint256: view
     def approve(_for: address, amount: uint256) -> bool: nonpayable
     def totalSupply() -> uint256: view
     def liquidity() -> LiquidityValues: view
     def stablecoin_allocation() -> uint256: view
-    def stablecoin_allocated() -> uint256: view
-    def allocate_stablecoins(limit: uint256): nonpayable
 
 interface AMM:
-    def get_debt() -> uint256: view
-    def value_change(collateral_amount: uint256, borrowed_amount: uint256, is_deposit: bool) -> OraclizedValue: view
     def value_oracle() -> OraclizedValue: view
 
-interface GaugeController:
-    def is_killed(gauge: address) -> bool: view
-
 interface Factory:
-    def admin() -> address: view
     def markets(idx: uint256) -> Market: view
 
 interface VaultFactory:
