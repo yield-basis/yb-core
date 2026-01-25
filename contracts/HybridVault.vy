@@ -152,7 +152,10 @@ def set_crvusd_vault(new_vault: IERC4626):
 @view
 def _crvusd_available() -> uint256:
     if self.crvusd_vault != empty(IERC4626):
-        return staticcall self.crvusd_vault.previewRedeem(staticcall self.crvusd_vault.balanceOf(self))
+        shares: uint256 = staticcall self.crvusd_vault.balanceOf(self)
+        if shares == 0:
+            return 0
+        return staticcall self.crvusd_vault.previewRedeem(shares)
     else:
         return 0
 
@@ -187,7 +190,12 @@ def _required_crvusd() -> uint256:
     total_crvusd: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         pool: Market = staticcall FACTORY.markets(pool_id)
-        lt_shares: uint256 = staticcall pool.lt.balanceOf(self) + staticcall pool.staker.previewRedeem(staticcall pool.staker.balanceOf(self))
+        staker_balance: uint256 = staticcall pool.staker.balanceOf(self)
+        lt_shares: uint256 = staticcall pool.lt.balanceOf(self)
+        if staker_balance > 0:
+            lt_shares += staticcall pool.staker.previewRedeem(staker_balance)
+        if lt_shares == 0:
+            continue
         lt_total: uint256 = staticcall pool.lt.totalSupply()
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
         crvusd_amount: uint256 = (staticcall pool.amm.value_oracle()).value
