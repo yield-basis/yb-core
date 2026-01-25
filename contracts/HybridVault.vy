@@ -316,7 +316,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
-    assert market.lt.address != empty(address)
+    assert market.lt.address != empty(address), "Bad pool_id"
     if not self.pool_approved[pool_id]:
         assert extcall market.asset_token.approve(market.lt.address, max_value(uint256), default_return_value=True)
         extcall market.lt.approve(market.staker.address, max_value(uint256))
@@ -373,7 +373,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
-    assert market.lt.address != empty(address)
+    assert market.lt.address != empty(address), "Bad pool_id"
 
     required_before: uint256 = self._required_crvusd()
 
@@ -409,7 +409,7 @@ def stake(pool_id: uint256, pool_shares: uint256) -> uint256:
     """
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
-    assert market.lt.address != empty(address)
+    assert market.lt.address != empty(address), "Bad pool_id"
     return extcall market.staker.deposit(pool_shares, self)
 
 
@@ -423,7 +423,7 @@ def unstake(pool_id: uint256, gauge_shares: uint256) -> uint256:
     """
     assert self.owner == msg.sender, "Access"
     market: Market = staticcall FACTORY.markets(pool_id)
-    assert market.lt.address != empty(address)
+    assert market.lt.address != empty(address), "Bad pool_id"
     return extcall market.staker.redeem(gauge_shares, self, self)
 
 
