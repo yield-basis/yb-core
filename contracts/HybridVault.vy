@@ -126,7 +126,7 @@ def set_personal_limit(pool_id: uint256, limit: uint256):
     """
     @notice Set a personal pool limit for this vault
     @param pool_id The market pool identifier
-    @param limit The personal limit to set (actual limit will be max of this and global pool limit)
+    @param limit The personal limit to set (added to the global pool limit)
     """
     assert msg.sender == staticcall VAULT_FACTORY.ADMIN(), "Only admin"
     self.personal_limit[pool_id] = limit
@@ -174,7 +174,7 @@ def _pool_limits(pool_id: uint256) -> uint256:
 def pool_limits(pool_id: uint256) -> uint256:
     """
     @notice Get the effective pool limit for a specific market
-    @dev Returns the maximum of personal limit and global factory limit
+    @dev Returns the sum of personal limit and global factory limit
     @param pool_id The market pool identifier
     @return The effective pool limit in crvUSD value
     """
