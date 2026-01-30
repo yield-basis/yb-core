@@ -86,7 +86,7 @@ used_vaults: public(DynArray[uint256, MAX_VAULTS])
 
 pool_approved: HashMap[uint256, bool]
 token_in_use: HashMap[address, bool]
-stablecoin_allocation: public(uint256)
+stablecoin_allocation: public(HashMap[uint256, uint256])
 personal_limit: public(HashMap[uint256, uint256])
 
 
@@ -349,7 +349,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     # Reduce cap to what it should be
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
-    self.stablecoin_allocation += 2 * additional_crvusd
+    self.stablecoin_allocation[pool_id] += 2 * additional_crvusd
 
     if not stake:
         return lt_shares
@@ -390,10 +390,11 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
         else:
             self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
 
+    # XXX TODO check for possible issues when value changes b/w deposit and withdrawal
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation)
+    reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
     self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-    self.stablecoin_allocation -= reduction
+    self.stablecoin_allocation[pool_id] -= reduction
 
     return assets
 
