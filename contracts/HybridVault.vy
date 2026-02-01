@@ -398,6 +398,9 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     self._allocate_stablecoins(market.lt, previous_allocation - reduction)
     self.stablecoin_allocation[pool_id] -= reduction
 
+    if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
+        self._remove_from_used(pool_id)
+
     return assets
 
 
