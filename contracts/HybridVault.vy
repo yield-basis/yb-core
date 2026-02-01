@@ -207,12 +207,11 @@ def _required_crvusd() -> uint256:
 @internal
 @view
 def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (uint256, uint256):
-    # Only works when lt_supply > 0
-    # Also probably make ceil div?
     lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
     lt_supply: uint256 = staticcall lt.totalSupply()
+    liquidity: LiquidityValues = staticcall lt.liquidity()
     value_in_amm: uint256 = (staticcall amm.value_oracle()).value
-    return value_in_amm, value_in_amm * lt_shares // lt_supply
+    return value_in_amm, value_in_amm * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_supply
 
 
 @external
@@ -323,6 +322,9 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
         self.pool_approved[pool_id] = True
         self.token_in_use[market.lt.address] = True
         self.token_in_use[market.staker.address] = True
+
+    # Trigger checkpoint_staker_rebase() by staking 0 tokens
+    extcall market.staker.deposit(0, self)
 
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
