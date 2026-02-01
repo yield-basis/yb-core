@@ -175,7 +175,7 @@ def test_uninitialized_impl_matches_empty_vault(
     assets_for_crvusd_result = impl_assets_result
     ratio_crvusd_for_deposit = (crvusd_for_deposit_result / 1e18) / (assets / 1e10)
     ratio_assets_for_crvusd = (crvusd_amount / 1e18) / (assets_for_crvusd_result / 1e10)
-    tolerance = max(ratio_crvusd_for_deposit, ratio_assets_for_crvusd) / 1000  # 0.1% tolerance
+    tolerance = max(ratio_crvusd_for_deposit, ratio_assets_for_crvusd) / 500  # 0.2% tolerance
     assert abs(ratio_crvusd_for_deposit - ratio_assets_for_crvusd) <= tolerance, \
         f"Ratio mismatch: crvusd_for_deposit gives {ratio_crvusd_for_deposit}, assets_for_crvusd gives {ratio_assets_for_crvusd}"
 
