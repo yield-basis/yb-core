@@ -67,3 +67,7 @@ Fork tests in `tests_forked/` use `boa.fork(NETWORK)` with RPC URLs from `tests_
 - Vyper 0.4.3 syntax
 - No blank lines between imports
 - flake8 with relaxed line length (160 chars)
+
+## Git Commits
+
+When creating git commits, use "Assisted-by: Claude <noreply@anthropic.com>" instead of "Co-Authored-By" in the commit message trailer.
