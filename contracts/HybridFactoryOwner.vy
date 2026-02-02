@@ -15,6 +15,10 @@ interface Factory:
     def set_fee_receiver(new_fee_receiver: address): nonpayable
     def set_implementations(amm: address, lt: address, virtual_pool: address, price_oracle: address, staker: address): nonpayable
     def set_min_admin_fee(new_min_admin_fee: uint256): nonpayable
+    def fill_staker_vpool(i: uint256): nonpayable
+    def set_allocator(allocator: address, amount: uint256): nonpayable
+    def set_agg(agg: address): nonpayable
+    def set_flash(flash: address): nonpayable
     def STABLECOIN() -> IERC20: view
 
 interface PriceOracle:
@@ -36,6 +40,7 @@ interface LT:
     def amm() -> AMM: view
     def stablecoin_allocated() -> uint256: view
     def set_killed(is_killed: bool): nonpayable
+    def distribute_borrower_fees(discount: uint256): nonpayable
     def CRYPTOPOOL() -> Cryptopool: view
     def pricePerShare() -> uint256: view
 
@@ -242,3 +247,57 @@ def set_limit_setter(setter: address, enabled: bool):
     assert msg.sender == ADMIN, "Access"
     self.limit_setters[setter] = enabled
     log SetLimitSetter(setter=setter, enabled=enabled)
+
+
+@external
+def lt_distribute_borrower_fees(lt: LT, discount: uint256):
+    """
+    @notice Distribute borrower fees for a specific LT market with a custom discount
+    @param lt Address of the LT contract
+    @param discount Discount value (only admin can set non-default)
+    """
+    assert msg.sender == ADMIN, "Access"
+    extcall lt.distribute_borrower_fees(discount)
+
+
+## Additional Factory methods
+
+@external
+def fill_staker_vpool(i: uint256):
+    """
+    @notice Set staker and vpool for market i in case they were set or changed in the implementations
+    @param i Market index
+    """
+    assert msg.sender == ADMIN, "Access"
+    extcall FACTORY.fill_staker_vpool(i)
+
+
+@external
+def set_allocator(allocator: address, amount: uint256):
+    """
+    @notice Add allocator of stablecoins and take coins from it
+    @param allocator Address of the allocator
+    @param amount Amount to allocate
+    """
+    assert msg.sender == ADMIN, "Access"
+    extcall FACTORY.set_allocator(allocator, amount)
+
+
+@external
+def set_agg(agg: address):
+    """
+    @notice Set or change stablecoin price aggregator in the factory
+    @param agg Address of the new aggregator
+    """
+    assert msg.sender == ADMIN, "Access"
+    extcall FACTORY.set_agg(agg)
+
+
+@external
+def set_flash(flash: address):
+    """
+    @notice Set or change stablecoin flash lender implementation in the factory
+    @param flash Address of the flash lender
+    """
+    assert msg.sender == ADMIN, "Access"
+    extcall FACTORY.set_flash(flash)
