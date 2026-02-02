@@ -48,11 +48,13 @@ interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256) -> uint256: nonpayable
     def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
     def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
+    def emergency_withdraw(shares: uint256, receiver: address, owner: address) -> (uint256, int256): nonpayable
     def balanceOf(user: address) -> uint256: view
     def approve(_for: address, amount: uint256) -> bool: nonpayable
     def totalSupply() -> uint256: view
     def liquidity() -> LiquidityValues: view
     def stablecoin_allocation() -> uint256: view
+    def is_killed() -> bool: view
 
 interface AMM:
     def value_oracle() -> OraclizedValue: view
@@ -386,23 +388,77 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     required_after: uint256 = self._required_crvusd()
 
-    if required_before > required_after and withdraw_stablecoins:
-        if required_after > 0:
-            self._withdraw_crvusd(self._downscale(required_before - required_after), receiver)
-        else:
-            self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
+    if required_before > required_after:
+        if withdraw_stablecoins:
+            if required_after > 0:
+                self._withdraw_crvusd(self._downscale(required_before - required_after), receiver)
+            else:
+                self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
 
-    # XXX TODO check for possible issues when value changes b/w deposit and withdrawal
-    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
-    self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-    self.stablecoin_allocation[pool_id] -= reduction
+        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+        reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+        self.stablecoin_allocation[pool_id] -= reduction
 
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
 
     return assets
 
+
+
+@external
+def emergency_withdraw(pool_id: uint256, shares: uint256):
+    """
+    @notice Emergency withdraw from a killed YB market
+    @dev Handles negative stables_to_return by redeeming crvUSD from the backing vault.
+         Unstake LT tokens before calling this function if needed.
+    @param pool_id The market pool identifier
+    @param shares Amount of LT shares to withdraw
+    """
+    assert self.owner == msg.sender, "Access"
+
+    market: Market = staticcall FACTORY.markets(pool_id)
+    assert market.lt.address != empty(address), "Bad pool_id"
+    assert staticcall market.lt.is_killed(), "Not killed"
+    assert shares > 0, "Zero shares"
+
+    required_before: uint256 = self._required_crvusd()
+
+    # Redeem all crvUSD from backing vault to cover potential debt repayment
+    crvusd_vault: IERC4626 = self.crvusd_vault
+    crvusd_shares: uint256 = staticcall crvusd_vault.balanceOf(self)
+    if crvusd_shares > 0:
+        extcall crvusd_vault.redeem(crvusd_shares, self, self)
+
+    # Approve LT to pull crvUSD (for negative stables_to_return)
+    extcall CRVUSD.approve(market.lt.address, max_value(uint256))
+
+    assets: uint256 = (extcall market.lt.emergency_withdraw(shares, self, self))[0]
+
+    # Reset crvUSD approval
+    extcall CRVUSD.approve(market.lt.address, 0)
+
+    # Re-deposit remaining crvUSD back to the backing vault
+    remaining_crvusd: uint256 = staticcall CRVUSD.balanceOf(self)
+    if remaining_crvusd > 0 and crvusd_vault.address != empty(address):
+        extcall crvusd_vault.deposit(remaining_crvusd, self)
+
+    # Send assets to owner
+    _owner: address = self.owner
+    if assets > 0:
+        assert extcall market.asset_token.transfer(_owner, assets, default_return_value=True)
+
+    # Reduce stablecoin allocation
+    required_after: uint256 = self._required_crvusd()
+    if required_before > required_after:
+        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+        reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+        self.stablecoin_allocation[pool_id] -= reduction
+
+    if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
+        self._remove_from_used(pool_id)
 
 
 @external
