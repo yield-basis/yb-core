@@ -15,7 +15,7 @@ struct Market:
     cryptopool: CurveCryptoPool
     amm: AMM
     lt: LT
-    price_oracle: address
+    price_oracle: PriceOracle
     virtual_pool: address
     staker: IERC4626
 
@@ -43,6 +43,7 @@ interface IERC4626:
 
 interface CurveCryptoPool:
     def price_oracle() -> uint256: view
+    def calc_token_amount(amounts: uint256[2], deposit: bool) -> uint256: view
 
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256) -> uint256: nonpayable
@@ -58,6 +59,8 @@ interface LT:
 
 interface AMM:
     def value_oracle() -> OraclizedValue: view
+    def collateral_amount() -> uint256: view
+    def get_debt() -> uint256: view
 
 interface Factory:
     def markets(idx: uint256) -> Market: view
@@ -69,6 +72,9 @@ interface VaultFactory:
     def allowed_crvusd_vaults(vault: address) -> bool: view
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
 
+interface PriceOracle:
+    def price() -> uint256: view
+
 
 event SetPersonalLimit:
     pool_id: uint256
@@ -77,6 +83,9 @@ event SetPersonalLimit:
 event SetCrvusdVault:
     vault: IERC4626
 
+
+AMM_MIN_SAFE_DEBT: public(immutable(uint256))
+AMM_MAX_SAFE_DEBT: public(immutable(uint256))
 
 MAX_VAULTS: public(constant(uint256)) = 16
 FACTORY: public(immutable(Factory))
@@ -105,6 +114,14 @@ def __init__(factory: Factory, crvusd: IERC20, vault_factory: VaultFactory):
     FACTORY = factory
     CRVUSD = crvusd
     VAULT_FACTORY = vault_factory
+
+    leverage: uint256 = 2 * 10**18
+    denominator: uint256 = 2 * leverage - 10**18
+    lev_ratio: uint256 = leverage**2 * 10**18 // denominator**2
+    # 1 / (4 * L**2)
+    AMM_MIN_SAFE_DEBT = 10**54 // (4 * leverage**2)
+    # (2 * L - 1)**2 / (4 * L**2) - 1 / (8 * L**2)
+    AMM_MAX_SAFE_DEBT = denominator**2 * 10**18 // (4 * leverage**2) - 10**54 // (8 * leverage**2)
 
 
 @external
@@ -174,6 +191,51 @@ def _pool_limits(pool_id: uint256) -> uint256:
     return self.personal_limit[pool_id] + staticcall VAULT_FACTORY.pool_limits(pool_id)
 
 
+@internal
+@view
+def _check_safe_limits(market: Market, assets: uint256, debt: uint256) -> bool:
+    """
+    @notice Check whether the AMM state would be within safe limits after a deposit
+    @param market The market containing the AMM to check
+    @param assets Amount of assets to deposit (0 to check current state)
+    @param debt Amount of debt to take on (0 to check current state)
+    @return True if within safe limits, False otherwise
+    """
+    # Calculate LP tokens from assets and debt
+    lp_tokens: uint256 = 0
+    if assets > 0 or debt > 0:
+        lp_tokens = staticcall market.cryptopool.calc_token_amount([debt, assets], True)
+
+    # Get current state and add new values
+    collateral: uint256 = staticcall market.amm.collateral_amount() + lp_tokens
+    total_debt: uint256 = staticcall market.amm.get_debt() + debt
+    p_o: uint256 = staticcall market.price_oracle.price()
+
+    # Collateral value in stablecoin terms (collateral precision is 10**18 for LT tokens)
+    coll_value: uint256 = p_o * collateral // 10**18
+
+    # Check safe limits
+    if total_debt < coll_value * AMM_MIN_SAFE_DEBT // 10**18:
+        return False
+    if total_debt > coll_value * AMM_MAX_SAFE_DEBT // 10**18:
+        return False
+    return True
+
+
+@external
+@view
+def safe_to_deposit(pool_id: uint256, assets: uint256, debt: uint256) -> bool:
+    """
+    @notice Check whether it is safe to deposit into or swap in the AMM for a given market
+    @dev Returns False if the AMM's debt/collateral ratio would be outside safe bounds after the deposit
+    @param pool_id The market pool identifier
+    @param assets Amount of assets to deposit (0 to check current state)
+    @param debt Amount of debt to take on (0 to check current state)
+    @return True if the AMM would be within safe limits, False otherwise
+    """
+    return self._check_safe_limits(staticcall FACTORY.markets(pool_id), assets, debt)
+
+
 @external
 @view
 def pool_limits(pool_id: uint256) -> uint256:
@@ -208,11 +270,14 @@ def _required_crvusd() -> uint256:
 
 @internal
 @view
-def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (uint256, uint256):
-    lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
-    lt_supply: uint256 = staticcall lt.totalSupply()
-    liquidity: LiquidityValues = staticcall lt.liquidity()
-    value_in_amm: uint256 = (staticcall amm.value_oracle()).value
+def _required_crvusd_for(market: Market, assets: uint256, debt: uint256) -> (uint256, uint256):
+    # Only works when lt_supply > 0
+    # Also probably make ceil div?
+    assert self._check_safe_limits(market, assets, debt), "Unsafe deposit"
+    lt_shares: uint256 = staticcall market.lt.preview_deposit(assets, debt, False)
+    lt_supply: uint256 = staticcall market.lt.totalSupply()
+    liquidity: LiquidityValues = staticcall market.lt.liquidity()
+    value_in_amm: uint256 = (staticcall market.amm.value_oracle()).value
     return value_in_amm, value_in_amm * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_supply
 
 
@@ -259,7 +324,7 @@ def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) ->
     @return The downscaled crvUSD amount required for this deposit
     """
     market: Market = staticcall FACTORY.markets(pool_id)
-    return self._downscale(self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
+    return self._downscale(self._required_crvusd_for(market, assets, debt)[1])
 
 
 @external
@@ -274,7 +339,7 @@ def crvusd_for_deposit(pool_id: uint256, assets: uint256, debt: uint256) -> uint
     """
     market: Market = staticcall FACTORY.markets(pool_id)
     available: uint256 = self._crvusd_available()
-    required: uint256 = self._downscale(self._required_crvusd() + self._required_crvusd_for(market.lt, market.amm, assets, debt)[1])
+    required: uint256 = self._downscale(self._required_crvusd() + self._required_crvusd_for(market, assets, debt)[1])
     return required - min(required, available)
 
 
@@ -330,7 +395,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
 
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
-    pool_value, additional_crvusd = self._required_crvusd_for(market.lt, market.amm, assets, debt)
+    pool_value, additional_crvusd = self._required_crvusd_for(market, assets, debt)
     crvusd_available: uint256 = self._crvusd_available()
     crvusd_required: uint256 = self._downscale(self._required_crvusd() + additional_crvusd)
     if crvusd_available < crvusd_required:
@@ -626,7 +691,7 @@ def assets_for_crvusd(pool_id: uint256, crvusd_amount: uint256) -> uint256:
     test_assets: uint256 = 10**asset_decimals
 
     # Get crvusd required for test_assets
-    crvusd_for_test: uint256 = self._downscale(self._required_crvusd_for(market.lt, market.amm, test_assets, test_debt)[1])
+    crvusd_for_test: uint256 = self._downscale(self._required_crvusd_for(market, test_assets, test_debt)[1])
 
     # Scale to get assets for effective_crvusd
     # crvusd_for_test / test_assets = effective_crvusd / assets
