@@ -271,7 +271,6 @@ def _required_crvusd() -> uint256:
 @internal
 @view
 def _required_crvusd_for(market: Market, assets: uint256, debt: uint256) -> (uint256, uint256):
-    assert self._check_safe_limits(market, assets, debt), "Unsafe deposit"
     lt_shares: uint256 = staticcall market.lt.preview_deposit(assets, debt, False)
     lt_supply: uint256 = staticcall market.lt.totalSupply()
     liquidity: LiquidityValues = staticcall market.lt.liquidity()
