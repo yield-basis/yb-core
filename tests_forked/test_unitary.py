@@ -1,4 +1,6 @@
 import boa
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests_forked.conftest import WBTC, SCRVUSD, CRVUSD
 
 
@@ -538,3 +540,40 @@ def test_withdrawable_crvusd_for(
 
     # Verify vault state after withdrawal
     assert vault.required_crvusd() == 0, "No crvUSD should be required after full withdrawal"
+
+
+@settings(max_examples=20, deadline=None)
+@given(
+    crvusd_amount=st.integers(min_value=100 * 10**18, max_value=1_000_000 * 10**18)
+)
+def test_assets_for_crvusd_roundtrip(
+    vault, factory, twocrypto, erc20, crvusd_amount
+):
+    """
+    Test that assets_for_crvusd and raw_required_crvusd_for are consistent:
+    converting crvusd_amount -> assets -> raw_required_crvusd should return
+    approximately the original crvusd_amount.
+    """
+    pool_id = 3
+
+    # Get market info
+    market = factory.markets(pool_id)
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_oracle()
+    asset_decimals = erc20.at(market.asset_token).decimals()
+
+    # Step 1: Convert crvusd_amount to assets
+    assets = vault.assets_for_crvusd(pool_id, crvusd_amount)
+    if assets == 0:
+        return
+
+    # Step 2: Compute debt the same way the contract does: debt = assets * price_oracle / 10**decimals
+    debt = assets * price // 10**asset_decimals
+
+    # Step 3: Convert back to crvusd via raw_required_crvusd_for
+    crvusd_roundtrip = vault.raw_required_crvusd_for(pool_id, assets, debt)
+
+    # Step 4: Check round-trip consistency (0.01% tolerance)
+    tolerance = crvusd_amount // 10000 + 1
+    assert abs(crvusd_roundtrip - crvusd_amount) <= tolerance, \
+        f"Round-trip mismatch: {crvusd_amount} -> assets={assets} -> {crvusd_roundtrip} (diff={abs(crvusd_roundtrip - crvusd_amount)})"
