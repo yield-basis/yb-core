@@ -8,12 +8,13 @@ WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
 CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
 SCRVUSD = "0x0655977FEb2f289A4aB78af67BAB0d17aAb84367"
+FORK_BLOCK = 24322443  # January 28, 2026
 
 
 @pytest.fixture(scope="module", autouse=True)
 def forked_env():
     """Fork the network defined in networks.py for all tests in this module."""
-    with boa.fork(NETWORK):
+    with boa.fork(NETWORK, block_identifier=FORK_BLOCK):
         yield
 
 
