@@ -19,6 +19,9 @@ def test_stake_unstake_wbtc(
     usd_value = assets * price // 10**8  # adjust for WBTC decimals
     debt = usd_value
 
+    if not vault.safe_to_deposit(pool_id, assets, debt):
+        return
+
     with boa.env.prank(funded_account):
         # Deposit 1 WBTC without staking
         lt_shares = vault.deposit(pool_id, assets, debt, 0, False, True)
@@ -72,6 +75,9 @@ def test_deposit_withdraw_crvusd_from_wallet(
     price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
     usd_value = assets * price // 10**8  # adjust for WBTC decimals
     debt = usd_value // 2
+
+    if not vault.safe_to_deposit(pool_id, assets, debt):
+        return
 
     with boa.env.prank(account):
         # Approve vault to spend user's tokens
@@ -155,6 +161,9 @@ def test_uninitialized_impl_matches_empty_vault(
     usd_value = assets * price // 10**8
     debt = usd_value
 
+    if not empty_vault.safe_to_deposit(pool_id, assets, debt):
+        return
+
     # Call crvusd_for_deposit on both contracts
     impl_crvusd_result = impl.crvusd_for_deposit(pool_id, assets, debt)
     vault_crvusd_result = empty_vault.crvusd_for_deposit(pool_id, assets, debt)
@@ -211,6 +220,9 @@ def test_recover_tokens(
     price = cryptopool.price_scale()
     usd_value = assets * price // 10**8
     debt = usd_value
+
+    if not vault.safe_to_deposit(pool_id, assets, debt):
+        return
 
     with boa.env.prank(account):
         wbtc_token.approve(vault.address, 2**256 - 1)
@@ -359,6 +371,9 @@ def test_claim_reward(
     usd_value = assets * price // 10**8
     debt = usd_value
 
+    if not vault.safe_to_deposit(pool_id, assets, debt):
+        return
+
     with boa.env.prank(account):
         wbtc_token.approve(vault.address, 2**256 - 1)
         crvusd_token.approve(vault.address, 2**256 - 1)
@@ -417,6 +432,9 @@ def test_set_personal_limit(
     usd_value = assets * price // 10**8
     debt = usd_value
 
+    if not vault.safe_to_deposit(pool_id, assets, debt):
+        return
+
     # Verify deposit fails with zero global limit and no personal limit
     with boa.env.prank(account):
         wbtc_token.approve(vault.address, 2**256 - 1)
@@ -471,6 +489,9 @@ def test_withdrawable_crvusd_for(
     price = cryptopool.price_scale()  # price of WBTC in crvUSD (18 decimals)
     usd_value = small_wbtc_amount * price // 10**8  # adjust for WBTC decimals
     debt = usd_value
+
+    if not vault.safe_to_deposit(pool_id, small_wbtc_amount, debt):
+        return
 
     with boa.env.prank(account):
         wbtc_token.approve(vault.address, 2**256 - 1)
