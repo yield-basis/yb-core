@@ -272,7 +272,17 @@ def _required_crvusd() -> uint256:
             continue
         lt_total: uint256 = staticcall pool.lt.totalSupply()
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
-        crvusd_amount: uint256 = (staticcall pool.amm.value_oracle()).value
+        success: bool = False
+        res: Bytes[64] = empty(Bytes[64])
+        success, res = raw_call(
+            pool.amm.address,
+            method_id("value_oracle()"),
+            max_outsize=64,
+            is_static_call=True,
+            revert_on_failure=False)
+        if not success:
+            return max_value(uint256)
+        crvusd_amount: uint256 = abi_decode(res, (uint256, uint256))[1]
         crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
         total_crvusd += crvusd_amount
     return total_crvusd
@@ -522,12 +532,19 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
         assert extcall market.asset_token.transfer(_owner, assets, default_return_value=True)
 
     # Reduce stablecoin allocation
-    required_after: uint256 = self._required_crvusd()
-    if required_before > required_after:
-        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-        reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+    if required_before == max_value(uint256):
+        # value_oracle() reverted - reduce allocation proportionally to shares withdrawn vs pool supply
+        lt_supply: uint256 = staticcall market.lt.totalSupply()
+        reduction: uint256 = previous_allocation * shares // lt_supply
         self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-        self.stablecoin_allocation[pool_id] -= reduction
+        self.stablecoin_allocation[pool_id] -= min(reduction, self.stablecoin_allocation[pool_id])
+    else:
+        required_after: uint256 = self._required_crvusd()
+        if required_before > required_after:
+            reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+            self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+            self.stablecoin_allocation[pool_id] -= reduction
 
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
