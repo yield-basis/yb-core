@@ -370,6 +370,13 @@ def _add_to_used(pool_id: uint256):
 
 @internal
 def _remove_from_used(pool_id: uint256):
+    remaining_allocation: uint256 = self.stablecoin_allocation[pool_id]
+    if remaining_allocation > 0:
+        market: Market = staticcall FACTORY.markets(pool_id)
+        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+        self._allocate_stablecoins(market.lt, previous_allocation - remaining_allocation)
+        self.stablecoin_allocation[pool_id] = 0
+
     used_vaults: DynArray[uint256, MAX_VAULTS] = self.used_vaults
     new_used_vaults: DynArray[uint256, MAX_VAULTS] = empty(DynArray[uint256, MAX_VAULTS])
     for p: uint256 in used_vaults:
