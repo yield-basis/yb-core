@@ -153,15 +153,25 @@ def set_personal_limit(pool_id: uint256, limit: uint256):
 
 
 @external
-def set_crvusd_vault(new_vault: IERC4626):
+def set_crvusd_vault(new_vault: IERC4626, redeem: bool = True):
     """
     @notice Change the crvUSD vault used by this HybridVault
-    @dev Only callable by owner when current vault has no deposits
+    @dev Only callable by owner when there are no active positions.
+         Transfers old vault tokens back to the owner (redeemed as crvUSD by default).
     @param new_vault The new crvUSD vault to use (must be in allowed list)
+    @param redeem If True, redeem old vault shares for crvUSD; if False, transfer vault shares directly
     """
     assert msg.sender == self.owner, "Only owner"
     assert staticcall VAULT_FACTORY.allowed_crvusd_vaults(new_vault.address), "Vault not allowed"
-    assert staticcall self.crvusd_vault.balanceOf(self) == 0, "Current vault not empty"
+    assert len(self.used_vaults) == 0, "Has active positions"
+    old_vault: IERC4626 = self.crvusd_vault
+    if old_vault != empty(IERC4626):
+        shares: uint256 = staticcall old_vault.balanceOf(self)
+        if shares > 0:
+            if redeem:
+                extcall old_vault.redeem(shares, msg.sender, self)
+            else:
+                extcall old_vault.transfer(msg.sender, shares)
     self.crvusd_vault = new_vault
     extcall CRVUSD.approve(new_vault.address, max_value(uint256))
     log SetCrvusdVault(vault=new_vault)
