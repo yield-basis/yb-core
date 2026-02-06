@@ -596,7 +596,16 @@ def preview_claim_reward(token: IERC20) -> uint256:
     total: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         market: Market = staticcall FACTORY.markets(pool_id)
-        total += staticcall market.staker.preview_claim(token, self)
+        success: bool = False
+        res: Bytes[32] = empty(Bytes[32])
+        success, res = raw_call(
+            market.staker.address,
+            abi_encode(token.address, self, method_id=method_id("preview_claim(address,address)")),
+            max_outsize=32,
+            is_static_call=True,
+            revert_on_failure=False)
+        if success:
+            total += convert(res, uint256)
     return total
 
 
@@ -610,7 +619,15 @@ def claim_reward(token: IERC20) -> uint256:
     total: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         market: Market = staticcall FACTORY.markets(pool_id)
-        total += extcall market.staker.claim(token, self)
+        success: bool = False
+        res: Bytes[32] = empty(Bytes[32])
+        success, res = raw_call(
+            market.staker.address,
+            abi_encode(token.address, self, method_id=method_id("claim(address,address)")),
+            max_outsize=32,
+            revert_on_failure=False)
+        if success:
+            total += convert(res, uint256)
     if total > 0:
         assert extcall token.transfer(self.owner, total, default_return_value=True)
     return total
