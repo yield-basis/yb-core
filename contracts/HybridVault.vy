@@ -271,7 +271,11 @@ def _required_crvusd() -> uint256:
         if lt_shares == 0:
             continue
         lt_total: uint256 = staticcall pool.lt.totalSupply()
+        if lt_total == 0:
+            continue
         liquidity: LiquidityValues = staticcall pool.lt.liquidity()
+        if liquidity.total == 0:
+            continue
         success: bool = False
         res: Bytes[64] = empty(Bytes[64])
         success, res = raw_call(
