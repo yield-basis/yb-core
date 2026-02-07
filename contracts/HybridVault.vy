@@ -1,8 +1,8 @@
 # @version 0.4.3
 # pragma nonreentrancy on
 """
-@title HybridVaultFactory
-@notice Factory for vaults which keep both YB vaults and scrvUSD
+@title HybridVault
+@notice Vault that combines YB market positions with a crvUSD vault
 @author Yield Basis
 @license GNU Affero General Public License v3.0
 """
@@ -105,7 +105,7 @@ personal_limit: public(HashMap[uint256, uint256])
 def __init__(factory: Factory, crvusd: IERC20, vault_factory: VaultFactory):
     """
     @notice Initialize the HybridVault implementation contract
-    @dev Sets owner to 0x01 to prevent initialization of the factory itself
+    @dev Sets owner to 0x01 to prevent initialization of the implementation itself
     @param factory The YB factory contract address
     @param crvusd The crvUSD token address
     @param vault_factory The HybridVaultFactory contract address
@@ -236,7 +236,7 @@ def _check_safe_limits(market: Market, assets: uint256, debt: uint256) -> bool:
 @view
 def safe_to_deposit(pool_id: uint256, assets: uint256, debt: uint256) -> bool:
     """
-    @notice Check whether it is safe to deposit into or swap in the AMM for a given market
+    @notice Check whether it is safe to deposit into a given market
     @dev Returns False if the AMM's debt/collateral ratio would be outside safe bounds after the deposit
     @param pool_id The market pool identifier
     @param assets Amount of assets to deposit (0 to check current state)
@@ -655,9 +655,9 @@ def _deposit_crvusd(assets: uint256) -> uint256:
 @external
 def deposit_crvusd(assets: uint256) -> uint256:
     """
-    @notice Deposit crvUSD into scrvUSD vault to back positions
+    @notice Deposit crvUSD into the crvUSD vault
     @param assets Amount of crvUSD to deposit
-    @return Amount of scrvUSD shares received
+    @return Amount of crvUSD vault shares received
     """
     return self._deposit_crvusd(assets)
 
@@ -682,9 +682,9 @@ def _redeem_crvusd(shares: uint256, receiver: address) -> uint256:
 @external
 def redeem_crvusd(shares: uint256) -> uint256:
     """
-    @notice Redeem scrvUSD shares for crvUSD (owner only)
+    @notice Redeem crvUSD vault shares for crvUSD (owner only)
     @dev Reverts if withdrawal would leave insufficient backing
-    @param shares Amount of scrvUSD shares to redeem
+    @param shares Amount of crvUSD vault shares to redeem
     @return Amount of crvUSD withdrawn
     """
     assert self.owner == msg.sender, "Access"
@@ -694,8 +694,8 @@ def redeem_crvusd(shares: uint256) -> uint256:
 @external
 def deposit_scrvusd(shares: uint256):
     """
-    @notice Deposit scrvUSD shares directly into the vault
-    @param shares Amount of scrvUSD shares to transfer in
+    @notice Deposit crvUSD vault shares directly into the vault
+    @param shares Amount of crvUSD vault shares to transfer in
     """
     extcall self.crvusd_vault.transferFrom(msg.sender, self, shares)
 
@@ -703,9 +703,9 @@ def deposit_scrvusd(shares: uint256):
 @external
 def withdraw_scrvusd(shares: uint256):
     """
-    @notice Withdraw scrvUSD shares from the vault (owner only)
+    @notice Withdraw crvUSD vault shares from the vault (owner only)
     @dev Reverts if withdrawal would leave insufficient backing
-    @param shares Amount of scrvUSD shares to withdraw
+    @param shares Amount of crvUSD vault shares to withdraw
     """
     assert self.owner == msg.sender, "Access"
     extcall self.crvusd_vault.transfer(msg.sender, shares)
