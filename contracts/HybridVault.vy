@@ -460,7 +460,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
     """
     @notice Withdraw assets from a YB market
     @param pool_id The market pool identifier
-    @param shares LT shares (or staked shares if unstake=True) to withdraw
+    @param shares LT shares (or staked shares if unstake=True) to withdraw; max_value(uint256) to withdraw all
     @param min_assets Minimum assets to receive (slippage protection)
     @param unstake If True, unstake from gauge before withdrawing
     @param receiver Address to receive the withdrawn assets
@@ -512,7 +512,7 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
     @dev Handles negative stables_to_return by redeeming crvUSD from the backing vault.
          Unstake LT tokens before calling this function if needed.
     @param pool_id The market pool identifier
-    @param shares Amount of LT shares to withdraw
+    @param shares Amount of LT shares to withdraw; max_value(uint256) to withdraw all
     """
     assert self.owner == msg.sender, "Access"
 
