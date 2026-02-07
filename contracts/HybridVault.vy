@@ -476,7 +476,12 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     lt_shares: uint256 = shares
     if unstake:
-        lt_shares = extcall market.staker.redeem(shares, self, self)
+        staker_shares: uint256 = shares
+        if staker_shares == max_value(uint256):
+            staker_shares = staticcall market.staker.balanceOf(self)
+        lt_shares = extcall market.staker.redeem(staker_shares, self, self)
+    elif lt_shares == max_value(uint256):
+        lt_shares = staticcall market.lt.balanceOf(self)
     assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, receiver)
 
     required_after: uint256 = self._required_crvusd()
@@ -514,7 +519,11 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address), "Bad pool_id"
     assert staticcall market.lt.is_killed(), "Not killed"
-    assert shares > 0, "Zero shares"
+
+    lt_shares: uint256 = shares
+    if lt_shares == max_value(uint256):
+        lt_shares = staticcall market.lt.balanceOf(self)
+    assert lt_shares > 0, "Zero shares"
 
     required_before: uint256 = self._required_crvusd()
 
@@ -527,7 +536,7 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
     # Approve LT to pull crvUSD (for negative stables_to_return)
     extcall CRVUSD.approve(market.lt.address, max_value(uint256))
 
-    assets: uint256 = (extcall market.lt.emergency_withdraw(shares, self, self))[0]
+    assets: uint256 = (extcall market.lt.emergency_withdraw(lt_shares, self, self))[0]
 
     # Reset crvUSD approval
     extcall CRVUSD.approve(market.lt.address, 0)
@@ -547,7 +556,7 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
     if required_before == max_value(uint256):
         # value_oracle() reverted - reduce allocation proportionally to shares withdrawn vs pool supply
         lt_supply: uint256 = staticcall market.lt.totalSupply()
-        reduction: uint256 = previous_allocation * shares // lt_supply
+        reduction: uint256 = previous_allocation * lt_shares // lt_supply
         self._allocate_stablecoins(market.lt, previous_allocation - reduction)
         self.stablecoin_allocation[pool_id] -= min(reduction, self.stablecoin_allocation[pool_id])
     else:
