@@ -57,7 +57,7 @@ def __init__(factory: Factory, pool_ids: DynArray[uint256, 10], pool_limits: Dyn
     """
     FACTORY = factory
     ADMIN = staticcall (staticcall factory.admin()).ADMIN()
-    self.stablecoin_fraction = 4 * 10**17
+    self.stablecoin_fraction = 55 * 10**16
     for i: uint256 in range(10):
         if i >= len(pool_ids):
             break
