@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Deployed at: 0xdeb033832Bbd3ecE762d43338573D6aC3e85c338
+# Deployed at: 0xd3BFa85dc668Aab38121bE12D69dd180301dec25
 
 import boa
 import os
