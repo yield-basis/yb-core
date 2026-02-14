@@ -71,3 +71,16 @@ def check_timestamp_lt(expected: uint256):
     @param expected Value that block.timestamp must be less than
     """
     assert block.timestamp < expected, "Timestamp not less"
+
+
+last_called: public(HashMap[address, uint256])
+
+@external
+def check_called_after(min_delay: uint256):
+    """
+    @notice Record the current timestamp for msg.sender and revert if
+            the sender has not called this method at least min_delay seconds ago
+    @param min_delay Minimum number of seconds since the sender's previous call
+    """
+    assert block.timestamp >= self.last_called[msg.sender] + min_delay, "Too early"
+    self.last_called[msg.sender] = block.timestamp
