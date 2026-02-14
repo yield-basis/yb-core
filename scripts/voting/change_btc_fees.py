@@ -11,7 +11,7 @@ from getpass import getpass
 from networks import NETWORK
 from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
-from time import sleep
+from time import sleep, time
 from vyper.utils import method_id
 
 from boa.explorer import Etherscan
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     comparator = boa.load_partial('contracts/dao/CallComparator.vy').at(CALL_COMPARATOR)
     twocrypto_deployer = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
 
-    now = boa.eval('block.timestamp')
+    now = int(time())
     deadline_a = now + DEADLINE_A
     deadline_bcd = now + DEADLINE_BCD
 
