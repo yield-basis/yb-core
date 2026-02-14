@@ -85,3 +85,42 @@ if __name__ == '__main__':
             raise Exception("check_nonequal should have reverted")
         except boa.BoaError:
             print("check_nonequal correctly reverted for equal value")
+
+        # check_gt: totalSupply > 0
+        checker.check_gt(YB, selector, 0)
+        print("check_gt passed")
+
+        try:
+            checker.check_gt(YB, selector, total_supply)
+            raise Exception("check_gt should have reverted")
+        except boa.BoaError:
+            print("check_gt correctly reverted")
+
+        # check_lt: totalSupply < max
+        checker.check_lt(YB, selector, total_supply + 1)
+        print("check_lt passed")
+
+        try:
+            checker.check_lt(YB, selector, total_supply)
+            raise Exception("check_lt should have reverted")
+        except boa.BoaError:
+            print("check_lt correctly reverted")
+
+        # check_timestamp_gt/lt
+        checker.check_timestamp_gt(0)
+        print("check_timestamp_gt passed")
+
+        try:
+            checker.check_timestamp_gt(2**256 - 1)
+            raise Exception("check_timestamp_gt should have reverted")
+        except boa.BoaError:
+            print("check_timestamp_gt correctly reverted")
+
+        checker.check_timestamp_lt(2**256 - 1)
+        print("check_timestamp_lt passed")
+
+        try:
+            checker.check_timestamp_lt(0)
+            raise Exception("check_timestamp_lt should have reverted")
+        except boa.BoaError:
+            print("check_timestamp_lt correctly reverted")
