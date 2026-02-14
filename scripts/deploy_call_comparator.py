@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# Deployed at: 0xdeb033832Bbd3ecE762d43338573D6aC3e85c338
+
 import boa
 import os
 import json
@@ -13,7 +15,7 @@ from networks import NETWORK
 from networks import ETHERSCAN_API_KEY
 
 
-FORK = True
+FORK = False
 EXTRA_TIMEOUT = 10
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 YB = "0x01791F726B4103694969820be083196cC7c045fF"
