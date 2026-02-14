@@ -1,6 +1,6 @@
 # @version 0.4.3
 """
-@title EqualityChecker
+@title CallComparator
 @author Yield Basis
 @license MIT
 @notice Calls a view method by selector and asserts the result satisfies a comparison against an expected value

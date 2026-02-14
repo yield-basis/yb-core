@@ -52,7 +52,7 @@ if __name__ == '__main__':
         admin = account_load('yb-deployer')
         boa.env.add_account(admin)
 
-    checker = boa.load('contracts/dao/EqualityChecker.vy')
+    checker = boa.load('contracts/dao/CallComparator.vy')
     if not FORK:
         verify(checker, etherscan, wait=True)
 

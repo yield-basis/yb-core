@@ -4,7 +4,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def checker():
-    return boa.load('contracts/dao/EqualityChecker.vy')
+    return boa.load('contracts/dao/CallComparator.vy')
 
 
 @pytest.fixture(scope="module")
