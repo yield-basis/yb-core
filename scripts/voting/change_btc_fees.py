@@ -33,7 +33,7 @@ EXTRA_TIMEOUT = 10
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
 DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
-CALL_COMPARATOR = "0xdeb033832Bbd3ecE762d43338573D6aC3e85c338"
+CALL_COMPARATOR = "0xd3BFa85dc668Aab38121bE12D69dd180301dec25"
 
 USER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
@@ -125,6 +125,8 @@ if __name__ == '__main__':
     # --- Vote A: Set fee to 5% if timestamp < 3 weeks AND price_scale == current ---
     actions_a = []
     actions_a.append(Action(to=comparator.address, value=0,
+                            data=comparator.check_called_after.prepare_calldata(60)))
+    actions_a.append(Action(to=comparator.address, value=0,
                             data=comparator.check_timestamp_lt.prepare_calldata(deadline_a)))
     for m in market_data:
         actions_a.append(Action(to=comparator.address, value=0,
@@ -136,6 +138,8 @@ if __name__ == '__main__':
 
     # --- Vote B: Set fee to 3% if timestamp < 3.5 weeks AND price_scale != current AND fee == 5% ---
     actions_b = []
+    actions_b.append(Action(to=comparator.address, value=0,
+                            data=comparator.check_called_after.prepare_calldata(60)))
     actions_b.append(Action(to=comparator.address, value=0,
                             data=comparator.check_timestamp_lt.prepare_calldata(deadline_bcd)))
     for m in market_data:
@@ -151,6 +155,8 @@ if __name__ == '__main__':
     # --- Vote C: Set fee to 2% if timestamp < 3.5 weeks AND price_scale != current AND fee == 3% ---
     actions_c = []
     actions_c.append(Action(to=comparator.address, value=0,
+                            data=comparator.check_called_after.prepare_calldata(60)))
+    actions_c.append(Action(to=comparator.address, value=0,
                             data=comparator.check_timestamp_lt.prepare_calldata(deadline_bcd)))
     for m in market_data:
         actions_c.append(Action(to=comparator.address, value=0,
@@ -164,6 +170,8 @@ if __name__ == '__main__':
 
     # --- Vote D: Set fee to current if timestamp < 3.5 weeks AND price_scale != current AND fee == 2% ---
     actions_d = []
+    actions_d.append(Action(to=comparator.address, value=0,
+                            data=comparator.check_called_after.prepare_calldata(60)))
     actions_d.append(Action(to=comparator.address, value=0,
                             data=comparator.check_timestamp_lt.prepare_calldata(deadline_bcd)))
     for m in market_data:
