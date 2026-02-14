@@ -27,7 +27,7 @@ FEE_C = int(0.02 * 10**18)   # 2%
 DEADLINE_A = 3 * 7 * 86400       # 3 weeks from now
 DEADLINE_BCD = int(3.5 * 7 * 86400)  # 3.5 weeks from now
 
-FORK = True
+FORK = False
 EXTRA_TIMEOUT = 10
 
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
@@ -199,8 +199,13 @@ if __name__ == '__main__':
          'Guarded: only executes if price_scale changed, fee is 2%, and within 3.5 weeks.'),
     ]
 
-    for label, actions, title, summary in all_votes:
+    extra_accounts = ['yb-deployer-a', 'yb-deployer-b', 'yb-deployer-c']
+
+    for i, (label, actions, title, summary) in enumerate(all_votes):
         if not FORK:
+            if i > 0:
+                acc = account_load(extra_accounts[i - 1])
+                boa.env.add_account(acc, force_eoa=True)
             proposal_id = voting.createProposal(*Proposal(
                 metadata=pin_to_ipfs({
                     'title': title,
