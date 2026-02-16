@@ -506,19 +506,19 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
 
 @external
-def emergency_withdraw(pool_id: uint256, shares: uint256):
+def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bool = False):
     """
-    @notice Emergency withdraw from a killed YB market
+    @notice Emergency withdraw from a YB market
     @dev Handles negative stables_to_return by redeeming crvUSD from the backing vault.
          Unstake LT tokens before calling this function if needed.
     @param pool_id The market pool identifier
     @param shares Amount of LT shares to withdraw; max_value(uint256) to withdraw all
+    @param crvusd_from_wallet If True, pull necessary crvUSD from the caller instead of the backing vault
     """
     assert self.owner == msg.sender, "Access"
 
     market: Market = staticcall FACTORY.markets(pool_id)
     assert market.lt.address != empty(address), "Bad pool_id"
-    assert staticcall market.lt.is_killed(), "Not killed"
 
     lt_shares: uint256 = shares
     if lt_shares == max_value(uint256):
@@ -527,11 +527,19 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
 
     required_before: uint256 = self._required_crvusd()
 
-    # Redeem all crvUSD from backing vault to cover potential debt repayment
     crvusd_vault: IERC4626 = self.crvusd_vault
-    crvusd_shares: uint256 = staticcall crvusd_vault.balanceOf(self)
-    if crvusd_shares > 0:
-        extcall crvusd_vault.redeem(crvusd_shares, self, self)
+    if crvusd_from_wallet:
+        # Pull crvUSD from caller instead of redeeming from backing vault
+        total_debt: uint256 = staticcall market.amm.get_debt()
+        if total_debt > 0:
+            lt_supply: uint256 = staticcall market.lt.totalSupply()
+            max_needed: uint256 = total_debt * lt_shares // lt_supply + 1
+            extcall CRVUSD.transferFrom(msg.sender, self, max_needed)
+    else:
+        # Redeem all crvUSD from backing vault to cover potential debt repayment
+        crvusd_shares: uint256 = staticcall crvusd_vault.balanceOf(self)
+        if crvusd_shares > 0:
+            extcall crvusd_vault.redeem(crvusd_shares, self, self)
 
     # Approve LT to pull crvUSD (for negative stables_to_return)
     extcall CRVUSD.approve(market.lt.address, max_value(uint256))
@@ -541,10 +549,16 @@ def emergency_withdraw(pool_id: uint256, shares: uint256):
     # Reset crvUSD approval
     extcall CRVUSD.approve(market.lt.address, 0)
 
-    # Re-deposit remaining crvUSD back to the backing vault
+    # Handle remaining crvUSD
     remaining_crvusd: uint256 = staticcall CRVUSD.balanceOf(self)
-    if remaining_crvusd > 0 and crvusd_vault.address != empty(address):
-        extcall crvusd_vault.deposit(remaining_crvusd, self)
+    if crvusd_from_wallet:
+        # Refund excess crvUSD to caller
+        if remaining_crvusd > 0:
+            extcall CRVUSD.transfer(msg.sender, remaining_crvusd)
+    else:
+        # Re-deposit remaining crvUSD back to the backing vault
+        if remaining_crvusd > 0 and crvusd_vault.address != empty(address):
+            extcall crvusd_vault.deposit(remaining_crvusd, self)
 
     # Send assets to owner
     _owner: address = self.owner
