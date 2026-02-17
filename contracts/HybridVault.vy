@@ -117,7 +117,6 @@ def __init__(factory: Factory, crvusd: IERC20, vault_factory: VaultFactory):
 
     leverage: uint256 = 2 * 10**18
     denominator: uint256 = 2 * leverage - 10**18
-    lev_ratio: uint256 = leverage**2 * 10**18 // denominator**2
     # 1 / (4 * L**2)
     AMM_MIN_SAFE_DEBT = 10**54 // (4 * leverage**2)
     # (2 * L - 1)**2 / (4 * L**2) - 1 / (8 * L**2)
