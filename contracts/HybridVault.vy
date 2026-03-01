@@ -260,34 +260,43 @@ def pool_limits(pool_id: uint256) -> uint256:
 
 @internal
 @view
+def _pool_crvusd(pool: Market) -> uint256:
+    staker_balance: uint256 = staticcall pool.staker.balanceOf(self)
+    lt_shares: uint256 = staticcall pool.lt.balanceOf(self)
+    if staker_balance > 0:
+        lt_shares += staticcall pool.staker.previewRedeem(staker_balance)
+    if lt_shares == 0:
+        return 0
+    lt_total: uint256 = staticcall pool.lt.totalSupply()
+    if lt_total == 0:
+        return 0
+    liquidity: LiquidityValues = staticcall pool.lt.liquidity()
+    if liquidity.total == 0:
+        return 0
+    success: bool = False
+    res: Bytes[64] = empty(Bytes[64])
+    success, res = raw_call(
+        pool.amm.address,
+        method_id("value_oracle()"),
+        max_outsize=64,
+        is_static_call=True,
+        revert_on_failure=False)
+    if not success:
+        return max_value(uint256)
+    crvusd_amount: uint256 = abi_decode(res, (uint256, uint256))[1]
+    crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
+    return crvusd_amount
+
+
+@internal
+@view
 def _required_crvusd() -> uint256:
     total_crvusd: uint256 = 0
     for pool_id: uint256 in self.used_vaults:
         pool: Market = staticcall FACTORY.markets(pool_id)
-        staker_balance: uint256 = staticcall pool.staker.balanceOf(self)
-        lt_shares: uint256 = staticcall pool.lt.balanceOf(self)
-        if staker_balance > 0:
-            lt_shares += staticcall pool.staker.previewRedeem(staker_balance)
-        if lt_shares == 0:
-            continue
-        lt_total: uint256 = staticcall pool.lt.totalSupply()
-        if lt_total == 0:
-            continue
-        liquidity: LiquidityValues = staticcall pool.lt.liquidity()
-        if liquidity.total == 0:
-            continue
-        success: bool = False
-        res: Bytes[64] = empty(Bytes[64])
-        success, res = raw_call(
-            pool.amm.address,
-            method_id("value_oracle()"),
-            max_outsize=64,
-            is_static_call=True,
-            revert_on_failure=False)
-        if not success:
+        crvusd_amount: uint256 = self._pool_crvusd(pool)
+        if crvusd_amount == max_value(uint256):
             return max_value(uint256)
-        crvusd_amount: uint256 = abi_decode(res, (uint256, uint256))[1]
-        crvusd_amount = crvusd_amount * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_total
         total_crvusd += crvusd_amount
     return total_crvusd
 
@@ -526,6 +535,7 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
     assert lt_shares > 0, "Zero shares"
 
     required_before: uint256 = self._required_crvusd()
+    pool_crvusd_before: uint256 = self._pool_crvusd(market)
 
     crvusd_vault: IERC4626 = self.crvusd_vault
     if crvusd_from_wallet:
@@ -567,18 +577,24 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
 
     # Reduce stablecoin allocation
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+    reduction: uint256 = 0
     if required_before == max_value(uint256):
-        # value_oracle() reverted - reduce allocation proportionally to shares withdrawn vs pool supply
-        lt_supply: uint256 = staticcall market.lt.totalSupply()
-        reduction: uint256 = previous_allocation * lt_shares // lt_supply
-        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-        self.stablecoin_allocation[pool_id] -= min(reduction, self.stablecoin_allocation[pool_id])
+        if pool_crvusd_before != max_value(uint256):
+            # Use per-pool crvusd change to calculate reduction
+            pool_crvusd_after: uint256 = self._pool_crvusd(market)
+            if pool_crvusd_before > pool_crvusd_after:
+                reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
+        else:
+            # value_oracle() reverted for this pool too - reduce allocation proportionally
+            lt_supply: uint256 = staticcall market.lt.totalSupply()
+            reduction = min(previous_allocation * lt_shares // lt_supply, self.stablecoin_allocation[pool_id])
     else:
         required_after: uint256 = self._required_crvusd()
         if required_before > required_after:
-            reduction: uint256 = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
-            self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-            self.stablecoin_allocation[pool_id] -= reduction
+            reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+    if reduction > 0:
+        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+        self.stablecoin_allocation[pool_id] -= reduction
 
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
