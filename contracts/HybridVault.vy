@@ -171,6 +171,7 @@ def set_crvusd_vault(new_vault: IERC4626, redeem: bool = True):
                 extcall old_vault.redeem(shares, msg.sender, self)
             else:
                 extcall old_vault.transfer(msg.sender, shares)
+        extcall CRVUSD.approve(old_vault.address, 0)
     self.crvusd_vault = new_vault
     extcall CRVUSD.approve(new_vault.address, max_value(uint256))
     log SetCrvusdVault(vault=new_vault)
