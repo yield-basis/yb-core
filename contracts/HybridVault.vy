@@ -499,24 +499,27 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = 0
+
     if required_before == max_value(uint256):
-        if pool_crvusd_before != max_value(uint256):
-            pool_crvusd_after: uint256 = self._pool_crvusd(market)
+        pool_crvusd_after: uint256 = self._pool_crvusd(market)
+        if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
             if pool_crvusd_before > pool_crvusd_after:
                 reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
                 if withdraw_stablecoins:
-                    self._withdraw_crvusd(self._downscale(pool_crvusd_before - pool_crvusd_after), receiver)
+                    self._withdraw_crvusd(self._downscale(pool_crvusd_before - pool_crvusd_after), receiver, False)
         else:
             reduction = min(previous_allocation * lt_shares // lt_supply, self.stablecoin_allocation[pool_id])
+
     else:
         required_after: uint256 = self._required_crvusd()
         if required_before > required_after:
             if withdraw_stablecoins:
                 if required_after > 0:
-                    self._withdraw_crvusd(self._downscale(required_before - required_after), receiver)
+                    self._withdraw_crvusd(self._downscale(required_before - required_after), receiver, True)
                 else:
                     self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
             reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+
     if reduction > 0:
         self._allocate_stablecoins(market.lt, previous_allocation - reduction)
         self.stablecoin_allocation[pool_id] -= reduction
@@ -706,12 +709,13 @@ def deposit_crvusd(assets: uint256) -> uint256:
 
 
 @internal
-def _withdraw_crvusd(assets: uint256, receiver: address) -> uint256:
+def _withdraw_crvusd(assets: uint256, receiver: address, post_check_crvusd: bool) -> uint256:
     to_withdraw: uint256 = min(assets, self._crvusd_available())
     if to_withdraw == 0:
         return 0
     shares_burned: uint256 = extcall self.crvusd_vault.withdraw(to_withdraw, receiver, self)
-    assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
+    if post_check_crvusd:
+        assert self._crvusd_available() >= self._downscale(self._required_crvusd()), "Not enough crvUSD left"
     return shares_burned
 
 
