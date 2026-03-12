@@ -509,6 +509,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
                     self._withdraw_crvusd(self._downscale(pool_crvusd_before - pool_crvusd_after), receiver, False)
         else:
             reduction = min(previous_allocation * lt_shares // lt_supply, self.stablecoin_allocation[pool_id])
+            assert not withdraw_stablecoins, "Oracle is broken"
 
     else:
         required_after: uint256 = self._required_crvusd()
