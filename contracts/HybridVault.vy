@@ -511,8 +511,9 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = 0
+    required_after: uint256 = self._required_crvusd()
 
-    if required_before == max_value(uint256):
+    if required_before == max_value(uint256) or required_after == max_value(uint256):
         pool_crvusd_after: uint256 = self._pool_crvusd(market)
         if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
             if pool_crvusd_before > pool_crvusd_after:
@@ -526,7 +527,6 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
             assert not withdraw_stablecoins, "Oracle is broken"
 
     else:
-        required_after: uint256 = self._required_crvusd()
         if required_before > required_after:
             if withdraw_stablecoins:
                 if required_after > 0:
@@ -610,7 +610,9 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
     # Reduce stablecoin allocation
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = 0
-    if required_before == max_value(uint256):
+    required_after: uint256 = self._required_crvusd()
+
+    if required_before == max_value(uint256) or required_after == max_value(uint256):
         pool_crvusd_after: uint256 = self._pool_crvusd(market)
         if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
             # Use per-pool crvusd change to calculate reduction
@@ -620,9 +622,9 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
             # value_oracle() reverted for this pool too - reduce allocation proportionally
             reduction = min(previous_allocation * lt_shares // lt_supply, self.stablecoin_allocation[pool_id])
     else:
-        required_after: uint256 = self._required_crvusd()
         if required_before > required_after:
             reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+
     if reduction > 0:
         self._allocate_stablecoins(market.lt, previous_allocation - reduction)
         self.stablecoin_allocation[pool_id] -= reduction
