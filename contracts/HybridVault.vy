@@ -99,6 +99,7 @@ pool_approved: HashMap[uint256, bool]
 token_in_use: HashMap[address, bool]
 stablecoin_allocation: public(HashMap[uint256, uint256])
 personal_limit: public(HashMap[uint256, uint256])
+pool_downscale_factor: public(HashMap[uint256, uint256])
 
 
 @deploy
@@ -193,6 +194,17 @@ def _crvusd_available() -> uint256:
 @view
 def _downscale(amount: uint256) -> uint256:
     return amount * (staticcall VAULT_FACTORY.stablecoin_fraction()) // 10**18
+
+
+@internal
+def _downscale_w(pool_id: uint256, amount: uint256, fetch_new: bool) -> uint256:
+    downscale_factor: uint256 = 0
+    if fetch_new:
+        downscale_factor = staticcall VAULT_FACTORY.stablecoin_fraction()
+        self.pool_downscale_factor[pool_id] = downscale_factor
+    else:
+        downscale_factor = self.pool_downscale_factor[pool_id]
+    return amount * downscale_factor // 10**18
 
 
 @internal
@@ -435,7 +447,7 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     pool_value, additional_crvusd = self._required_crvusd_for(market, assets, debt)
     crvusd_available: uint256 = self._crvusd_available()
     # next line will revert if max_value(uint256)
-    crvusd_required: uint256 = self._downscale(self._required_crvusd() + additional_crvusd)
+    crvusd_required: uint256 = self._downscale_w(pool_id, self._required_crvusd() + additional_crvusd, True)
     if crvusd_available < crvusd_required:
         if deposit_stablecoins:
             self._deposit_crvusd(crvusd_required - crvusd_available)
@@ -506,7 +518,9 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
             if pool_crvusd_before > pool_crvusd_after:
                 reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
                 if withdraw_stablecoins:
-                    self._withdraw_crvusd(self._downscale(pool_crvusd_before - pool_crvusd_after), receiver, False)
+                    self._withdraw_crvusd(
+                        self._downscale_w(pool_id, pool_crvusd_before - pool_crvusd_after, False),
+                        receiver, False)
         else:
             reduction = min(previous_allocation * lt_shares // lt_supply, self.stablecoin_allocation[pool_id])
             assert not withdraw_stablecoins, "Oracle is broken"
@@ -516,7 +530,7 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
         if required_before > required_after:
             if withdraw_stablecoins:
                 if required_after > 0:
-                    self._withdraw_crvusd(self._downscale(required_before - required_after), receiver, True)
+                    self._withdraw_crvusd(self._downscale_w(pool_id, required_before - required_after, True), receiver, True)
                 else:
                     self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
             reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
