@@ -611,9 +611,9 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     reduction: uint256 = 0
     if required_before == max_value(uint256):
-        if pool_crvusd_before != max_value(uint256):
+        pool_crvusd_after: uint256 = self._pool_crvusd(market)
+        if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
             # Use per-pool crvusd change to calculate reduction
-            pool_crvusd_after: uint256 = self._pool_crvusd(market)
             if pool_crvusd_before > pool_crvusd_after:
                 reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
         else:
