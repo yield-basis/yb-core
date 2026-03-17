@@ -460,6 +460,90 @@ def test_set_personal_limit(
         assert lt_shares > 0, "Should receive LT shares"
 
 
+def test_crvusd_vault_limit(
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20, dao
+):
+    """
+    Test that crvusd vault limits are enforced across multiple HybridVaults.
+    """
+    pool_id = 3
+    assets = 1 * 10**8  # 1 WBTC (8 decimals)
+
+    # Create two accounts with funds
+    account1 = boa.env.generate_address()
+    account2 = boa.env.generate_address()
+    wbtc_token = erc20.at(WBTC)
+    crvusd_token = erc20.at(CRVUSD)
+
+    for acc in [account1, account2]:
+        boa.deal(wbtc_token, acc, 10 * 10**8)
+        boa.deal(crvusd_token, acc, 1_000_000 * 10**18)
+
+    # Create vaults for both accounts
+    with boa.env.prank(account1):
+        vault1_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault1 = hybrid_vault_deployer.at(vault1_addr)
+
+    with boa.env.prank(account2):
+        vault2_addr = hybrid_vault_factory.create_vault(SCRVUSD)
+    vault2 = hybrid_vault_deployer.at(vault2_addr)
+
+    # Get market info and calculate debt
+    market = factory.markets(pool_id)
+    cryptopool = twocrypto.at(market.cryptopool)
+    price = cryptopool.price_scale()
+    usd_value = assets * price // 10**8
+    debt = usd_value
+
+    if not vault1.safe_to_deposit(pool_id, assets, debt):
+        return
+
+    # First deposit with no limit set — should succeed
+    with boa.env.prank(account1):
+        wbtc_token.approve(vault1.address, 2**256 - 1)
+        crvusd_token.approve(vault1.address, 2**256 - 1)
+        lt_shares1 = vault1.deposit(pool_id, assets, debt, 0, False, True)
+        assert lt_shares1 > 0
+
+    # Verify running sum is tracked
+    vault1_required = hybrid_vault_factory.crvusd_vault_required(vault1.address)
+    total_required = hybrid_vault_factory.crvusd_vault_total_required(SCRVUSD)
+    assert vault1_required > 0, "Vault required should be tracked"
+    assert total_required == vault1_required, "Total should equal single vault's required"
+
+    # Set limit just above current usage (10% headroom)
+    limit = total_required + total_required // 10
+    with boa.env.prank(dao):
+        hybrid_vault_factory.set_crvusd_vault_limit(SCRVUSD, limit)
+    assert hybrid_vault_factory.crvusd_vault_limits(SCRVUSD) == limit
+
+    # Second vault's deposit should fail — would exceed limit
+    with boa.env.prank(account2):
+        wbtc_token.approve(vault2.address, 2**256 - 1)
+        crvusd_token.approve(vault2.address, 2**256 - 1)
+        with boa.reverts("Beyond vault limit"):
+            vault2.deposit(pool_id, assets, debt, 0, False, True)
+
+    # Withdraw from vault1 should always work
+    with boa.env.prank(account1):
+        vault1.withdraw(pool_id, lt_shares1, 0, False, account1, False)
+
+    # Running sum should be back to 0
+    assert hybrid_vault_factory.crvusd_vault_required(vault1.address) == 0
+    assert hybrid_vault_factory.crvusd_vault_total_required(SCRVUSD) == 0
+
+    # Now vault2 can deposit (within the limit)
+    with boa.env.prank(account2):
+        lt_shares2 = vault2.deposit(pool_id, assets, debt, 0, False, True)
+        assert lt_shares2 > 0
+
+    # Cleanup: withdraw and remove limit
+    with boa.env.prank(account2):
+        vault2.withdraw(pool_id, lt_shares2, 0, False, account2, False)
+    with boa.env.prank(dao):
+        hybrid_vault_factory.set_crvusd_vault_limit(SCRVUSD, 0)
+
+
 def test_withdrawable_crvusd_for(
     hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
 ):

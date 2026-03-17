@@ -35,6 +35,10 @@ event SetAllowedCrvusdVault:
     vault: address
     allowed: bool
 
+event SetCrvusdVaultLimit:
+    crvusd_vault: address
+    limit: uint256
+
 
 FACTORY: public(immutable(Factory))
 ADMIN: public(immutable(address))
@@ -44,6 +48,9 @@ vault_to_user: public(HashMap[HybridVault, address])
 stablecoin_fraction: public(uint256)
 pool_limits: public(HashMap[uint256, uint256])
 allowed_crvusd_vaults: public(HashMap[address, bool])
+crvusd_vault_limits: public(HashMap[address, uint256])
+crvusd_vault_total_required: public(HashMap[address, uint256])
+crvusd_vault_required: public(HashMap[HybridVault, uint256])
 
 
 @deploy
@@ -128,16 +135,61 @@ def set_pool_limit(pool_id: uint256, pool_limit: uint256):
 
 
 @external
-def set_allowed_crvusd_vault(vault: address, allowed: bool):
+def set_allowed_crvusd_vault(vault: address, allowed: bool, limit: uint256 = 0):
     """
-    @notice Enable or disable a crvUSD vault for use
-    @dev Only callable by ADMIN
+    @notice Enable or disable a crvUSD vault for use, with an optional deposit limit
+    @dev Only callable by ADMIN. Limit of 0 means unlimited.
     @param vault The crvUSD vault address
     @param allowed Whether the vault is allowed
+    @param limit The maximum total required crvUSD across all HybridVaults using this vault
     """
     assert msg.sender == ADMIN, "Access"
     self.allowed_crvusd_vaults[vault] = allowed
+    self.crvusd_vault_limits[vault] = limit
     log SetAllowedCrvusdVault(vault=vault, allowed=allowed)
+    log SetCrvusdVaultLimit(crvusd_vault=vault, limit=limit)
+
+
+@external
+def set_crvusd_vault_limit(crvusd_vault: address, limit: uint256):
+    """
+    @notice Set the total deposit limit for a crvUSD vault across all HybridVaults
+    @dev Only callable by ADMIN. 0 means no limit.
+    @param crvusd_vault The crvUSD vault address
+    @param limit The maximum total required crvUSD allowed across all HybridVaults using this vault
+    """
+    assert msg.sender == ADMIN, "Access"
+    self.crvusd_vault_limits[crvusd_vault] = limit
+    log SetCrvusdVaultLimit(crvusd_vault=crvusd_vault, limit=limit)
+
+
+@external
+def update_vault_required(crvusd_vault: address, new_required: uint256, check_limit: bool = True):
+    """
+    @notice Update the tracked required crvUSD for a HybridVault
+    @dev Only callable by registered HybridVaults. Reverts on increase if vault limit exceeded and check_limit is True.
+    @param crvusd_vault The crvUSD vault address the HybridVault uses
+    @param new_required The new total required crvUSD for this HybridVault
+    @param check_limit If True, revert when increase would exceed the vault limit
+    """
+    hybrid_vault: HybridVault = HybridVault(msg.sender)
+    assert self.vault_to_user[hybrid_vault] != empty(address), "Only vaults can call"
+
+    old_required: uint256 = self.crvusd_vault_required[hybrid_vault]
+
+    if new_required > old_required:
+        increase: uint256 = new_required - old_required
+        total: uint256 = self.crvusd_vault_total_required[crvusd_vault] + increase
+        if check_limit:
+            vault_limit: uint256 = self.crvusd_vault_limits[crvusd_vault]
+            if vault_limit > 0:
+                assert total <= vault_limit, "Beyond vault limit"
+        self.crvusd_vault_total_required[crvusd_vault] = total
+    elif new_required < old_required:
+        decrease: uint256 = old_required - new_required
+        self.crvusd_vault_total_required[crvusd_vault] -= decrease
+
+    self.crvusd_vault_required[hybrid_vault] = new_required
 
 
 @external

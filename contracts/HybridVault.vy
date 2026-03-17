@@ -71,6 +71,7 @@ interface VaultFactory:
     def pool_limits(pool_id: uint256) -> uint256: view
     def allowed_crvusd_vaults(vault: address) -> bool: view
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
+    def update_vault_required(crvusd_vault: address, new_required: uint256, check_limit: bool): nonpayable
 
 interface PriceOracle:
     def price() -> uint256: view
@@ -166,6 +167,7 @@ def set_crvusd_vault(new_vault: IERC4626, redeem: bool = True):
     assert len(self.used_vaults) == 0, "Has active positions"
     old_vault: IERC4626 = self.crvusd_vault
     if old_vault != empty(IERC4626):
+        extcall VAULT_FACTORY.update_vault_required(old_vault.address, 0, False)
         shares: uint256 = staticcall old_vault.balanceOf(self)
         if shares > 0:
             if redeem:
@@ -470,6 +472,8 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
     self.stablecoin_allocation[pool_id] += 2 * additional_crvusd
 
+    extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, crvusd_required, True)
+
     if not stake:
         return lt_shares
 
@@ -541,6 +545,9 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
+
+    if required_after != max_value(uint256):
+        extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, self._downscale(required_after), False)
 
     return assets
 
@@ -631,6 +638,9 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
 
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
+
+    if required_after != max_value(uint256):
+        extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, self._downscale(required_after), False)
 
 
 @external
