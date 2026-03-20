@@ -181,6 +181,7 @@ def update_vault_required(crvusd_vault: address, new_required: uint256, check_li
         increase: uint256 = new_required - old_required
         total: uint256 = self.crvusd_vault_total_required[crvusd_vault] + increase
         if check_limit:
+            assert self.allowed_crvusd_vaults[crvusd_vault], "Vault wind-down"
             vault_limit: uint256 = self.crvusd_vault_limits[crvusd_vault]
             if vault_limit > 0:
                 assert total <= vault_limit, "Beyond vault limit"
