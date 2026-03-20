@@ -501,34 +501,50 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
 
     assets: uint256 = extcall market.lt.withdraw(lt_shares, min_assets, receiver)
 
-    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    reduction: uint256 = 0
-    required_after: uint256 = self._required_crvusd()
-
-    if required_before == max_value(uint256) or required_after == max_value(uint256):
-        pool_crvusd_after: uint256 = self._pool_crvusd(market)
-
-        assert pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256), "Oracle is broken"
-        assert not withdraw_stablecoins, "Cannot withdraw stables"
-
-        if pool_crvusd_before > pool_crvusd_after:
-            reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
-
-    else:
-        if required_before > required_after:
-            if withdraw_stablecoins:
-                if required_after > 0:
-                    self._withdraw_crvusd(self._downscale(required_before - required_after), receiver, True)
-                else:
-                    self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
-            reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
-
-    if reduction > 0:
-        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-        self.stablecoin_allocation[pool_id] -= reduction
-
+    removed: bool = False
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
+        removed = True
+
+    required_after: uint256 = self._required_crvusd()
+
+    if not removed:
+        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+        reduction: uint256 = 0
+
+        if required_before == max_value(uint256) or required_after == max_value(uint256):
+            pool_crvusd_after: uint256 = self._pool_crvusd(market)
+
+            assert pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256), "Oracle is broken"
+            assert not withdraw_stablecoins, "Cannot withdraw stables"
+
+            if pool_crvusd_before > pool_crvusd_after:
+                reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
+
+        else:
+            if required_before > required_after:
+                if withdraw_stablecoins:
+                    if required_after > 0:
+                        self._withdraw_crvusd(self._downscale(required_before - required_after), receiver, True)
+                    else:
+                        self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
+                reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+
+        if reduction > 0:
+            self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+            self.stablecoin_allocation[pool_id] -= reduction
+
+    else:
+        # Pool fully withdrawn and removed - allocation already cleared by _remove_from_used
+        if withdraw_stablecoins:
+            assert required_after != max_value(uint256), "Cannot withdraw stables"
+            if required_after > 0:
+                available: uint256 = self._crvusd_available()
+                needed: uint256 = self._downscale(required_after)
+                if available > needed:
+                    self._withdraw_crvusd(available - needed, receiver, True)
+            else:
+                self._redeem_crvusd(staticcall self.crvusd_vault.balanceOf(self), receiver)
 
     if required_after != max_value(uint256):
         extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, self._downscale(required_after), False)
