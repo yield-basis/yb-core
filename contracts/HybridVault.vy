@@ -653,7 +653,10 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
             if reduction > previous_allocation:
                 reduction = previous_allocation
             self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-            self.stablecoin_allocation[pool_id] -= reduction
+            old_allocation: uint256 = self.stablecoin_allocation[pool_id]
+            # in fact, we NEVER can undeflow in the subtraction
+            # but why not do this way just in case: extra safety never hurts
+            self.stablecoin_allocation[pool_id] = old_allocation - min(reduction, old_allocation)
 
     if required_after != max_value(uint256):
         extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, self._downscale(required_after), False)
