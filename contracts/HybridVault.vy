@@ -615,36 +615,41 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
     if assets > 0:
         assert extcall market.asset_token.transfer(_owner, assets, default_return_value=True)
 
-    # Reduce stablecoin allocation
-    previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
-    reduction: uint256 = 0
-    required_after: uint256 = self._required_crvusd()
-
-    if required_before == max_value(uint256) or required_after == max_value(uint256):
-        pool_crvusd_after: uint256 = self._pool_crvusd(market)
-        if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
-            # Use per-pool crvusd change to calculate reduction
-            if pool_crvusd_before > pool_crvusd_after:
-                reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
-        else:
-            # value_oracle() reverted for this pool!
-            # therefore we reduce allocation for this pool more than otherwise
-            # but it's fair b/c oracle failure begs for shutting it down
-            stablecoin_fraction: uint256 = staticcall VAULT_FACTORY.stablecoin_fraction()
-            reduction = crvusd_before - min(remaining_crvusd, crvusd_before)
-            if stablecoin_fraction > 0:
-                reduction = reduction * 10**18 // stablecoin_fraction
-            reduction = min(reduction, self.stablecoin_allocation[pool_id])
-    else:
-        if required_before > required_after:
-            reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
-
-    if reduction > 0:
-        self._allocate_stablecoins(market.lt, previous_allocation - reduction)
-        self.stablecoin_allocation[pool_id] -= reduction
-
+    # Check if pool is fully withdrawn and remove early
+    removed: bool = False
     if staticcall market.lt.balanceOf(self) == 0 and staticcall market.staker.balanceOf(self) == 0:
         self._remove_from_used(pool_id)
+        removed = True
+
+    required_after: uint256 = self._required_crvusd()
+
+    if not removed:
+        # Reduce stablecoin allocation
+        previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
+        reduction: uint256 = 0
+
+        if required_before == max_value(uint256) or required_after == max_value(uint256):
+            pool_crvusd_after: uint256 = self._pool_crvusd(market)
+            if pool_crvusd_before != max_value(uint256) and pool_crvusd_after != max_value(uint256):
+                # Use per-pool crvusd change to calculate reduction
+                if pool_crvusd_before > pool_crvusd_after:
+                    reduction = min(2 * (pool_crvusd_before - pool_crvusd_after), self.stablecoin_allocation[pool_id])
+            else:
+                # value_oracle() reverted for this pool!
+                # therefore we reduce allocation for this pool more than otherwise
+                # but it's fair b/c oracle failure begs for shutting it down
+                stablecoin_fraction: uint256 = staticcall VAULT_FACTORY.stablecoin_fraction()
+                reduction = crvusd_before - min(remaining_crvusd, crvusd_before)
+                if stablecoin_fraction > 0:
+                    reduction = reduction * 10**18 // stablecoin_fraction
+                reduction = min(reduction, self.stablecoin_allocation[pool_id])
+        else:
+            if required_before > required_after:
+                reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
+
+        if reduction > 0:
+            self._allocate_stablecoins(market.lt, previous_allocation - reduction)
+            self.stablecoin_allocation[pool_id] -= reduction
 
     if required_after != max_value(uint256):
         extcall VAULT_FACTORY.update_vault_required(self.crvusd_vault.address, self._downscale(required_after), False)
