@@ -531,6 +531,8 @@ def withdraw(pool_id: uint256, shares: uint256, min_assets: uint256, unstake: bo
                 reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
 
         if reduction > 0:
+            if reduction > previous_allocation:
+                reduction = previous_allocation
             self._allocate_stablecoins(market.lt, previous_allocation - reduction)
             self.stablecoin_allocation[pool_id] -= reduction
 
@@ -648,6 +650,8 @@ def emergency_withdraw(pool_id: uint256, shares: uint256, crvusd_from_wallet: bo
                 reduction = min(2 * (required_before - required_after), self.stablecoin_allocation[pool_id])
 
         if reduction > 0:
+            if reduction > previous_allocation:
+                reduction = previous_allocation
             self._allocate_stablecoins(market.lt, previous_allocation - reduction)
             self.stablecoin_allocation[pool_id] -= reduction
 
