@@ -456,6 +456,8 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
     lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares)
 
+    assert lt_shares > 0, "No liquidity given"
+
     # Reduce cap to what it should be
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)
     self.stablecoin_allocation[pool_id] += 2 * additional_crvusd
