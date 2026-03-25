@@ -118,7 +118,7 @@ def price(lt: LT) -> uint256:
     # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
     # yb_oracle_value *= f_lp / lt_supply / price_oracle
     yb_oracle: uint256 = amm_state.x0 * (
-        isqrt(10**18 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1) - 10**18
+        isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1) - 10**18
     ) // 10**18
     # Make it per LT token
     yb_oracle = yb_oracle * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // lt_supply
