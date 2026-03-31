@@ -88,7 +88,7 @@ def main():
     # Deploy HybridVaultFactory first (without impl)
     print("Deploying HybridVaultFactory...")
     print(f"  Pool IDs: {POOL_IDS}")
-    print(f"  Pool limits: {[l // 10**18 for l in POOL_LIMITS]} crvUSD")
+    print(f"  Pool limits: {[l // 10**18 for l in POOL_LIMITS]} crvUSD")  # noqa
     hybrid_vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
         factory.address,
@@ -117,6 +117,10 @@ def main():
 
     assert hybrid_vault_factory.allowed_crvusd_vaults(SCRVUSD), "scrvUSD should be allowed"
 
+    can_deposit = {}
+    for i, asset_amount, debt_amount in zip([3, 6], [10**8, 10**18], [70_000 * 10**18, 2000 * 10**18]):
+        can_deposit[i] = vault_impl.safe_to_deposit(i, asset_amount, debt_amount)
+
     # Print summary
     print("\n" + "=" * 60)
     print("Deployment Summary")
@@ -129,6 +133,11 @@ def main():
     print(f"crvUSD:               {CRVUSD}")
     print(f"scrvUSD (allowed):    {SCRVUSD}")
     print("=" * 60)
+
+    print()
+    for i in can_deposit.keys():
+        print(f"Pool {i} deposit status:        {can_deposit[i]}")
+
     print("\nHybridVaultFactory is ready for HybridVault deployments!")
     print("Users can now call hybrid_vault_factory.create_vault(scrvUSD) to create vaults.")
     print("\nAnvil is still running. Press Ctrl+C to stop.")
