@@ -8,6 +8,17 @@
 from ethereum.ercs import IERC20
 
 
+struct OraclizedValue:
+    p_o: uint256
+    value: uint256
+
+struct LiquidityValues:
+    admin: int256  # Can be negative
+    total: uint256
+    ideal_staked: uint256
+    staked: uint256
+
+
 interface MFOwner:
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
     def lt_in_factory(lt: LT) -> bool: view
@@ -23,6 +34,7 @@ interface Gauge:
 
 interface AMM:
     def collect_fees() -> uint256: nonpayable
+    def value_oracle() -> OraclizedValue: view
 
 interface LT:
     def deposit(assets: uint256, debt: uint256, min_shares: uint256, receiver: address) -> uint256: nonpayable
@@ -39,6 +51,9 @@ interface LT:
     def preview_deposit(assets: uint256, debt: uint256, raise_overflow: bool) -> uint256: view
     def preview_withdraw(tokens: uint256) -> uint256: view
     def staker() -> Gauge: view
+    def totalSupply() -> uint256: view
+    def liquidity() -> LiquidityValues: view
+    def stablecoin_allocation() -> uint256: view
 
 
 STABLECOIN: public(immutable(IERC20))
@@ -58,8 +73,10 @@ def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coef
     cpool_stables: uint256 = staticcall cpool.balances(0)
     cpool_assets: uint256 = staticcall cpool.balances(1)
 
-    eassets: uint256 = (staticcall lt_from.preview_emergency_withdraw(shares_in))[0]
-    debt: uint256 = cpool_stables * eassets // cpool_assets
+    eassets: uint256 = 0
+    net_stables: int256 = 0
+    eassets, net_stables = staticcall lt_from.preview_emergency_withdraw(shares_in)
+    debt: uint256 = convert(convert(cpool_stables * eassets // cpool_assets, int256) - net_stables, uint256)
 
     assets: uint256 = staticcall lt_from.preview_withdraw(shares_in)
 
@@ -83,6 +100,16 @@ def preview_migrate_staked(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coef
 
 
 @internal
+@view
+def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (uint256, uint256):
+    lt_shares: uint256 = staticcall lt.preview_deposit(assets, debt, False)
+    lt_supply: uint256 = staticcall lt.totalSupply()
+    liquidity: LiquidityValues = staticcall lt.liquidity()
+    value_in_amm: uint256 = (staticcall amm.value_oracle()).value
+    return value_in_amm, value_in_amm * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_supply
+
+
+@internal
 def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256, debt_coefficient: uint256,
                    _for: address) -> uint256:
     # Check that LTs are in the factory
@@ -103,13 +130,23 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     assets: uint256 = extcall lt_from.withdraw(shares_in, 0)
     debt = (staticcall STABLECOIN.balanceOf(amm.address)) - debt
 
+    pool_value: uint256 = 0
+    additional_crvusd: uint256 = 0
+    pool_value, additional_crvusd = self._required_crvusd_for(lt_to, staticcall lt_to.amm(), assets, debt)
+
     # Now we freed up some stablecoins in the AMM
     extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_from, 0)  # Take what freed up from old allocation
-    extcall lt_to.allocate_stablecoins()  # Give these coins to the new AMM
+
+    # Save previous allocation and allocate more
+    previous_allocation: uint256 = staticcall lt_to.stablecoin_allocation()
+    extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_to, max((pool_value + additional_crvusd) * 22 // 10, previous_allocation))
 
     debt = debt * debt_coefficient // 10**18
+    shares: uint256 = extcall lt_to.deposit(assets, debt, min_out, _for)
 
-    return extcall lt_to.deposit(assets, debt, min_out, _for)
+    extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_to, previous_allocation)
+
+    return shares
 
 
 @external
