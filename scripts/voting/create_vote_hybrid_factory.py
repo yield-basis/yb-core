@@ -91,7 +91,7 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer-2')
+        USER = account_load('yb-deployer')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
@@ -178,8 +178,9 @@ if __name__ == '__main__':
                 'title': 'Deploy HybridVault infrastructure and migrate Factory ownership',
                 'summary': (
                     'Transfer Factory from MigrationFactoryOwner to new HybridFactoryOwner. '
+                    'Set WETH market to be $20M larger if going via HybridVault. '
                     'Set LTMigrator and HybridVaultFactory as limit setters. '
-                    'Set HybridVault implementation. Allow scrvUSD as crvUSD vault with 100M limit. '
+                    'Set HybridVault implementation. Allow scrvUSD as crvUSD vault. '
                     'Disable old markets (0-2) in the new owner.'
                 ),
                 'resources': []}).encode(),
