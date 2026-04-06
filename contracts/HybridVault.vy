@@ -347,16 +347,20 @@ def withdrawable_crvusd_for(pool_id: uint256, shares: uint256, is_staked: bool) 
 
 @external
 @view
-def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256, downscale: bool = True) -> uint256:
     """
     @notice Calculate crvUSD required for a potential deposit
     @param pool_id The market pool identifier
     @param assets Amount of collateral assets to deposit
     @param debt Amount of debt to take on
-    @return The downscaled crvUSD amount required for this deposit
+    @param downscale Downscale the amount to return
+    @return crvUSD amount required for this deposit
     """
     market: Market = staticcall FACTORY.markets(pool_id)
-    return self._downscale(self._required_crvusd_for(market, assets, debt)[1])
+    amount: uint256 = self._required_crvusd_for(market, assets, debt)[1]
+    if downscale:
+        amount = self._downscale(amount)
+    return amount
 
 
 @external
