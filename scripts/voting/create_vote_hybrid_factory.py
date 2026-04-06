@@ -26,7 +26,7 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 
-FORK = True
+FORK = False
 EXTRA_TIMEOUT = 10
 
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
@@ -39,7 +39,7 @@ OLD_MARKET_IDX = [0, 1, 2]
 WETH_MARKET_ID = 6
 WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 POOL_IDS = [6]
-POOL_LIMITS = [40_000_000 * 10**18]
+POOL_LIMITS = [50_000_000 * 10**18]
 
 USER = "0xeAfD26ffA47a9e387FB7409A456c4f7c4EF31ad8"
 
@@ -178,7 +178,7 @@ if __name__ == '__main__':
                 'title': 'Deploy HybridVault infrastructure and migrate Factory ownership',
                 'summary': (
                     'Transfer Factory from MigrationFactoryOwner to new HybridFactoryOwner. '
-                    'Set WETH market to be $20M larger if going via HybridVault. '
+                    'Set WETH market to be $25M larger if going via HybridVault. '
                     'Set LTMigrator and HybridVaultFactory as limit setters. '
                     'Set HybridVault implementation. Allow scrvUSD as crvUSD vault. '
                     'Disable old markets (0-2) in the new owner.'
