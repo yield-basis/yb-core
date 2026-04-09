@@ -308,6 +308,10 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
     out_amount: uint256 = 0
     fee: uint256 = self.fee
 
+    coll_vs_debt_before: uint256 = unsafe_div(p_o * collateral * COLLATERAL_PRECISION, debt)
+    if debt == 0:
+        coll_vs_debt_before = max_value(uint256)
+
     if i == 0:  # Trader buys collateral from us
         x: uint256 = x_initial + in_amount
         y: uint256 = math._ceil_div(x_initial * collateral, x)
@@ -330,8 +334,23 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         assert extcall COLLATERAL.transferFrom(msg.sender, self, in_amount, default_return_value=True)
         assert extcall STABLECOIN.transfer(_for, out_amount, default_return_value=True)
 
+    # Depending on asymmetry decide on the math control
+    coll_vs_debt_after: uint256 = unsafe_div(p_o * collateral * COLLATERAL_PRECISION, debt)
+    if debt == 0:
+        coll_vs_debt_after = max_value(uint256)
+
+    check_state: bool = True # Init here separately
+    if coll_vs_debt_after > 2 * 10**18:
+        if coll_vs_debt_before > coll_vs_debt_after:
+            # We improved -> relax the check
+            check_state = False
+    else:
+        if coll_vs_debt_before < coll_vs_debt_after:
+            # We improved -> relax the check
+            check_state = False
+
     # This call also will not allow to get too close to the untradable region
-    assert self.get_x0(p_o, collateral, debt, True) >= x0, "Bad final state"
+    assert self.get_x0(p_o, collateral, debt, check_state) >= x0, "Bad final state"
 
     self.collateral_amount = collateral
     self.debt = debt
