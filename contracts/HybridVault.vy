@@ -347,16 +347,20 @@ def withdrawable_crvusd_for(pool_id: uint256, shares: uint256, is_staked: bool) 
 
 @external
 @view
-def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256) -> uint256:
+def raw_required_crvusd_for(pool_id: uint256, assets: uint256, debt: uint256, downscale: bool = True) -> uint256:
     """
     @notice Calculate crvUSD required for a potential deposit
     @param pool_id The market pool identifier
     @param assets Amount of collateral assets to deposit
     @param debt Amount of debt to take on
-    @return The downscaled crvUSD amount required for this deposit
+    @param downscale Downscale the amount to return
+    @return crvUSD amount required for this deposit
     """
     market: Market = staticcall FACTORY.markets(pool_id)
-    return self._downscale(self._required_crvusd_for(market, assets, debt)[1])
+    amount: uint256 = self._required_crvusd_for(market, assets, debt)[1]
+    if downscale:
+        amount = self._downscale(amount)
+    return amount
 
 
 @external
@@ -450,13 +454,12 @@ def deposit(pool_id: uint256, assets: uint256, debt: uint256, min_shares: uint25
     previous_allocation: uint256 = staticcall market.lt.stablecoin_allocation()
     self._allocate_stablecoins(market.lt, max((pool_value + additional_crvusd) * 22 // 10, previous_allocation))
 
-    if assets > 0:
-        self._add_to_used(pool_id)
-
     assert extcall market.asset_token.transferFrom(msg.sender, self, assets, default_return_value=True)
     lt_shares: uint256 = extcall market.lt.deposit(assets, debt, min_shares)
 
     assert lt_shares > 0, "No liquidity given"
+
+    self._add_to_used(pool_id)  # We don't get here if lt_shares = 0
 
     # Reduce cap to what it should be
     self._allocate_stablecoins(market.lt, previous_allocation + 2 * additional_crvusd)

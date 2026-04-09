@@ -88,7 +88,7 @@ def main():
     # Deploy HybridVaultFactory first (without impl)
     print("Deploying HybridVaultFactory...")
     print(f"  Pool IDs: {POOL_IDS}")
-    print(f"  Pool limits: {[l // 10**18 for l in POOL_LIMITS]} crvUSD")
+    print(f"  Pool limits: {[l // 10**18 for l in POOL_LIMITS]} crvUSD")  # noqa
     hybrid_vault_factory = boa.load(
         "contracts/HybridVaultFactory.vy",
         factory.address,
@@ -117,6 +117,25 @@ def main():
 
     assert hybrid_vault_factory.allowed_crvusd_vaults(SCRVUSD), "scrvUSD should be allowed"
 
+    # Compute AMM_MAX_SAFE_DEBT the same way HybridVault.__init__ does
+    leverage = 2 * 10**18
+    denominator = 2 * leverage - 10**18
+    AMM_MAX_SAFE_DEBT = denominator**2 * 10**18 // (4 * leverage**2) - 10**54 // (8 * leverage**2)
+
+    can_deposit = {}
+    debt_ratio = {}
+    for i in POOL_IDS:
+        can_deposit[i] = vault_impl.safe_to_deposit(i, 0, 0)
+        market = factory.markets(i)
+        amm = boa.load_partial("contracts/AMM.vy").at(market[2])
+        price_oracle = boa.load_partial("contracts/CryptopoolLPOracle.vy").at(market[4])
+        total_debt = amm.get_debt()
+        collateral = amm.collateral_amount()
+        p_o = price_oracle.price()
+        coll_value = p_o * collateral // 10**18
+        max_allowed = coll_value * AMM_MAX_SAFE_DEBT // 10**18
+        debt_ratio[i] = total_debt / max_allowed if max_allowed > 0 else float('inf')
+
     # Print summary
     print("\n" + "=" * 60)
     print("Deployment Summary")
@@ -129,6 +148,12 @@ def main():
     print(f"crvUSD:               {CRVUSD}")
     print(f"scrvUSD (allowed):    {SCRVUSD}")
     print("=" * 60)
+
+    print()
+    for i in can_deposit.keys():
+        print(f"Pool {i} deposit status:        {can_deposit[i]}")
+        print(f"Pool {i} debt/max_safe_debt:    {debt_ratio[i]:.6f}")
+
     print("\nHybridVaultFactory is ready for HybridVault deployments!")
     print("Users can now call hybrid_vault_factory.create_vault(scrvUSD) to create vaults.")
     print("\nAnvil is still running. Press Ctrl+C to stop.")
