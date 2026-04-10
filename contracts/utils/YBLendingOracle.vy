@@ -30,6 +30,8 @@ interface LT:
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def get_state() -> AMMState: view
+    def collateral_amount() -> uint256: view
+    def get_debt() -> uint256: view
 
 
 struct AMMState:
@@ -89,9 +91,12 @@ def _scaled_A_raw_from_A(A_pool: uint256) -> uint256:
     )
 
 
-@external
+@internal
 @view
-def price(lt: LT) -> uint256:
+def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
+    """
+    @return (yb_oracle_usd, asset_price_usd)
+    """
     pool: IFXSwap = staticcall lt.CRYPTOPOOL()
     amm: LevAMM = staticcall lt.amm()
     agg_price: uint256 = staticcall (staticcall lt.agg()).price()
@@ -102,7 +107,6 @@ def price(lt: LT) -> uint256:
     D: uint256 = staticcall pool.D()
     pool_supply: uint256 = staticcall pool.totalSupply()
 
-    amm_state: AMMState = staticcall amm.get_state()
     lv: LiquidityValues = staticcall lt.liquidity()
     lt_supply: uint256 = staticcall lt.totalSupply()
 
@@ -115,14 +119,48 @@ def price(lt: LT) -> uint256:
     )
     lp_price_oracle: uint256 = portfolio_value * D // pool_supply
 
-    # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
-    # yb_oracle_value *= f_lp / lt_supply / price_oracle
-    yb_oracle: uint256 = amm_state.x0 * (
-        isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1) - 10**18
-    ) // 10**18
+    # Try to get AMM state (may revert if AMM is too imbalanced for x0 calculation)
+    yb_oracle: uint256 = 0
+    success: bool = False
+    response: Bytes[96] = empty(Bytes[96])
+    success, response = raw_call(
+        amm.address,
+        method_id("get_state()"),
+        max_outsize=96,
+        revert_on_failure=False,
+        is_static_call=True
+    )
+
+    if success and not use_balances:
+        # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
+        # yb_oracle_value *= f_lp / lt_supply / price_oracle
+        amm_state: AMMState = abi_decode(response, AMMState)
+        yb_oracle = amm_state.x0 * (
+            isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1) - 10**18
+        ) // 10**18
+    else:
+        # AMM is too imbalanced for x0 to be calculated.
+        # Balances can't change in this state, so compute value from balances directly.
+        collateral: uint256 = staticcall amm.collateral_amount()
+        debt: uint256 = staticcall amm.get_debt()
+        yb_oracle = collateral * lp_price_oracle // 10**18 * agg_price // 10**18 - debt
+
     # Make it per LT token
     yb_oracle = yb_oracle * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // lt_supply
-    # Make it in BTC. x0 was calculated taking crvUSD price aggregator into account -> use that
-    yb_oracle = yb_oracle * 10**18 // (price_oracle * agg_price // 10**18)
 
-    return yb_oracle
+    return (yb_oracle, price_oracle * agg_price // 10**18)
+
+
+@external
+@view
+def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
+    yb_oracle: uint256 = 0
+    asset_price: uint256 = 0
+    yb_oracle, asset_price = self._price(lt, use_balances)
+    return yb_oracle * 10**18 // asset_price
+
+
+@external
+@view
+def price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
+    return self._price(lt, use_balances)[0]
