@@ -288,7 +288,7 @@ def mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
 
 @internal
 @view
-def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
+def _calculate_values(p_o: uint256, _amm_value: uint256 = 0) -> LiquidityValuesOut:
     prev: LiquidityValues = self.liquidity
     staker: address = self.staker
     staked: int256 = 0
@@ -301,7 +301,11 @@ def _calculate_values(p_o: uint256) -> LiquidityValuesOut:
         10**18 - (10**18 - self._min_admin_fee()) * isqrt(convert(10**36 - staked * 10**36 // supply, uint256)) // 10**18,
         int256)
 
-    cur_value: int256 = convert((staticcall self.amm.value_oracle()).value * 10**18 // p_o, int256)
+    amm_value: uint256 = _amm_value
+    if amm_value == 0:
+        amm_value = (staticcall self.amm.value_oracle()).value
+
+    cur_value: int256 = convert(amm_value * 10**18 // p_o, int256)
     prev_value: int256 = convert(prev.total, int256)
     value_change: int256 = cur_value - (prev_value + prev.admin)
 
@@ -635,7 +639,21 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: a
     amm: LevAMM = self.amm
     killed: bool = staticcall amm.is_killed()
 
-    if killed:
+    # Read value_oracle without fail at revert
+    response: Bytes[64] = empty(Bytes[64])
+    success: bool = False
+    success, response = raw_call(
+        amm.address,
+        method_id("value_oracle()"),
+        max_outsize=64,
+        revert_on_failure=False,
+        is_static_call=True
+    )
+    amm_value: uint256 = 0
+    if success:
+        amm_value = abi_decode(response, OraclizedValue).value
+
+    if killed or not success:
         # If killed:
         admin: address = self.admin
         if admin.is_contract:
@@ -659,7 +677,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: a
         # If not killed - only owner is allowed to work with their LP
         assert owner == msg.sender, "Not killed"
 
-        lv = self._calculate_values(self._price_oracle_w())
+        lv = self._calculate_values(self._price_oracle_w(), amm_value)
         supply = lv.supply_tokens
         self.liquidity.admin = lv.admin
         self.liquidity.total = lv.total
@@ -684,7 +702,7 @@ def emergency_withdraw(shares: uint256, receiver: address = msg.sender, owner: a
     self._burn(owner, shares)
 
     self.liquidity.total = self.liquidity.total * (supply - shares) // supply
-    if self.liquidity.admin < 0 or killed:
+    if self.liquidity.admin < 0 or killed or not success:
         self.liquidity.admin = self.liquidity.admin * (10**18 - frac_clean) // 10**18
 
     if stables_to_return > 0:
