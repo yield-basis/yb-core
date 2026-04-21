@@ -1,0 +1,4 @@
+[submodule "contracts/curve_std"]
+	path = contracts/curve_std
+	url = git@github.com:curvefi/curve-std.git
+	branch = feat/lp_math

@@ -1,6 +1,6 @@
 # @version 0.4.3
 
-import liboracle
+from ..curve_std.curve_std.stableswap import lp_oracle_2
 from snekmate.utils import math
 
 
@@ -92,7 +92,7 @@ def _scaled_A_raw_from_A(A_pool: uint256) -> uint256:
     # Pool stores A as: A_true * N_COINS**(N_COINS-1) * 10_000.
     # Solver expects: A_true * solver.A_PRECISION.
     return unsafe_div(
-        A_pool * liboracle.A_PRECISION,
+        A_pool * lp_oracle_2.A_PRECISION,
         N_COINS**(N_COINS-1) * POOL_A_PRECISION
     )
 
@@ -203,7 +203,7 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     lp_price_ps: uint256 = 2 * vprice * isqrt(price_scale * 10**18) // 10**18
 
     # Calculating the LP oracle value
-    portfolio_value: uint256 = liboracle._portfolio_value(
+    portfolio_value: uint256 = lp_oracle_2._portfolio_value(
         self._scaled_A_raw_from_A(self._A_at_last_timestamp(pool)),
         price_oracle * PRECISION // price_scale,
     )
