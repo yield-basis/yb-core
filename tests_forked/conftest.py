@@ -103,7 +103,7 @@ def hybrid_vault_factory(factory, hybrid_factory_owner, dao):
 @pytest.fixture(scope="module")
 def twocrypto(forked_env):
     """Twocrypto interface for cryptopool interactions."""
-    return boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy")
+    return boa.load_partial("contracts/twocrypto_ng/contracts/main/Twocrypto.vy")
 
 
 @pytest.fixture(scope="module")

@@ -7,13 +7,13 @@ from eth.constants import ZERO_ADDRESS
 @pytest.fixture(scope="session")
 def cryptopool(stablecoin, collateral_token, admin, accounts):
     with boa.env.prank(admin):
-        amm_interface = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
+        amm_interface = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
-        math_impl = boa.load('contracts/testing/twocrypto/StableswapMath.vy')
-        views_impl = boa.load('contracts/testing/twocrypto/TwocryptoView.vy')
+        math_impl = boa.load('contracts/twocrypto_ng/contracts/main/StableswapMath.vy')
+        views_impl = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoView.vy')
         gauge_impl = ZERO_ADDRESS.hex()
 
-        factory = boa.load('contracts/testing/twocrypto/TwocryptoFactory.vy')
+        factory = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoFactory.vy')
         factory.initialise_ownership(admin, admin)
         factory.set_pool_implementation(amm_impl, 0)
         factory.set_gauge_implementation(gauge_impl)
@@ -38,7 +38,7 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
                 100_000 * 10**18  # initial_price: uint256
             ))
         pool.set_admin_fee(0)
-        pool.set_views(views_impl)
+        pool.set_periphery(views_impl, math_impl)
 
         for addr in accounts + [admin]:
             with boa.env.prank(addr):

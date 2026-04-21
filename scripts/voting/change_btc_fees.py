@@ -96,7 +96,7 @@ if __name__ == '__main__':
     factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
     factory_owner = boa.load_partial('contracts/MigrationFactoryOwner.vy').at(factory.admin())
     comparator = boa.load_partial('contracts/dao/CallComparator.vy').at(CALL_COMPARATOR)
-    twocrypto_deployer = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
+    twocrypto_deployer = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
 
     now = int(time())
     deadline_a = now + DEADLINE_A

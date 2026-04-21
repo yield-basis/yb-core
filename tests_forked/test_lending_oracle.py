@@ -78,7 +78,7 @@ def test_price_in_usd_consistency(factory, forked_env):
     """
     oracle = boa.load("contracts/utils/YBLendingOracle.vy")
     lt_deployer = boa.load_partial("contracts/LT.vy")
-    twocrypto = boa.load_partial("contracts/testing/twocrypto/Twocrypto.vy")
+    twocrypto = boa.load_partial("contracts/twocrypto_ng/contracts/main/Twocrypto.vy")
 
     for market_id in MARKET_IDS:
         market = factory.markets(market_id)

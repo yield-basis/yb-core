@@ -256,7 +256,7 @@ if __name__ == '__main__':
         vault = hybrid_vault_deployer.at(vault_addr)
 
         # Calculate debt: assets * price / 2
-        twocrypto = boa.load_partial('contracts/testing/twocrypto/Twocrypto.vy')
+        twocrypto = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
         weth_lt = lt_interface.at(factory.markets(WETH_MARKET_ID).lt)
         cryptopool = twocrypto.at(weth_lt.CRYPTOPOOL())
         price = cryptopool.price_scale()
