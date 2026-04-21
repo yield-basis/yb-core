@@ -1,6 +1,6 @@
 # @version 0.4.3
 
-from ..curve_std.curve_std.stableswap import lp_oracle_2
+from ..twocrypto_ng.contracts.main import LPOracle
 from snekmate.utils import math
 
 
@@ -51,50 +51,9 @@ struct LiquidityValues:
 
 
 PRECISION: constant(uint256) = 10**18
-N_COINS: constant(uint256) = 2
-POOL_A_PRECISION: constant(uint256) = 10_000
 L: constant(uint256) = 2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
-
-
-@internal
-@view
-def _A_at_last_timestamp(pool: IFXSwap) -> uint256:
-    # In case of stale pool price_oracle converges to last price and D is cached at last timestamp.
-    #   If pool ramps A parameter the calculated invariant variables will be off,
-    #   so we calculate them at one timestamp(of last interaction).
-    # Replicates Twocrypto._A_gamma() but evaluates it at pool.last_timestamp().
-    t: uint256 = staticcall pool.last_timestamp()
-    future_t: uint256 = staticcall pool.future_A_gamma_time()
-    future_A: uint256 = staticcall pool.future_A_gamma() >> 128
-
-    if t >= future_t:
-        return future_A
-
-    initial_A: uint256 = staticcall pool.initial_A_gamma() >> 128
-    initial_t: uint256 = staticcall pool.initial_A_gamma_time()
-
-    if t <= initial_t:
-        return initial_A
-
-    # Interpolate linearly in the same way as Twocrypto._A_gamma().
-    duration: uint256 = future_t - initial_t
-    elapsed: uint256 = t - initial_t
-    remaining: uint256 = duration - elapsed
-
-    return unsafe_div(initial_A * remaining + future_A * elapsed, duration)
-
-
-@internal
-@view
-def _scaled_A_raw_from_A(A_pool: uint256) -> uint256:
-    # Pool stores A as: A_true * N_COINS**(N_COINS-1) * 10_000.
-    # Solver expects: A_true * solver.A_PRECISION.
-    return unsafe_div(
-        A_pool * lp_oracle_2.A_PRECISION,
-        N_COINS**(N_COINS-1) * POOL_A_PRECISION
-    )
 
 
 @internal
@@ -203,8 +162,8 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     lp_price_ps: uint256 = 2 * vprice * isqrt(price_scale * 10**18) // 10**18
 
     # Calculating the LP oracle value
-    portfolio_value: uint256 = lp_oracle_2._portfolio_value(
-        self._scaled_A_raw_from_A(self._A_at_last_timestamp(pool)),
+    portfolio_value: uint256 = LPOracle.lp_oracle_2._portfolio_value(
+        LPOracle._scaled_A_raw_from_A(LPOracle._A_at_last_timestamp(LPOracle.IFXSwap(pool.address))),
         price_oracle * PRECISION // price_scale,
     )
     lp_price_oracle: uint256 = portfolio_value * D // pool_supply

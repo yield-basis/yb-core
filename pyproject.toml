@@ -21,6 +21,7 @@ ipython = "^9"
 # matplotlib = "^3"  # Only for graphs, otherwise not needed
 snekmate = "0.1.2"
 numpy = "^2"
+curve-std = {git = "https://github.com/curvefi/curve-std.git", rev = "09ad21756cd573cd6ac7afb32fb299fef32429cc"}
 
 [build-system]
 requires = ["poetry-core"]

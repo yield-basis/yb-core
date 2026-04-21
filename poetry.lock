@@ -861,6 +861,26 @@ test = ["certifi (>=2024)", "cryptography-vectors (==46.0.1)", "pretend (>=0.7)"
 test-randomorder = ["pytest-randomly"]
 
 [[package]]
+name = "curve-std"
+version = "0.1.0"
+description = "Add your description here"
+optional = false
+python-versions = ">=3.10"
+files = []
+develop = false
+
+[package.dependencies]
+snekmate = ">=0.1.2"
+titanoboa = ">=0.2.8"
+vyper = "0.4.3"
+
+[package.source]
+type = "git"
+url = "https://github.com/curvefi/curve-std.git"
+reference = "09ad21756cd573cd6ac7afb32fb299fef32429cc"
+resolved_reference = "09ad21756cd573cd6ac7afb32fb299fef32429cc"
+
+[[package]]
 name = "cytoolz"
 version = "1.0.1"
 description = "Cython implementation of Toolz: High performance functional utilities"
@@ -3701,4 +3721,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<4"
-content-hash = "84f4e96ed53e3954758786e57a9c2d08b6fc4ca9be5ac3d28647a0b4e3d45aa8"
+content-hash = "32ed77c687812fdee5e8db9164809f276d9287038851d8ba43654c550753dcae"
