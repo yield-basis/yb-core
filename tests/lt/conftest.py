@@ -49,7 +49,7 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
 
 
 @pytest.fixture(scope="function")
-def seed_cryptopool(stablecoin, collateral_token, cryptopool, admin):
+def seed_cryptopool(stablecoin, collateral_token, cryptopool, yb_market, admin):
     stablecoin._mint_for_testing(admin, 100_000 * 10**18)
     collateral_token._mint_for_testing(admin, 10**18)
     with boa.env.prank(admin):

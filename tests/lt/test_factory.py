@@ -24,7 +24,7 @@ def test_factory(factory, admin, accounts, stablecoin):
         factory.set_allocator(accounts[0], 10**18)
 
 
-def test_create_market(factory, cryptopool, seed_cryptopool, accounts, admin):
+def test_create_market(factory, cryptopool, stablecoin, collateral_token, accounts, admin):
     fee = int(0.007e18)
     rate = int(0.1e18 / (365 * 86400))
     ceiling = 100 * 10**6 * 10**18
@@ -35,3 +35,9 @@ def test_create_market(factory, cryptopool, seed_cryptopool, accounts, admin):
 
     with boa.env.prank(admin):
         factory.add_market(cryptopool.address, fee, rate, ceiling)
+
+    # Seed AFTER market creation
+    stablecoin._mint_for_testing(admin, 100_000 * 10**18)
+    collateral_token._mint_for_testing(admin, 10**18)
+    with boa.env.prank(admin):
+        cryptopool.add_liquidity([100_000 * 10**18, 10**18], 0)
