@@ -66,13 +66,13 @@ if __name__ == '__main__':
         gc = boa.load('contracts/dao/GaugeController.vy', yb.address, ve_yb.address)
         ve_yb.set_transfer_clearance_checker(gc.address)
 
-        amm_interface = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
+        amm_interface = boa.load_partial('contracts/twocrypto_pool/contracts/main/Twocrypto.vy')
         amm_impl = amm_interface.deploy_as_blueprint()
-        math_impl = boa.load('contracts/twocrypto_ng/contracts/main/StableswapMath.vy')
-        views_impl = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoView.vy')
+        math_impl = boa.load('contracts/twocrypto_pool/contracts/main/StableswapMath.vy')
+        views_impl = boa.load('contracts/twocrypto_pool/contracts/main/TwocryptoView.vy')
         gauge_impl = "0x0000000000000000000000000000000000000000"
 
-        factory = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoFactory.vy')
+        factory = boa.load('contracts/twocrypto_pool/contracts/main/TwocryptoFactory.vy')
         factory.initialise_ownership(admin, admin)
         factory.set_pool_implementation(amm_impl, 0)
         factory.set_gauge_implementation(gauge_impl)

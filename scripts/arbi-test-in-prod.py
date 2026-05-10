@@ -55,16 +55,16 @@ if __name__ == '__main__':
     print("Price:", price_oracle / 1e18)
 
     print("== Deploying Twocrypto ==")
-    amm_interface = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
+    amm_interface = boa.load_partial('contracts/twocrypto_pool/contracts/main/Twocrypto.vy')
     amm_impl = amm_interface.deploy_as_blueprint()
     boa.verify(amm_impl, verifier)
-    math_impl = boa.load('contracts/twocrypto_ng/contracts/main/StableswapMath.vy')
+    math_impl = boa.load('contracts/twocrypto_pool/contracts/main/StableswapMath.vy')
     boa.verify(math_impl, verifier)
-    views_impl = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoView.vy')
+    views_impl = boa.load('contracts/twocrypto_pool/contracts/main/TwocryptoView.vy')
     boa.verify(views_impl, verifier)
     gauge_impl = "0x0000000000000000000000000000000000000000"
 
-    factory = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoFactory.vy')
+    factory = boa.load('contracts/twocrypto_pool/contracts/main/TwocryptoFactory.vy')
     boa.verify(factory, verifier)
     factory.initialise_ownership(YB_MULTISIG, deployer)  # fee_receiver, admin
     factory.set_pool_implementation(amm_impl, 0)

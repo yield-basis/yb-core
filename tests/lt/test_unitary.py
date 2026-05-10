@@ -194,12 +194,13 @@ def test_preview_emergency_withdraw(cryptopool, yb_lt, collateral_token, stablec
 def test_loss_negative_value(cryptopool, collateral_token, stablecoin, yb_amm, yb_lt, yb_allocated,
                              accounts, admin):
     with boa.env.prank(admin):
+        adjustment_step = cryptopool.adjustment_step()
         cryptopool.apply_new_parameters(
             5 * 10**5,
             5 * 10**5,
             cryptopool.fee_gamma(),
-            cryptopool.allowed_extra_profit(),
-            cryptopool.adjustment_step(),
+            adjustment_step[0],
+            adjustment_step[1],
             cryptopool.ma_time())
 
     # Seed

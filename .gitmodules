@@ -1,4 +1,8 @@
-[submodule "contracts/twocrypto_ng"]
-	path = contracts/twocrypto_ng
+[submodule "twocrypto_pool"]
+	path = contracts/twocrypto_pool
+	url = git@github.com:curvefi/twocrypto-ng.git
+	branch = fxswap-ext-fee
+[submodule "twocrypto_lp_oracle"]
+	path = contracts/twocrypto_lp_oracle
 	url = git@github.com:curvefi/twocrypto-ng.git
 	branch = feat/lp-oracle

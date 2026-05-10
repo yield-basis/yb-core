@@ -1,6 +1,6 @@
 # @version 0.4.3
 
-from ..twocrypto_ng.contracts.main import LPOracle
+from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
 
 

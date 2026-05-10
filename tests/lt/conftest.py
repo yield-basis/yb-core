@@ -1,24 +1,48 @@
+from pathlib import Path
+
 import boa
 import pytest
 
 from eth.constants import ZERO_ADDRESS
 
 
+TWOCRYPTO_DIR = "contracts/twocrypto_pool/contracts/main"
+
+
+def _load_twocrypto_with_embedded_periphery(views_address, math_address):
+    twocrypto_code = Path(f"{TWOCRYPTO_DIR}/Twocrypto.vy").read_text()
+    twocrypto_code = twocrypto_code.replace(
+        "MATH = Math(empty(address))",
+        f"MATH = Math({math_address})",
+        1,
+    )
+    twocrypto_code = twocrypto_code.replace(
+        "VIEW = Views(empty(address))",
+        f"VIEW = Views({views_address})",
+        1,
+    )
+    return boa.loads_partial(twocrypto_code)
+
+
 @pytest.fixture(scope="session")
 def cryptopool(stablecoin, collateral_token, admin, accounts):
     with boa.env.prank(admin):
-        amm_interface = boa.load_partial('contracts/twocrypto_ng/contracts/main/Twocrypto.vy')
-        amm_impl = amm_interface.deploy_as_blueprint()
-        math_impl = boa.load('contracts/twocrypto_ng/contracts/main/StableswapMath.vy')
-        views_impl = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoView.vy')
+        math_impl = boa.load(f"{TWOCRYPTO_DIR}/StableswapMath.vy")
+        views_impl = boa.load(f"{TWOCRYPTO_DIR}/TwocryptoView.vy")
+        amm_partial = _load_twocrypto_with_embedded_periphery(
+            views_impl.address, math_impl.address
+        )
+        amm_impl = amm_partial.deploy_as_blueprint()
         gauge_impl = ZERO_ADDRESS.hex()
 
-        factory = boa.load('contracts/twocrypto_ng/contracts/main/TwocryptoFactory.vy')
+        factory = boa.load(f"{TWOCRYPTO_DIR}/TwocryptoFactory.vy")
         factory.initialise_ownership(admin, admin)
         factory.set_pool_implementation(amm_impl, 0)
         factory.set_gauge_implementation(gauge_impl)
         factory.set_views_implementation(views_impl)
         factory.set_math_implementation(math_impl)
+
+        amm_interface = boa.load_partial(f"{TWOCRYPTO_DIR}/Twocrypto.vy")
 
         # Params have nothing to do with reality!
         pool = amm_interface.at(
@@ -32,13 +56,13 @@ def cryptopool(stablecoin, collateral_token, admin, accounts):
                 int(0.0025 * 1e10),  # mid_fee: uint256
                 int(0.0045 * 1e10),  # out_fee: uint256
                 int(0.01 * 1e18),  # fee_gamma: uint256
-                int(1e-10 * 1e18),  # allowed_extra_profit: uint256
-                int(1e-6 * 1e18),  # adjustment_step: uint256
+                int(0.0001 / 100 * 10**18),  # adjustment_step_min: uint256
+                int(10 / 100 * 10**18),  # adjustment_step_max: uint256
                 600,  # ma_exp_time: uint256
                 100_000 * 10**18  # initial_price: uint256
             ))
-        pool.set_admin_fee(0)
-        pool.set_periphery(views_impl, math_impl)
+        # Default reserved_profit_fraction is 50%; zero out the admin share.
+        pool.set_fee_parameters(pool.reserved_profit_fraction(), 0)
 
         for addr in accounts + [admin]:
             with boa.env.prank(addr):
