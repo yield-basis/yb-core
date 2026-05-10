@@ -1,7 +1,7 @@
 import boa
 import pytest
 from numpy import exp, longdouble
-from hypothesis import settings
+from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, initialize
 from .conftest import RATE, RESERVE
@@ -28,7 +28,7 @@ def test_mint(yb, admin, accounts):
             yb.mint(accounts[0], 10**17)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def ivest(admin, yb, accounts):
     vest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, accounts[2], admin)
     with boa.env.prank(admin):
@@ -89,7 +89,9 @@ class StatefulYB(RuleBasedStateMachine):
 
 
 def test_yb(yb, admin, accounts, ivest):
-    StatefulYB.TestCase.settings = settings(max_examples=200, stateful_step_count=100)
+    StatefulYB.TestCase.settings = settings(
+        max_examples=200, stateful_step_count=100,
+        suppress_health_check=[HealthCheck.function_scoped_fixture])
     for k, v in locals().items():
         setattr(StatefulYB, k, v)
     run_state_machine_as_test(StatefulYB)

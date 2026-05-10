@@ -1,7 +1,7 @@
 import pytest
 import boa
 import os
-from hypothesis import settings
+from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
 from .conftest import N_POOLS
@@ -35,7 +35,7 @@ def gauges(lps, gc, dummy_factory, admin, accounts):
     return gauges
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def vote_for_gauges(gauges, yb, ve_yb, gc, accounts, admin):
     user = accounts[0]
     t = boa.env.evm.patch.timestamp
@@ -197,7 +197,9 @@ class StatefulG(RuleBasedStateMachine):
 
 @pytest.mark.parametrize("_tmp", range(int(os.environ.get("PYTEST_XDIST_WORKER_COUNT", 1))))  # This splits the test into small chunks which are easier to parallelize
 def test_gauges(lps, gauges, gc, yb, accounts, vote_for_gauges, ve_yb, _tmp):
-    StatefulG.TestCase.settings = settings(max_examples=100, stateful_step_count=20)
+    StatefulG.TestCase.settings = settings(
+        max_examples=100, stateful_step_count=20,
+        suppress_health_check=[HealthCheck.function_scoped_fixture])
     for k, v in locals().items():
         setattr(StatefulG, k, v)
     run_state_machine_as_test(StatefulG)

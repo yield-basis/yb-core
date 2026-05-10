@@ -2,7 +2,7 @@ import boa
 import pytest
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def virtual_pool(factory, flash, stablecoin, collateral_token, admin, accounts):
     stablecoin._mint_for_testing(flash.address, 10**12 * 10**18)
     vp_impl = boa.load_partial('contracts/VirtualPool.vy')

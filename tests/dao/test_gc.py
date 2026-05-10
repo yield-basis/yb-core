@@ -2,7 +2,7 @@ import boa
 import pytest
 import os
 from math import log
-from hypothesis import settings
+from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis import given
 from hypothesis.stateful import RuleBasedStateMachine, run_state_machine_as_test, rule, invariant
@@ -414,7 +414,7 @@ def test_early_emissions_vote(ve_yb, yb, gc, fake_gauges, accounts, admin):
     state.teardown()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def lock_for_accounts(yb, ve_yb, accounts, admin):
     with boa.env.prank(admin):
         for user in accounts:
@@ -439,6 +439,7 @@ def prepare_gauges(fake_gauges):
                 min_size=N_POOLS, max_size=N_POOLS),
             min_size=10, max_size=10)
 )
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges, vote_split, admin):
     with boa.env.prank(admin):
         for gauge in fake_gauges:
