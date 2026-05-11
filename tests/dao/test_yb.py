@@ -28,9 +28,14 @@ def test_mint(yb, admin, accounts):
             yb.mint(accounts[0], 10**17)
 
 
+@pytest.fixture(scope="session")
+def ivest_partial():
+    return boa.load_partial('contracts/dao/InflationaryVest.vy')
+
+
 @pytest.fixture
-def ivest(admin, yb, accounts):
-    vest = boa.load('contracts/dao/InflationaryVest.vy', yb.address, accounts[2], admin)
+def ivest(ivest_partial, admin, yb, accounts):
+    vest = ivest_partial.deploy(yb.address, accounts[2], admin)
     with boa.env.prank(admin):
         yb.mint(vest.address, VEST_AMOUNT)
         vest.start()

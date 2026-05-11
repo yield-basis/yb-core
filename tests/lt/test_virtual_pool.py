@@ -3,10 +3,9 @@ import pytest
 
 
 @pytest.fixture
-def virtual_pool(factory, flash, stablecoin, collateral_token, admin, accounts):
+def virtual_pool(factory, flash, vpool_interface, stablecoin, collateral_token, admin, accounts):
     stablecoin._mint_for_testing(flash.address, 10**12 * 10**18)
-    vp_impl = boa.load_partial('contracts/VirtualPool.vy')
-    pool = vp_impl.at(factory.markets(0).virtual_pool)
+    pool = vpool_interface.at(factory.markets(0).virtual_pool)
     for a in accounts + [admin]:
         with boa.env.prank(a):
             stablecoin.approve(pool.address, 2**256 - 1)
