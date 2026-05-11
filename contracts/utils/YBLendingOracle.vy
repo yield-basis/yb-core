@@ -30,12 +30,16 @@ interface LT:
     def staker() -> address: view
     def balanceOf(addr: address) -> uint256: view
     def min_admin_fee() -> uint256: view
+    def updated_balances() -> (uint256, uint256): view
 
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def get_state() -> AMMState: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
+
+interface ILiquidityGauge:
+    def totalSupply() -> uint256: view
 
 
 struct AMMState:
@@ -215,6 +219,17 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     return (yb_oracle, price_oracle * agg_price // 10**18)
 
 
+@internal
+@view
+def _staked_scale(lt: LT) -> uint256:
+    # Donation-attackable: anyone transferring LT directly to the gauge inflates assets-per-share.
+    # Only safe for lending markets that accept that risk.
+    staker: address = staticcall lt.staker()
+    staker_balance: uint256 = (staticcall lt.updated_balances())[1]
+    gauge_supply: uint256 = staticcall ILiquidityGauge(staker).totalSupply()
+    return (staker_balance + 1) * 10**18 // (gauge_supply + 1)
+
+
 @external
 @view
 def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
@@ -228,3 +243,18 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
 @view
 def price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
     return self._price(lt, use_balances)[0]
+
+
+@external
+@view
+def staked_price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
+    yb_oracle: uint256 = 0
+    asset_price: uint256 = 0
+    yb_oracle, asset_price = self._price(lt, use_balances)
+    return yb_oracle * self._staked_scale(lt) // asset_price
+
+
+@external
+@view
+def staked_price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
+    return self._price(lt, use_balances)[0] * self._staked_scale(lt) // 10**18
