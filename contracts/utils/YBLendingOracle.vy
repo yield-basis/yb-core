@@ -222,8 +222,6 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
 @internal
 @view
 def _staked_scale(lt: LT) -> uint256:
-    # Donation-attackable: anyone transferring LT directly to the gauge inflates assets-per-share.
-    # Only safe for lending markets that accept that risk.
     staker: address = staticcall lt.staker()
     staker_balance: uint256 = (staticcall lt.updated_balances())[1]
     gauge_supply: uint256 = staticcall ILiquidityGauge(staker).totalSupply()
