@@ -1,0 +1,59 @@
+[
+  {
+    "name": "executeVote",
+    "inputs": [{"name": "_voteId", "type": "uint256"}],
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "name": "vote",
+    "inputs": [
+      {"name": "_voteId", "type": "uint256"},
+      {"name": "_supports", "type": "bool"},
+      {"name": "_executesIfDecided", "type": "bool"}
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "name": "canExecute",
+    "inputs": [{"name": "_voteId", "type": "uint256"}],
+    "outputs": [{"name": "", "type": "bool"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "name": "getVote",
+    "inputs": [{"name": "_voteId", "type": "uint256"}],
+    "outputs": [
+      {"name": "open", "type": "bool"},
+      {"name": "executed", "type": "bool"},
+      {"name": "startDate", "type": "uint64"},
+      {"name": "snapshotBlock", "type": "uint64"},
+      {"name": "supportRequired", "type": "uint64"},
+      {"name": "minAcceptQuorum", "type": "uint64"},
+      {"name": "yea", "type": "uint256"},
+      {"name": "nay", "type": "uint256"},
+      {"name": "votingPower", "type": "uint256"},
+      {"name": "script", "type": "bytes"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "name": "voteTime",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint64"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "name": "votesLength",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
