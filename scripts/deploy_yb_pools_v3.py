@@ -64,9 +64,10 @@ NEW_TWOCRYPTO_IMPL_ID = (
 # --- YB DAO ------------------------------------------------------------------
 YB_FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 YB_DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
-# LTMigrator deployed and registered as a limit setter by the
-# create_vote_hybrid_factory vote. Reused — do not redeploy.
-LT_MIGRATOR = "0x2cdb9f485e718f551cfeea6c33cb7062ed37066c"
+# The on-chain LTMigrator at this address handles same-cryptopool migrations
+# only. For YB v3 (each old market migrates to a *new* cryptopool) we deploy
+# an upgraded LTMigrator (cross-pool aware) and register it as a limit setter.
+EXISTING_LT_MIGRATOR = "0x2cdb9f485e718f551cfeea6c33cb7062ed37066c"
 
 # Any address; executeVote is permissionless. Also acts as the Twocrypto
 # pool deployer (tx.origin), which gives it initialize() rights via the
@@ -337,16 +338,15 @@ def _find_lt_holder(lt_addr: str) -> str:
 
 
 def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int,
-                      holder: str, balance: int):
-    """Use the on-chain LTMigrator to migrate a real on-chain holder's
+                      holder: str, balance: int, migrator):
+    """Use the supplied LTMigrator to migrate a real on-chain holder's
     position from old market `spec['replaces_market_id']` to `new_market_id`.
     Raises if it fails."""
     old_market_id = spec["replaces_market_id"]
     old_lt = lt_interface.at(factory.markets(old_market_id).lt)
     new_lt = lt_interface.at(factory.markets(new_market_id).lt)
-    migrator = boa.load_partial("contracts/LTMigrator.vy").at(LT_MIGRATOR)
     print(
-        f"\n=== Testing LTMigrator @ {LT_MIGRATOR}: "
+        f"\n=== Testing LTMigrator @ {migrator.address}: "
         f"market #{old_market_id} ({old_lt.symbol()}) -> "
         f"#{new_market_id} ({new_lt.symbol()}) ==="
     )
@@ -422,6 +422,26 @@ def run_test_flow():
 
     boa.env.set_balance(TEST_EXECUTOR, 100 * 10**18)
 
+    # Deploy + register the upgraded LTMigrator (cross-cryptopool aware).
+    # The existing on-chain migrator's debt math assumes lt_from and lt_to
+    # share a cryptopool; v3 migrations don't. After registering the new
+    # one, we also unregister the old one so users can't accidentally route
+    # v3 migrations through buggy debt math.
+    with boa.env.prank(TEST_EXECUTOR):
+        migrator = boa.load(
+            "contracts/LTMigrator.vy",
+            yb_factory.STABLECOIN(),
+            factory_owner.address,
+        )
+    print(f"Deployed new LTMigrator: {migrator.address}")
+    with boa.env.prank(YB_DAO):
+        factory_owner.set_limit_setter(migrator.address, True)
+        factory_owner.set_limit_setter(EXISTING_LT_MIGRATOR, False)
+    print("Registered new LTMigrator; unregistered old LTMigrator "
+          f"@ {EXISTING_LT_MIGRATOR}.")
+    assert factory_owner.limit_setters(migrator.address) is True
+    assert factory_owner.limit_setters(EXISTING_LT_MIGRATOR) is False
+
     for spec in POOL_SPECS:
         print(
             f"\n=== Deploying YB v3 pool replacing market "
@@ -469,10 +489,11 @@ def run_test_flow():
         new_lt = lt_interface.at(lt_addr)
         seed_new_lt(new_lt, migration_assets)
 
-        # 7. Verify the existing on-chain LTMigrator moves funds from
-        #    the old market into the new one.
+        # 7. Verify the new LTMigrator moves funds from the old market
+        #    into the new one (different cryptopools → cross-pool path).
         test_lt_migration(
-            yb_factory, lt_interface, spec, n_after - 1, holder, balance
+            yb_factory, lt_interface, spec, n_after - 1,
+            holder, balance, migrator
         )
 
 

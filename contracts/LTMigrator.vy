@@ -5,7 +5,16 @@
 @author Scientia Spectra AG
 @license Copyright (c) 2025
 """
-from ethereum.ercs import IERC20
+
+
+interface ERC20:
+    def balanceOf(account: address) -> uint256: view
+    def transfer(to: address, amount: uint256) -> bool: nonpayable
+    def transferFrom(_from: address, to: address, amount: uint256) -> bool: nonpayable
+    def approve(spender: address, amount: uint256) -> bool: nonpayable
+    def allowance(owner: address, spender: address) -> uint256: view
+    def totalSupply() -> uint256: view
+    def decimals() -> uint8: view
 
 
 struct OraclizedValue:
@@ -25,6 +34,7 @@ interface MFOwner:
 
 interface Cryptopool:
     def balances(i: uint256) -> uint256: view
+    def price_oracle() -> uint256: view
 
 interface Gauge:
     def deposit(assets: uint256, receiver: address) -> uint256: nonpayable
@@ -43,7 +53,7 @@ interface LT:
     def approve(_to: address, _amount: uint256) -> bool: nonpayable
     def allowance(_from: address, _to: address) -> uint256: view
     def transferFrom(_from: address, _to: address, _amount: uint256) -> bool: nonpayable
-    def ASSET_TOKEN() -> IERC20: view
+    def ASSET_TOKEN() -> ERC20: view
     def amm() -> AMM: view
     def allocate_stablecoins(): nonpayable
     def CRYPTOPOOL() -> Cryptopool: view
@@ -56,12 +66,12 @@ interface LT:
     def stablecoin_allocation() -> uint256: view
 
 
-STABLECOIN: public(immutable(IERC20))
+STABLECOIN: public(immutable(ERC20))
 FACTORY_OWNER: public(immutable(MFOwner))
 
 
 @deploy
-def __init__(stablecoin: IERC20, factory_owner: MFOwner):
+def __init__(stablecoin: ERC20, factory_owner: MFOwner):
     STABLECOIN = stablecoin
     FACTORY_OWNER = factory_owner
 
@@ -69,16 +79,28 @@ def __init__(stablecoin: IERC20, factory_owner: MFOwner):
 @internal
 @view
 def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coefficient: uint256) -> uint256:
-    cpool: Cryptopool = staticcall lt_from.CRYPTOPOOL()
-    cpool_stables: uint256 = staticcall cpool.balances(0)
-    cpool_assets: uint256 = staticcall cpool.balances(1)
-
-    eassets: uint256 = 0
-    net_stables: int256 = 0
-    eassets, net_stables = staticcall lt_from.preview_emergency_withdraw(shares_in)
-    debt: uint256 = convert(convert(cpool_stables * eassets // cpool_assets, int256) - net_stables, uint256)
+    cpool_from: Cryptopool = staticcall lt_from.CRYPTOPOOL()
+    cpool_to: Cryptopool = staticcall lt_to.CRYPTOPOOL()
 
     assets: uint256 = staticcall lt_from.preview_withdraw(shares_in)
+
+    debt: uint256 = 0
+    if cpool_from == cpool_to:
+        # Same cryptopool: preserve the position's debt structure.
+        cpool_stables: uint256 = staticcall cpool_from.balances(0)
+        cpool_assets: uint256 = staticcall cpool_from.balances(1)
+        eassets: uint256 = 0
+        net_stables: int256 = 0
+        eassets, net_stables = staticcall lt_from.preview_emergency_withdraw(shares_in)
+        debt = convert(convert(cpool_stables * eassets // cpool_assets, int256) - net_stables, uint256)
+    else:
+        # Different cryptopool: rebase debt to the new pool's price_oracle so
+        # the deposit lands at the AMM's notion of equilibrium (the AMM's
+        # coll_value derives from the same oracle), regardless of old-pool
+        # drift / interest.
+        asset: ERC20 = staticcall lt_from.ASSET_TOKEN()
+        asset_decimals: uint256 = convert(staticcall asset.decimals(), uint256)
+        debt = assets * (staticcall cpool_to.price_oracle()) // (10**asset_decimals)
 
     return staticcall lt_to.preview_deposit(assets, debt * debt_coefficient // 10**18, False)
 
@@ -117,7 +139,7 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     assert staticcall FACTORY_OWNER.lt_in_factory(lt_to)
 
     # Prepare asset approvals (e.g. WBTC etc)
-    asset: IERC20 = staticcall lt_from.ASSET_TOKEN()
+    asset: ERC20 = staticcall lt_from.ASSET_TOKEN()
     if staticcall asset.allowance(self, lt_to.address) == 0:
         extcall asset.approve(lt_to.address, max_value(uint256))
     amm: AMM = staticcall lt_from.amm()
@@ -128,7 +150,20 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     # Withdraw from LT
     debt: uint256 = staticcall STABLECOIN.balanceOf(amm.address)
     assets: uint256 = extcall lt_from.withdraw(shares_in, 0)
-    debt = (staticcall STABLECOIN.balanceOf(amm.address)) - debt
+
+    cpool_from: Cryptopool = staticcall lt_from.CRYPTOPOOL()
+    cpool_to: Cryptopool = staticcall lt_to.CRYPTOPOOL()
+    if cpool_from == cpool_to:
+        # Same cryptopool: preserve the position's debt structure.
+        debt = (staticcall STABLECOIN.balanceOf(amm.address)) - debt
+    else:
+        # Different cryptopool: rebase debt to the new pool's price_oracle so
+        # the deposit lands at the AMM's notion of equilibrium (the AMM's
+        # coll_value derives from the same oracle), regardless of old-pool
+        # drift / interest. The freed crvUSD stays in the old AMM and is
+        # harvested by the subsequent lt_allocate_stablecoins(lt_from, 0).
+        asset_decimals: uint256 = convert(staticcall asset.decimals(), uint256)
+        debt = assets * (staticcall cpool_to.price_oracle()) // (10**asset_decimals)
 
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
