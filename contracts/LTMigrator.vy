@@ -31,6 +31,7 @@ struct LiquidityValues:
 interface MFOwner:
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
     def lt_in_factory(lt: LT) -> bool: view
+    def disabled_lts(lt: address) -> bool: view
 
 interface Cryptopool:
     def balances(i: uint256) -> uint256: view
@@ -79,6 +80,12 @@ def __init__(stablecoin: ERC20, factory_owner: MFOwner):
 @internal
 @view
 def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coefficient: uint256) -> uint256:
+    # Forward-only: refuse to migrate INTO a market the DAO has deprecated.
+    # disabled_lts is flipped by HybridFactoryOwner when admin disables a
+    # market via lt_allocate_stablecoins(lt, 0); deploying a fresh market
+    # via add_market leaves the flag at its default False.
+    assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
+
     cpool_from: Cryptopool = staticcall lt_from.CRYPTOPOOL()
     cpool_to: Cryptopool = staticcall lt_to.CRYPTOPOOL()
 
@@ -134,9 +141,12 @@ def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (u
 @internal
 def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256, debt_coefficient: uint256,
                    _for: address) -> uint256:
-    # Check that LTs are in the factory
+    # Check that LTs are in the factory; refuse to migrate INTO a market the
+    # DAO has deprecated (disabled_lts is the same flag the factory owner
+    # uses to gate non-admin deallocation calls).
     assert staticcall FACTORY_OWNER.lt_in_factory(lt_from)
     assert staticcall FACTORY_OWNER.lt_in_factory(lt_to)
+    assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
 
     # Prepare asset approvals (e.g. WBTC etc)
     asset: ERC20 = staticcall lt_from.ASSET_TOKEN()
