@@ -122,37 +122,61 @@ def ensure_curve_vote_executed(vote_id: int = CURVE_VOTE_ID):
 
 # Mainnet token addresses
 WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"   # 8 decimals
+CBBTC = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"  # 8 decimals
+TBTC = "0x18084fbA666a33d37592fA2633fD49a74DD93a88"   # 18 decimals
+WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"   # 18 decimals
 CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"  # 18 decimals
 
 MAGIC_GAMMA = 11111111111  # Twocrypto bootstrap-mode gamma
 
-# Per-pool spec for the new YB v3 pools. Currently only WBTC.
-# `initial_price` is filled in at runtime from CoinGecko (price of coin1 in
-# coin0, 1e18 precision). `coingecko_id` is the API id for coin1 in USD —
-# crvUSD is treated as 1:1 USD.
+# Per-pool spec for the new YB v3 pools. `initial_price` is filled in at
+# runtime from CoinGecko (price of coin1 in coin0, 1e18 precision); each
+# pool entry shares one of the base specs below.
+
+# Shared cryptopool + YB params for the three BTC variants.
+_BTC_BASE = {
+    "coin0": CRVUSD,
+    "coingecko_id": "bitcoin",
+    "A": 5 * 10000 * 2**2,
+    "mid_fee": int(0.0025 * 10**10),
+    "out_fee": int(0.0045 * 10**10),
+    "fee_gamma": int(0.01 * 10**18),
+    "adjustment_step_min": int(0.0001 / 100 * 10**18),
+    "adjustment_step_max": int(10 / 100 * 10**18),
+    "ma_exp_time": 600,
+    "reserved_profit_fraction": 5 * 10**9,  # 50% in 1e10 precision
+    "leverage_fee": int(0.0092 * 10**18),
+    "rate": int(0.035 * 10**18 // (86400 * 365)),
+    "debt_cap": 2 * 10**6 * 10**18,
+}
+
+# WETH pool — wider gamma + fees, longer MA. Tracks the existing on-chain
+# yb-WETH market params (A=25_000, ma=866, fees from create_weth_pool.py).
+_ETH_BASE = {
+    "coin0": CRVUSD,
+    "coingecko_id": "ethereum",
+    "A": 25_000,
+    "mid_fee": 60_000_000,        # 0.6%
+    "out_fee": 220_000_000,       # 2.2%
+    "fee_gamma": 1_395_000_000_000_000,  # 0.001395
+    "adjustment_step_min": int(0.0001 / 100 * 10**18),
+    "adjustment_step_max": int(10 / 100 * 10**18),
+    "ma_exp_time": 866,
+    "reserved_profit_fraction": 5 * 10**9,
+    "leverage_fee": int(0.014 * 10**18),
+    "rate": int(2 * 0.005 * 10**18 // (86400 * 365)),
+    "debt_cap": 2 * 25_000_000 * 10**18,
+}
+
 POOL_SPECS = [
-    {
-        "name": "Yield Basis WBTC",
-        "symbol": "YB-WBTC",
-        "coin0": CRVUSD,  # stablecoin first, matching YB factory convention
-        "coin1": WBTC,
-        "coingecko_id": "bitcoin",
-        "A": 5 * 10000 * 2**2,
-        "mid_fee": int(0.0025 * 10**10),
-        "out_fee": int(0.0045 * 10**10),
-        "fee_gamma": int(0.01 * 10**18),
-        "adjustment_step_min": int(0.0001 / 100 * 10**18),
-        "adjustment_step_max": int(10 / 100 * 10**18),
-        "ma_exp_time": 600,
-        # reserved_profit_fraction in 1e10 precision (FEE_PRECISION). 50% = 5e9.
-        "reserved_profit_fraction": 5 * 10**9,
-        # YB add_market params (mirrors create_vote_first_markets.py)
-        "leverage_fee": int(0.0092 * 10**18),
-        "rate": int(0.035 * 10**18 // (86400 * 365)),
-        "debt_cap": 2 * 10**6 * 10**18,
-        # YB market index this pool will eventually replace
-        "replaces_market_id": 3,
-    },
+    {**_BTC_BASE, "name": "Yield Basis WBTC",  "symbol": "YB-WBTC",
+     "coin1": WBTC,  "replaces_market_id": 3},
+    {**_BTC_BASE, "name": "Yield Basis cbBTC", "symbol": "YB-cbBTC",
+     "coin1": CBBTC, "replaces_market_id": 4},
+    {**_BTC_BASE, "name": "Yield Basis tBTC",  "symbol": "YB-tBTC",
+     "coin1": TBTC,  "replaces_market_id": 5},
+    {**_ETH_BASE, "name": "Yield Basis WETH",  "symbol": "YB-WETH",
+     "coin1": WETH,  "replaces_market_id": 6},
 ]
 
 
@@ -234,50 +258,86 @@ def simulate_yb_vote(actions: list[dict]):
 
 # --- bootstrap initial liquidity --------------------------------------------
 
-def seed_new_lt(new_lt, seed_assets: int):
-    """Bootstrap the new LT with a small first deposit from TEST_EXECUTOR.
-    The migrator's preview math divides by new_lt.totalSupply, so the LT
-    must have non-zero supply before we can migrate into it."""
-    erc20_partial = boa.load_partial("contracts/testing/ERC20Mock.vy")
-    asset = erc20_partial.at(new_lt.ASSET_TOKEN())
+ERC20_ABI_PATH = os.path.join(os.path.dirname(__file__), "erc20.abi.json")
+
+
+def _load_erc20(addr: str):
+    """Load an ERC20 via ABI only — avoids Vyper bytecode-cast warning
+    paths that crash on non-UTF8 storage in some Solidity contracts (cbBTC)."""
+    return boa.load_abi(ERC20_ABI_PATH, name="ERC20").at(addr)
+
+
+WETH_DEPOSIT_ABI = [{
+    "name": "deposit", "inputs": [], "outputs": [],
+    "stateMutability": "payable", "type": "function",
+}]
+
+
+def _give_asset(asset, account: str, amount: int):
+    """Mint `amount` of `asset` to `account` on the fork.
+    Uses boa.deal for normal ERC20s; falls back to WETH.deposit() for WETH,
+    whose totalSupply is computed from the contract's ETH balance."""
+    if asset.address.lower() == WETH.lower():
+        weth_deposit = boa.loads_abi(
+            __import__("json").dumps(WETH_DEPOSIT_ABI), name="WETH9"
+        ).at(asset.address)
+        boa.env.set_balance(account, boa.env.get_balance(account) + amount)
+        with boa.env.prank(account):
+            weth_deposit.deposit(value=amount)
+        return
+    boa.deal(asset, account, amount)
+
+
+def seed_new_lt(new_lt, migration_assets: int):
+    """Bootstrap the new LT with enough collateral that the migrator's
+    preview_deposit won't overflow amm.max_debt() (which scales with the
+    seeded collateral). Seeds at least 0.001 of the asset; otherwise 2×
+    the actual asset amount the migrator will deposit (from
+    old_lt.preview_withdraw)."""
+    asset = _load_erc20(new_lt.ASSET_TOKEN())
     twocrypto = boa.load_partial(
         "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
     ).at(new_lt.CRYPTOPOOL())
-    debt = seed_assets * twocrypto.price_oracle() // (10 ** asset.decimals())
+    decimals = asset.decimals()
+    price_oracle = twocrypto.price_oracle()
 
-    boa.deal(asset, TEST_EXECUTOR, seed_assets)
+    seed_assets = max(10 ** (decimals - 3), 2 * migration_assets)
+    debt = seed_assets * price_oracle // 10**decimals
+
+    _give_asset(asset, TEST_EXECUTOR, seed_assets)
     with boa.env.prank(TEST_EXECUTOR):
         asset.approve(new_lt.address, 2**256 - 1)
         new_lt.deposit(seed_assets, debt, 0, TEST_EXECUTOR)
 
     supply = new_lt.totalSupply()
-    print(f"  seeded {new_lt.symbol()}: totalSupply={supply / 1e18}")
+    print(f"  seeded {new_lt.symbol()}: "
+          f"assets={seed_assets / 10**decimals} totalSupply={supply / 1e18}")
     assert supply > 0, "seed deposit produced 0 LT shares"
 
 
 # --- LTMigrator test ---------------------------------------------------------
 
 def _find_lt_holder(lt_addr: str) -> str:
-    """Return a non-gauge address with a real direct LT balance — the kind
-    of user the migrator is meant to handle. Skips the gauge (top holder)
-    because its balance belongs to stakers, not the gauge itself."""
+    """Return the SMALLEST non-gauge address with a real direct LT balance.
+    Picking the smallest keeps the migration test cheap to seed against."""
     r = requests.get(
         f"https://api.ethplorer.io/getTopTokenHolders/{lt_addr}",
         params={"apiKey": "freekey", "limit": 10},
         timeout=20,
     )
     r.raise_for_status()
-    for h in r.json().get("holders", []):
-        addr = h["address"]
-        bal = int(h["balance"])
-        if addr.lower() == GAUGE_HOLDERS_TO_SKIP.lower():
-            continue
-        if bal > 0:
-            return addr
-    raise RuntimeError(f"No direct LT holder found for {lt_addr}")
+    candidates = [
+        h for h in r.json().get("holders", [])
+        if h["address"].lower() != GAUGE_HOLDERS_TO_SKIP.lower()
+        and int(h["balance"]) > 0
+    ]
+    if not candidates:
+        raise RuntimeError(f"No direct LT holder found for {lt_addr}")
+    return min(candidates, key=lambda h: int(h["balance"]))["address"]
 
 
-def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int):
+def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int,
+                      holder: str, balance: int):
     """Use the on-chain LTMigrator to migrate a real on-chain holder's
     position from old market `spec['replaces_market_id']` to `new_market_id`.
     Raises if it fails."""
@@ -290,11 +350,6 @@ def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int):
         f"market #{old_market_id} ({old_lt.symbol()}) -> "
         f"#{new_market_id} ({new_lt.symbol()}) ==="
     )
-
-    global GAUGE_HOLDERS_TO_SKIP
-    GAUGE_HOLDERS_TO_SKIP = factory.markets(old_market_id).staker
-    holder = _find_lt_holder(old_lt.address)
-    balance = old_lt.balanceOf(holder)
     print(f"  holder={holder} balance={balance / 1e18} {old_lt.symbol()}")
 
     received_before = new_lt.balanceOf(holder)
@@ -398,14 +453,27 @@ def run_test_flow():
             pool, TEST_EXECUTOR, [TEST_EXECUTOR, lt_addr, vpool_addr], spec
         )
 
-        # 5. Seed the new LT with a small first deposit so the migrator's
-        #    proportional math has non-zero supply to divide against.
-        new_lt = lt_interface.at(lt_addr)
-        seed_new_lt(new_lt, 10**5)  # 0.001 WBTC (8 decimals)
+        # 5. Find the migration test holder up front so we can size the
+        #    seed deposit against their balance.
+        global GAUGE_HOLDERS_TO_SKIP
+        old_market_id = spec["replaces_market_id"]
+        old_lt = lt_interface.at(yb_factory.markets(old_market_id).lt)
+        GAUGE_HOLDERS_TO_SKIP = yb_factory.markets(old_market_id).staker
+        holder = _find_lt_holder(old_lt.address)
+        balance = old_lt.balanceOf(holder)
 
-        # 6. Verify the existing on-chain LTMigrator can move funds from
+        # 6. Seed the new LT proportionally so amm.max_debt() can absorb
+        #    the migration. Use the asset amount the migrator will actually
+        #    deposit (LT shares are leveraged, so face value understates it).
+        migration_assets = old_lt.preview_withdraw(balance)
+        new_lt = lt_interface.at(lt_addr)
+        seed_new_lt(new_lt, migration_assets)
+
+        # 7. Verify the existing on-chain LTMigrator moves funds from
         #    the old market into the new one.
-        test_lt_migration(yb_factory, lt_interface, spec, n_after - 1)
+        test_lt_migration(
+            yb_factory, lt_interface, spec, n_after - 1, holder, balance
+        )
 
 
 # --- entrypoint --------------------------------------------------------------
