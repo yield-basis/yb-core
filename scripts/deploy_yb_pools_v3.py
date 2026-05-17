@@ -64,6 +64,9 @@ NEW_TWOCRYPTO_IMPL_ID = (
 # --- YB DAO ------------------------------------------------------------------
 YB_FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 YB_DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
+# LTMigrator deployed and registered as a limit setter by the
+# create_vote_hybrid_factory vote. Reused — do not redeploy.
+LT_MIGRATOR = "0x2cdb9f485e718f551cfeea6c33cb7062ed37066c"
 
 # Any address; executeVote is permissionless. Also acts as the Twocrypto
 # pool deployer (tx.origin), which gives it initialize() rights via the
@@ -133,7 +136,7 @@ POOL_SPECS = [
         "symbol": "YB-WBTC",
         "coin0": CRVUSD,  # stablecoin first, matching YB factory convention
         "coin1": WBTC,
-        "coingecko_id": "wrapped-bitcoin",
+        "coingecko_id": "bitcoin",
         "A": 5 * 10000 * 2**2,
         "mid_fee": int(0.0025 * 10**10),
         "out_fee": int(0.0045 * 10**10),
@@ -141,6 +144,8 @@ POOL_SPECS = [
         "adjustment_step_min": int(0.0001 / 100 * 10**18),
         "adjustment_step_max": int(10 / 100 * 10**18),
         "ma_exp_time": 600,
+        # reserved_profit_fraction in 1e10 precision (FEE_PRECISION). 50% = 5e9.
+        "reserved_profit_fraction": 5 * 10**9,
         # YB add_market params (mirrors create_vote_first_markets.py)
         "leverage_fee": int(0.0092 * 10**18),
         "rate": int(0.035 * 10**18 // (86400 * 365)),
@@ -206,6 +211,16 @@ def build_yb_add_market_action(factory_owner, cryptopool: str, spec: dict) -> di
     return {"to": factory_owner.address, "data": calldata}
 
 
+def build_disable_old_lt_action(factory_owner, old_lt_addr: str) -> dict:
+    """Return {to, data} for a FactoryOwner call that marks the old LT as
+    disabled. Required so that LTMigrator (a non-admin limit setter) can
+    later call lt_allocate_stablecoins(old_lt, 0) to free its allocation."""
+    calldata = factory_owner.lt_allocate_stablecoins.prepare_calldata(
+        old_lt_addr, 0
+    )
+    return {"to": factory_owner.address, "data": calldata}
+
+
 def simulate_yb_vote(actions: list[dict]):
     """Simulate a YB Aragon-OSx vote by raw_calling each action from the DAO.
     Matches what the voting plugin does on executeVote.
@@ -217,17 +232,106 @@ def simulate_yb_vote(actions: list[dict]):
     print("YB vote actions executed.")
 
 
+# --- bootstrap initial liquidity --------------------------------------------
+
+def seed_new_lt(new_lt, seed_assets: int):
+    """Bootstrap the new LT with a small first deposit from TEST_EXECUTOR.
+    The migrator's preview math divides by new_lt.totalSupply, so the LT
+    must have non-zero supply before we can migrate into it."""
+    erc20_partial = boa.load_partial("contracts/testing/ERC20Mock.vy")
+    asset = erc20_partial.at(new_lt.ASSET_TOKEN())
+    twocrypto = boa.load_partial(
+        "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
+    ).at(new_lt.CRYPTOPOOL())
+    debt = seed_assets * twocrypto.price_oracle() // (10 ** asset.decimals())
+
+    boa.deal(asset, TEST_EXECUTOR, seed_assets)
+    with boa.env.prank(TEST_EXECUTOR):
+        asset.approve(new_lt.address, 2**256 - 1)
+        new_lt.deposit(seed_assets, debt, 0, TEST_EXECUTOR)
+
+    supply = new_lt.totalSupply()
+    print(f"  seeded {new_lt.symbol()}: totalSupply={supply / 1e18}")
+    assert supply > 0, "seed deposit produced 0 LT shares"
+
+
+# --- LTMigrator test ---------------------------------------------------------
+
+def _find_lt_holder(lt_addr: str) -> str:
+    """Return a non-gauge address with a real direct LT balance — the kind
+    of user the migrator is meant to handle. Skips the gauge (top holder)
+    because its balance belongs to stakers, not the gauge itself."""
+    r = requests.get(
+        f"https://api.ethplorer.io/getTopTokenHolders/{lt_addr}",
+        params={"apiKey": "freekey", "limit": 10},
+        timeout=20,
+    )
+    r.raise_for_status()
+    for h in r.json().get("holders", []):
+        addr = h["address"]
+        bal = int(h["balance"])
+        if addr.lower() == GAUGE_HOLDERS_TO_SKIP.lower():
+            continue
+        if bal > 0:
+            return addr
+    raise RuntimeError(f"No direct LT holder found for {lt_addr}")
+
+
+def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int):
+    """Use the on-chain LTMigrator to migrate a real on-chain holder's
+    position from old market `spec['replaces_market_id']` to `new_market_id`.
+    Raises if it fails."""
+    old_market_id = spec["replaces_market_id"]
+    old_lt = lt_interface.at(factory.markets(old_market_id).lt)
+    new_lt = lt_interface.at(factory.markets(new_market_id).lt)
+    migrator = boa.load_partial("contracts/LTMigrator.vy").at(LT_MIGRATOR)
+    print(
+        f"\n=== Testing LTMigrator @ {LT_MIGRATOR}: "
+        f"market #{old_market_id} ({old_lt.symbol()}) -> "
+        f"#{new_market_id} ({new_lt.symbol()}) ==="
+    )
+
+    global GAUGE_HOLDERS_TO_SKIP
+    GAUGE_HOLDERS_TO_SKIP = factory.markets(old_market_id).staker
+    holder = _find_lt_holder(old_lt.address)
+    balance = old_lt.balanceOf(holder)
+    print(f"  holder={holder} balance={balance / 1e18} {old_lt.symbol()}")
+
+    received_before = new_lt.balanceOf(holder)
+    with boa.env.prank(holder):
+        old_lt.approve(migrator.address, 2**256 - 1)
+        preview = migrator.preview_migrate_plain(
+            old_lt.address, new_lt.address, balance
+        )
+        print(f"  preview_migrate_plain: {preview / 1e18}")
+        try:
+            migrator.migrate_plain(
+                old_lt.address,
+                new_lt.address,
+                balance,
+                int(preview * 0.998),
+            )
+        except Exception as e:
+            print(f"  ✗ migrate_plain reverted: {e}")
+            raise
+
+    received = new_lt.balanceOf(holder) - received_before
+    print(f"  ✓ Received {received / 1e18} {new_lt.symbol()}")
+    assert received > 0, "migrate_plain returned 0 shares"
+
+
+GAUGE_HOLDERS_TO_SKIP = "0x0000000000000000000000000000000000000000"
+
+
 # --- pool initialization (whitelist) -----------------------------------------
 
 def initialize_pool_whitelist(pool, executor: str, allowlist: list[str], spec: dict):
     """Call pool.initialize() from TEST_EXECUTOR with the LP allowlist.
     Requires the pool to have been deployed in bootstrap mode (magic gamma)."""
-    FEE_PRECISION = 10**10
-    rpf = FEE_PRECISION * 50 // 100   # reserved_profit_fraction = 50%
     admin_fee = 0                     # LPs get the full admin share
     with boa.env.prank(executor):
         pool.initialize(
-            rpf,
+            spec["reserved_profit_fraction"],
             admin_fee,
             "0x0000000000000000000000000000000000000000",  # policy
             spec["initial_price"],
@@ -246,6 +350,7 @@ def run_test_flow():
         "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
     )
     yb_factory = boa.load_partial("contracts/Factory.vy").at(YB_FACTORY)
+    lt_interface = boa.load_partial("contracts/LT.vy")
     factory_owner = boa.load_partial("contracts/HybridFactoryOwner.vy").at(
         yb_factory.admin()
     )
@@ -273,8 +378,12 @@ def run_test_flow():
         pool = pool_interface.at(pool_addr)
 
         n_before = yb_factory.market_count()
-        action = build_yb_add_market_action(factory_owner, pool_addr, spec)
-        simulate_yb_vote([action])
+        old_lt_addr = yb_factory.markets(spec["replaces_market_id"]).lt
+        actions = [
+            build_yb_add_market_action(factory_owner, pool_addr, spec),
+            build_disable_old_lt_action(factory_owner, old_lt_addr),
+        ]
+        simulate_yb_vote(actions)
         n_after = yb_factory.market_count()
         assert n_after == n_before + 1, (
             f"market_count did not increment ({n_before} -> {n_after})"
@@ -288,6 +397,15 @@ def run_test_flow():
         initialize_pool_whitelist(
             pool, TEST_EXECUTOR, [TEST_EXECUTOR, lt_addr, vpool_addr], spec
         )
+
+        # 5. Seed the new LT with a small first deposit so the migrator's
+        #    proportional math has non-zero supply to divide against.
+        new_lt = lt_interface.at(lt_addr)
+        seed_new_lt(new_lt, 10**5)  # 0.001 WBTC (8 decimals)
+
+        # 6. Verify the existing on-chain LTMigrator can move funds from
+        #    the old market into the new one.
+        test_lt_migration(yb_factory, lt_interface, spec, n_after - 1)
 
 
 # --- entrypoint --------------------------------------------------------------
