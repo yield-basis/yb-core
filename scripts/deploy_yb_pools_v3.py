@@ -377,6 +377,34 @@ def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int,
 
 GAUGE_HOLDERS_TO_SKIP = "0x0000000000000000000000000000000000000000"
 
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+# --- implementation refresh -------------------------------------------------
+#
+# Checked once (manually, not at runtime): AMM and LT bytecode have diverged
+# from on-chain; VirtualPool still matches the deployed blueprint exactly.
+# So the v3 vote deploys fresh AMM + LT blueprints and installs them via
+# factory_owner.set_implementations; VirtualPool / price_oracle / staker
+# are passed empty so the factory leaves them as-is.
+
+def install_new_implementations(yb_factory, factory_owner):
+    amm_blueprint = boa.load_partial("contracts/AMM.vy").deploy_as_blueprint()
+    lt_blueprint = boa.load_partial("contracts/LT.vy").deploy_as_blueprint()
+    print(f"  New AMM blueprint: {amm_blueprint.address}")
+    print(f"  New LT  blueprint: {lt_blueprint.address}")
+    with boa.env.prank(YB_DAO):
+        factory_owner.set_implementations(
+            amm_blueprint.address,
+            lt_blueprint.address,
+            ZERO_ADDRESS,  # VirtualPool: unchanged
+            ZERO_ADDRESS,  # PriceOracle: unchanged
+            ZERO_ADDRESS,  # Staker: unchanged
+        )
+    assert yb_factory.amm_impl() == amm_blueprint.address
+    assert yb_factory.lt_impl() == lt_blueprint.address
+    print("  set_implementations installed AMM + LT.")
+
 
 # --- pool initialization (whitelist) -----------------------------------------
 
@@ -421,6 +449,11 @@ def run_test_flow():
     )
 
     boa.env.set_balance(TEST_EXECUTOR, 100 * 10**18)
+
+    # Install the upgraded AMM + LT blueprints so add_market below uses them.
+    # VirtualPool is unchanged on-chain — see install_new_implementations.
+    print("\n=== Installing new AMM + LT implementations ===")
+    install_new_implementations(yb_factory, factory_owner)
 
     # Deploy + register the upgraded LTMigrator (cross-cryptopool aware).
     # The existing on-chain migrator's debt math assumes lt_from and lt_to
