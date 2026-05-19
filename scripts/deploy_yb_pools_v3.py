@@ -4,8 +4,10 @@ Deploy new YB v3 pools, a cross-pool LTMigrator, and the 5 Aragon-OSx
 votes that the YB DAO needs to ratify them.
 
 Usage:
-  python deploy_yb_pools_v3.py            # production deploy against NETWORK
-  python deploy_yb_pools_v3.py --test     # forked dry-run via boa.fork
+  python deploy_yb_pools_v3.py             # production: deploy + create votes
+  python deploy_yb_pools_v3.py --test      # forked dry-run via boa.fork
+  python deploy_yb_pools_v3.py --activate  # post-vote: initialize + seed markets
+  python deploy_yb_pools_v3.py --activate --test   # forked dry-run of activation
 
 Off-vote actions (the deployer EOA does these directly):
   1. Execute Curve Ownership-DAO vote 1408 (activates the new Twocrypto
@@ -24,15 +26,22 @@ YB DAO votes (created on Aragon-OSx via TokenVoting createProposal):
   Vote 4 — add_market for new tBTC pool + disable old tBTC LT.
   Vote 5 — add_market for new WETH pool + disable old WETH LT.
 
-Votes 2-5 are guarded by the on-chain CallComparator so they can only
-execute once Vote 1 has flipped Factory.amm_impl() / Factory.lt_impl()
-to the new blueprints — same pattern as scripts/voting/change_btc_fees_2.py.
+Votes 2-5 are guarded by the on-chain CallComparator (same pattern as
+scripts/voting/change_btc_fees_2.py): each can only execute once Vote 1 has
+flipped Factory.amm_impl() / lt_impl() to the new blueprints, AND only at
+an exact Factory.market_count() — which chains them to execute strictly in
+deploy order (WBTC, cbBTC, tBTC, WETH) and exactly once each.
 
 In --test mode the script also:
   - simulates Vote 2 BEFORE Vote 1 and confirms it reverts at the guard,
   - simulates each vote in order from YB_DAO with raw_call,
-  - initializes each new pool's LP allowlist and seeds the new LT,
+  - runs the --activate path on the fork (initialize + seed),
   - tests the new LTMigrator end-to-end on a real on-chain holder.
+
+--activate is the separate post-vote step: once Votes 2-5 have executed it
+discovers the new markets on-chain, reports how much of each collateral the
+activation account (yb-deployer, the pool deployer) must hold, and then
+initializes each pool's LP allowlist and seeds each LT. It is idempotent.
 """
 import json
 import os
@@ -101,6 +110,7 @@ TEST_EXECUTOR = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
 
 AMM_IMPL_SELECTOR = method_id("amm_impl()")
 LT_IMPL_SELECTOR = method_id("lt_impl()")
+MARKET_COUNT_SELECTOR = method_id("market_count()")
 
 # Aragon-OSx TokenVoting limits a creator to one active proposal at a time
 # (≈1 vote per day per address), so the 5 votes are spread across 5 keys.
@@ -229,6 +239,15 @@ POOL_SPECS = [
      "coin1": WETH,  "replaces_market_id": 6},
 ]
 
+# Collateral, in human units, that --activate seeds into each new market.
+# The activation account must hold these before running --activate.
+SEED_AMOUNTS = {
+    "YB-WBTC":  0.01,
+    "YB-cbBTC": 0.01,
+    "YB-tBTC":  0.01,
+    "YB-WETH":  0.1,
+}
+
 
 COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
 
@@ -351,31 +370,17 @@ def _give_asset(asset, account: str, amount: int):
     boa.deal(asset, account, amount)
 
 
-def seed_new_lt(new_lt, migration_assets: int):
-    """Bootstrap the new LT with enough collateral that the migrator's
-    preview_deposit won't overflow amm.max_debt() (which scales with the
-    seeded collateral). Seeds at least 0.001 of the asset; otherwise 2×
-    the actual asset amount the migrator will deposit (from
-    old_lt.preview_withdraw)."""
-    asset = _load_erc20(new_lt.ASSET_TOKEN())
-    twocrypto = boa.load_partial(
-        "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
-    ).at(new_lt.CRYPTOPOOL())
+def leverage_deposit(lt, asset, cryptopool, seed_assets: int) -> int:
+    """Approve and leverage-deposit `seed_assets` of `asset` into `lt` from the
+    current EOA, which must already hold the assets. Returns LT shares minted.
+    The matching crvUSD debt is borrowed from the factory allocation, so the
+    EOA only needs the collateral asset itself."""
     decimals = asset.decimals()
-    price_oracle = twocrypto.price_oracle()
-
-    seed_assets = max(10 ** (decimals - 3), 2 * migration_assets)
-    debt = seed_assets * price_oracle // 10**decimals
-
-    _give_asset(asset, TEST_EXECUTOR, seed_assets)
-    with boa.env.prank(TEST_EXECUTOR):
-        asset.approve(new_lt.address, 2**256 - 1)
-        new_lt.deposit(seed_assets, debt, 0, TEST_EXECUTOR)
-
-    supply = new_lt.totalSupply()
-    print(f"  seeded {new_lt.symbol()}: "
-          f"assets={seed_assets / 10**decimals} totalSupply={supply / 1e18}")
-    assert supply > 0, "seed deposit produced 0 LT shares"
+    debt = seed_assets * cryptopool.price_oracle() // 10**decimals
+    asset.approve(lt.address, 2**256 - 1)
+    before = lt.totalSupply()
+    lt.deposit(seed_assets, debt, 0, boa.env.eoa)
+    return lt.totalSupply() - before
 
 
 # --- LTMigrator test ---------------------------------------------------------
@@ -489,17 +494,113 @@ def deploy_new_migrator(yb_factory, factory_owner, etherscan=None):
 
 # --- pool initialization (whitelist) -----------------------------------------
 
-def initialize_pool_whitelist(pool, executor: str, allowlist: list[str], spec: dict):
+def initialize_pool(pool, allowlist: list[str], reserved_profit_fraction: int,
+                    initial_price: int):
+    """Take a bootstrap-mode Twocrypto pool out of init mode: set fee params
+    and the LP allowlist. The current EOA must be the pool's deploy_eoa."""
     admin_fee = 0                     # LPs get the full admin share
-    with boa.env.prank(executor):
-        pool.initialize(
-            spec["reserved_profit_fraction"],
-            admin_fee,
-            "0x0000000000000000000000000000000000000000",  # policy
-            spec["initial_price"],
-            allowlist,
+    pool.initialize(
+        reserved_profit_fraction,
+        admin_fee,
+        ZERO_ADDRESS,                 # policy
+        initial_price,
+        allowlist,
+    )
+    print(f"  initialized pool {pool.address} allowlist={allowlist}")
+
+
+# --- post-vote activation ----------------------------------------------------
+
+def discover_new_markets(yb_factory, pool_interface) -> dict:
+    """Map each POOL_SPECS symbol to its on-chain YB market id. A market is
+    matched by its cryptopool's collateral (coins[1]); only markets newer than
+    the replaced ones are considered. Raises if any market is missing."""
+    replaced_ids = {s["replaces_market_id"] for s in POOL_SPECS}
+    first_new_id = max(replaced_ids) + 1
+    count = yb_factory.market_count()
+
+    found = {}
+    for mid in range(count - 1, first_new_id - 1, -1):
+        cryptopool = pool_interface.at(yb_factory.markets(mid).cryptopool)
+        coin1 = cryptopool.coins(1)
+        for spec in POOL_SPECS:
+            if spec["symbol"] not in found and \
+                    coin1.lower() == spec["coin1"].lower():
+                found[spec["symbol"]] = mid
+                break
+
+    missing = [s["symbol"] for s in POOL_SPECS if s["symbol"] not in found]
+    if missing:
+        raise RuntimeError(
+            f"No new market found for {missing} — have Votes 2-5 executed?"
         )
-    print(f"Pool initialized with allowlist: {allowlist}")
+    return found
+
+
+def run_activation(yb_factory, pool_interface, lt_interface) -> bool:
+    """Discover the new markets, report the collateral the current EOA must
+    hold, and — if it is funded — initialize each pool and seed each LT.
+    Idempotent: pools/LTs already activated are skipped. Returns False (and
+    changes nothing) if the account is underfunded."""
+    account = boa.env.eoa
+    markets = discover_new_markets(yb_factory, pool_interface)
+
+    print(f"\n=== Activating {len(markets)} markets as {account} ===")
+    plan = []
+    for spec in POOL_SPECS:
+        symbol = spec["symbol"]
+        mid = markets[symbol]
+        asset = _load_erc20(spec["coin1"])
+        decimals = asset.decimals()
+        seed_raw = int(round(SEED_AMOUNTS[symbol] * 10**decimals))
+        plan.append({"spec": spec, "mid": mid, "asset": asset,
+                     "decimals": decimals, "seed_raw": seed_raw})
+        print(f"  {symbol:9s} market #{mid}")
+
+    print(f"\nCollateral required from {account}:")
+    underfunded = False
+    for item in plan:
+        asset, decimals, seed_raw = item["asset"], item["decimals"], item["seed_raw"]
+        balance = asset.balanceOf(account)
+        have, need = balance / 10**decimals, seed_raw / 10**decimals
+        token = asset.symbol()
+        if balance < seed_raw:
+            underfunded = True
+            short = (seed_raw - balance) / 10**decimals
+            print(f"  {token:6s} have {have:.8f}  need {need:.8f}  "
+                  f"TRANSFER {short:.8f}")
+        else:
+            print(f"  {token:6s} have {have:.8f}  need {need:.8f}  OK")
+    if underfunded:
+        print("\nUnderfunded — aborting. Fund the account and re-run.")
+        return False
+
+    for item in plan:
+        spec, mid = item["spec"], item["mid"]
+        market = yb_factory.markets(mid)
+        pool = pool_interface.at(market.cryptopool)
+        lt = lt_interface.at(market.lt)
+        print(f"\n--- {spec['symbol']} (market #{mid}) ---")
+
+        if pool.lp_allowlist(market.lt):
+            print("  pool already initialized — skipping")
+        else:
+            initialize_pool(
+                pool, [account, market.lt, market.virtual_pool],
+                spec["reserved_profit_fraction"], pool.price_scale(),
+            )
+
+        if lt.totalSupply() > 0:
+            print(f"  LT already seeded (totalSupply={lt.totalSupply() / 1e18}) "
+                  "— skipping")
+        else:
+            shares = leverage_deposit(lt, item["asset"], pool, item["seed_raw"])
+            print(f"  seeded {item['seed_raw'] / 10**item['decimals']} "
+                  f"{item['asset'].symbol()} -> {shares / 1e18} LT shares")
+            assert shares > 0, "seed deposit produced 0 LT shares"
+
+    print("\n=== Activation complete ===")
+    return True
 
 
 # --- entrypoint --------------------------------------------------------------
@@ -515,16 +616,41 @@ def _account_load(fname: str):
     return account.Account.from_key(pkey)
 
 
+def run_activate_mode(test_mode: bool):
+    """`--activate`: post-vote activation. Runs after Votes 2-5 have executed
+    on-chain — discovers the new markets, reports the collateral the activation
+    account must hold, and initializes + seeds each market. `--activate --test`
+    forks the network for a dry-run (real balances, no real txs)."""
+    if test_mode:
+        boa.fork(NETWORK)
+        boa.env.eoa = keystore_address(PROPOSER_ACCOUNT_NAMES[0])
+    else:
+        boa.set_network_env(NETWORK)
+        boa.env.add_account(
+            _account_load(PROPOSER_ACCOUNT_NAMES[0]), force_eoa=True
+        )
+    yb_factory = boa.load_partial("contracts/Factory.vy").at(YB_FACTORY)
+    pool_interface = boa.load_partial(
+        "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
+    )
+    lt_interface = boa.load_partial("contracts/LT.vy")
+    try:
+        run_activation(yb_factory, pool_interface, lt_interface)
+    except RuntimeError as e:
+        sys.exit(f"Activation aborted: {e}")
+
+
 def main():
-    """Single deploy + governance flow. Production runs every step.
-    --test mode runs the SAME steps on a fork and then adds:
-      * pre-flight: execute Curve vote 1408 if needed,
-      * a negative test (a market vote must revert before Vote 1),
-      * a DAO-pranked simulation of each vote's actions,
-      * per-market pool init + LT seeding + LTMigrator end-to-end test.
-    Keeping both modes in one function guarantees the production path is
-    exactly what the fork exercises."""
+    """`--test`        — forked dry-run of the full deploy + 5-vote flow.
+    `--activate`    — post-vote activation (initialize + seed the new markets).
+    `--activate --test` — forked dry-run of activation.
+    no flags        — production: deploy, verify, and create the 5 votes."""
     test_mode = "--test" in sys.argv[1:]
+    activate_mode = "--activate" in sys.argv[1:]
+
+    if activate_mode:
+        run_activate_mode(test_mode)
+        return
 
     if test_mode:
         boa.fork(NETWORK)
@@ -604,10 +730,16 @@ def main():
     }
 
     # --- Votes 2-5: per-market add_market + disable old LT.
-    # Each guarded by check_equal(Factory.amm_impl / lt_impl) on the new
-    # blueprints, so the comparator reverts unless Vote 1 has executed.
+    # Three comparator guards per vote:
+    #   * check_equal(Factory.amm_impl / lt_impl) — reverts unless Vote 1 has
+    #     installed the new blueprints;
+    #   * check_equal(Factory.market_count) — pins each vote to an exact
+    #     market_count. add_market increments it by 1, so this both forces
+    #     Votes 2-5 to execute in deploy order (WBTC, cbBTC, tBTC, WETH) and
+    #     prevents any of them executing twice.
+    n_markets = yb_factory.market_count()
     market_votes = []
-    for spec in POOL_SPECS:
+    for idx, spec in enumerate(POOL_SPECS):
         print(
             f"\n=== Deploying Curve pool for market replacing "
             f"#{spec['replaces_market_id']} ==="
@@ -617,15 +749,13 @@ def main():
         old_lt_addr = yb_factory.markets(spec["replaces_market_id"]).lt
         market_votes.append({
             "spec": spec,
-            "pool_addr": pool_addr,
-            "pool": pool_interface.at(pool_addr),
-            "old_lt_addr": old_lt_addr,
             "title": f"YB v3: add {spec['symbol']} market",
             "summary": (
                 f"Add YB market on new {spec['symbol']} Curve pool "
                 f"({pool_addr}) and disable old LT {old_lt_addr}. "
                 "Guarded: only executes once Vote 1 has installed the new "
-                "AMM + LT implementations."
+                f"AMM + LT implementations and market_count == {n_markets + idx} "
+                "(i.e. the preceding market votes have executed)."
             ),
             "actions": [
                 Action(to=comparator.address, value=0,
@@ -636,6 +766,10 @@ def main():
                        data=comparator.check_equal.prepare_calldata(
                            yb_factory.address, LT_IMPL_SELECTOR,
                            addr_as_uint256(lt_bp.address))),
+                Action(to=comparator.address, value=0,
+                       data=comparator.check_equal.prepare_calldata(
+                           yb_factory.address, MARKET_COUNT_SELECTOR,
+                           n_markets + idx)),
                 Action(to=factory_owner.address, value=0,
                        data=factory_owner.add_market.prepare_calldata(
                            pool_addr, spec["leverage_fee"], spec["rate"],
@@ -704,7 +838,7 @@ def main():
     if not test_mode:
         return
 
-    # --- TEST-ONLY: simulate each vote's actions from the DAO + bootstrap -
+    # --- TEST-ONLY: simulate each vote's actions from the DAO -------------
     print("\n=== Simulating Vote 1 (install impls + switch migrator) ===")
     simulate_yb_vote(vote1["actions"], label="Vote 1")
     assert yb_factory.amm_impl() == amm_bp.address
@@ -712,6 +846,18 @@ def main():
     assert factory_owner.limit_setters(migrator.address) is True
     assert factory_owner.limit_setters(EXISTING_LT_MIGRATOR) is False
     print("  Vote 1 post-state OK: impls installed, migrator switched.")
+
+    # --- TEST-ONLY: market votes must execute in deploy order ------------
+    print("\n=== Negative test: Vote 3 (cbBTC) before Vote 2 (WBTC) ===")
+    try:
+        with boa.env.prank(YB_DAO):
+            for action in market_votes[1]["actions"]:
+                boa.env.raw_call(to_address=action.to, data=action.data)
+        raise AssertionError(
+            "Vote 3 executed before Vote 2 — ordering guard is broken."
+        )
+    except Exception as e:
+        print(f"  Correctly reverted: {e}")
 
     for i, vote in enumerate(market_votes, start=2):
         spec = vote["spec"]
@@ -726,30 +872,40 @@ def main():
             f"market_count did not increment ({n_before} -> {n_after})"
         )
 
-        new_market = yb_factory.markets(n_after - 1)
-        lt_addr = new_market.lt
-        vpool_addr = new_market.virtual_pool
-        print(f"New YB market #{n_after - 1}: lt={lt_addr} virtual_pool={vpool_addr}")
+    # --- TEST-ONLY: exercise the --activate path on the fork -------------
+    # Production funds the activation account by real transfer; on the fork
+    # we mint the same SEED_AMOUNTS so run_activation sees a funded account.
+    for spec in POOL_SPECS:
+        asset = _load_erc20(spec["coin1"])
+        raw = int(round(SEED_AMOUNTS[spec["symbol"]] * 10**asset.decimals()))
+        _give_asset(asset, TEST_EXECUTOR, raw)
+    assert run_activation(yb_factory, pool_interface, lt_interface), \
+        "run_activation reported underfunded despite minted seed"
 
-        initialize_pool_whitelist(
-            vote["pool"], TEST_EXECUTOR,
-            [TEST_EXECUTOR, lt_addr, vpool_addr], spec,
-        )
+    # --- TEST-ONLY: LTMigrator end-to-end on a real holder --------------
+    new_markets = discover_new_markets(yb_factory, pool_interface)
+    global GAUGE_HOLDERS_TO_SKIP
+    for spec in POOL_SPECS:
+        new_id = new_markets[spec["symbol"]]
+        old_id = spec["replaces_market_id"]
+        old_lt = lt_interface.at(yb_factory.markets(old_id).lt)
+        new_market = yb_factory.markets(new_id)
+        new_lt = lt_interface.at(new_market.lt)
+        new_pool = pool_interface.at(new_market.cryptopool)
 
-        global GAUGE_HOLDERS_TO_SKIP
-        old_market_id = spec["replaces_market_id"]
-        old_lt = lt_interface.at(yb_factory.markets(old_market_id).lt)
-        GAUGE_HOLDERS_TO_SKIP = yb_factory.markets(old_market_id).staker
+        GAUGE_HOLDERS_TO_SKIP = yb_factory.markets(old_id).staker
         holder = _find_lt_holder(old_lt.address)
         balance = old_lt.balanceOf(holder)
 
-        migration_assets = old_lt.preview_withdraw(balance)
-        new_lt = lt_interface.at(lt_addr)
-        seed_new_lt(new_lt, migration_assets)
+        # Top up beyond the SEED_AMOUNTS bootstrap so amm.max_debt() can absorb
+        # this holder's migration (≈2× the migrated assets).
+        topup = 2 * old_lt.preview_withdraw(balance)
+        asset = _load_erc20(new_lt.ASSET_TOKEN())
+        _give_asset(asset, TEST_EXECUTOR, topup)
+        leverage_deposit(new_lt, asset, new_pool, topup)
 
         test_lt_migration(
-            yb_factory, lt_interface, spec, n_after - 1,
-            holder, balance, migrator,
+            yb_factory, lt_interface, spec, new_id, holder, balance, migrator,
         )
 
 
