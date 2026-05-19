@@ -1,29 +1,44 @@
 #!/usr/bin/env python3
 """
-Deploy new YB pools and a migrator.
+Deploy new YB v3 pools, a cross-pool LTMigrator, and the 5 Aragon-OSx
+votes that the YB DAO needs to ratify them.
 
 Usage:
   python deploy_yb_pools_v3.py            # production deploy against NETWORK
   python deploy_yb_pools_v3.py --test     # forked dry-run via boa.fork
 
-In test mode the script:
-  1. Executes Curve Ownership-DAO vote 1408 on the fork (activates new
-     Twocrypto pool implementations).
-       https://etherscan.io/tx/0xf0ab2beaedc45ed0daae42a544031690d86d110e3e8dd0891bf3a25ce33b97be
-  2. As TEST_EXECUTOR, deploys a WBTC/crvUSD Twocrypto pool using the
-     newly-activated implementation with magic gamma (11111111111).
-  3. Builds a YB Aragon-OSx vote whose action calls
-     YB Factory.add_market on the new Curve pool, then simulates that
-     action via raw_call from the YB DAO (per feedback_simulate_vote).
-  4. From TEST_EXECUTOR, calls pool.initialize with
-     [executor, LT, VirtualPool] as the initial LP allowlist.
+Off-vote actions (the deployer EOA does these directly):
+  1. Execute Curve Ownership-DAO vote 1408 (activates the new Twocrypto
+     pool implementation). https://etherscan.io/tx/0xf0ab2beaedc45ed0daae42a544031690d86d110e3e8dd0891bf3a25ce33b97be
+  2. Deploy fresh AMM + LT blueprints and the new LTMigrator.
+  3. Deploy 4 bootstrap-mode Twocrypto pools (WBTC, cbBTC, tBTC, WETH)
+     from TEST_EXECUTOR (tx.origin gets initialize() rights via the
+     magic-gamma path).
 
-This will eventually replace YB pool ID=3; only WBTC is wired up for now.
+YB DAO votes (created on Aragon-OSx via TokenVoting createProposal):
+  Vote 1 — Install new AMM + LT implementations and switch the
+           registered LTMigrator from the old (same-pool) contract to
+           the new (cross-pool) contract.
+  Vote 2 — add_market for new WBTC pool + disable old WBTC LT.
+  Vote 3 — add_market for new cbBTC pool + disable old cbBTC LT.
+  Vote 4 — add_market for new tBTC pool + disable old tBTC LT.
+  Vote 5 — add_market for new WETH pool + disable old WETH LT.
+
+Votes 2-5 are guarded by the on-chain CallComparator so they can only
+execute once Vote 1 has flipped Factory.amm_impl() / Factory.lt_impl()
+to the new blueprints — same pattern as scripts/voting/change_btc_fees_2.py.
+
+In --test mode the script also:
+  - simulates Vote 2 BEFORE Vote 1 and confirms it reverts at the guard,
+  - simulates each vote in order from YB_DAO with raw_call,
+  - initializes each new pool's LP allowlist and seeds the new LT,
+  - tests the new LTMigrator end-to-end on a real on-chain holder.
 """
 import json
 import os
 import sys
 import warnings
+from collections import namedtuple
 
 # Silence boa's "casted bytecode does not match compiled bytecode" UserWarnings
 # emitted when the on-chain Curve Twocrypto contracts were built with a slightly
@@ -36,8 +51,15 @@ warnings.filterwarnings(
 
 import boa
 import requests
+from time import sleep
+from vyper.utils import method_id
 
-from networks import NETWORK
+from boa.explorer import Etherscan
+from boa.verifiers import verify as boa_verify
+
+from networks import NETWORK, PINATA_TOKEN, ETHERSCAN_API_KEY
+
+VERIFY_RETRY_SECONDS = 10
 
 
 # --- Curve Ownership DAO -----------------------------------------------------
@@ -64,6 +86,9 @@ NEW_TWOCRYPTO_IMPL_ID = (
 # --- YB DAO ------------------------------------------------------------------
 YB_FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 YB_DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
+YB_VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
+# Gates Votes 2-5 on Vote 1 having flipped Factory.amm_impl() / lt_impl().
+CALL_COMPARATOR = "0xd3BFa85dc668Aab38121bE12D69dd180301dec25"
 # The on-chain LTMigrator at this address handles same-cryptopool migrations
 # only. For YB v3 (each old market migrates to a *new* cryptopool) we deploy
 # an upgraded LTMigrator (cross-pool aware) and register it as a limit setter.
@@ -73,6 +98,30 @@ EXISTING_LT_MIGRATOR = "0x2cdb9f485e718f551cfeea6c33cb7062ed37066c"
 # pool deployer (tx.origin), which gives it initialize() rights via the
 # magic-gamma bootstrap path.
 TEST_EXECUTOR = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"
+
+AMM_IMPL_SELECTOR = method_id("amm_impl()")
+LT_IMPL_SELECTOR = method_id("lt_impl()")
+
+# Aragon-OSx TokenVoting limits a creator to one active proposal at a time
+# (≈1 vote per day per address), so the 5 votes are spread across 5 keys.
+PROPOSER_ACCOUNT_NAMES = [
+    "yb-deployer",
+    "yb-deployer-a",
+    "yb-deployer-b",
+    "yb-deployer-c",
+    "yb-deployer-2",
+]
+
+Proposal = namedtuple(
+    "Proposal",
+    ["metadata", "actions", "allowFailureMap", "startDate", "endDate",
+     "voteOption", "tryEarlyExecution"],
+)
+Action = namedtuple("Action", ["to", "value", "data"])
+
+YB_VOTING_ABI_PATH = os.path.join(
+    os.path.dirname(__file__), "voting", "TokenVoting.abi.json"
+)
 
 
 # --- vote execution ----------------------------------------------------------
@@ -152,7 +201,7 @@ _BTC_BASE = {
 }
 
 # WETH pool — wider gamma + fees, longer MA. Tracks the existing on-chain
-# yb-WETH market params (A=25_000, ma=866, fees from create_weth_pool.py).
+# yb-WETH market params.
 _ETH_BASE = {
     "coin0": CRVUSD,
     "coingecko_id": "ethereum",
@@ -199,8 +248,6 @@ def fetch_initial_price(coingecko_id: str) -> int:
 
 
 def deploy_curve_pool(twocrypto_factory, spec: dict) -> str:
-    """Deploy a bootstrap-mode Twocrypto pool from TEST_EXECUTOR using the
-    implementation activated by vote 1408. Returns the new pool address."""
     with boa.env.prank(TEST_EXECUTOR):
         pool_addr = twocrypto_factory.deploy_pool(
             spec["name"],
@@ -221,40 +268,55 @@ def deploy_curve_pool(twocrypto_factory, spec: dict) -> str:
     return pool_addr
 
 
-# --- YB vote: build + simulate -----------------------------------------------
+# --- YB Aragon-OSx vote builders + simulator ---------------------------------
 
-def build_yb_add_market_action(factory_owner, cryptopool: str, spec: dict) -> dict:
-    """Return {to, data} for a YB add_market call on `cryptopool`.
-    Calls FactoryOwner.add_market (not Factory.add_market directly) — the
-    factory's admin is currently a FactoryOwner contract owned by the DAO."""
-    calldata = factory_owner.add_market.prepare_calldata(
-        cryptopool,
-        spec["leverage_fee"],
-        spec["rate"],
-        spec["debt_cap"],
-    )
-    return {"to": factory_owner.address, "data": calldata}
+def addr_as_uint256(addr: str) -> int:
+    """Address -> uint256. CallComparator.check_equal compares a uint256, and
+    `amm_impl()` / `lt_impl()` return the raw 32-byte address word; matching
+    them in Python means parsing the hex address as an int."""
+    return int(addr, 16)
 
 
-def build_disable_old_lt_action(factory_owner, old_lt_addr: str) -> dict:
-    """Return {to, data} for a FactoryOwner call that marks the old LT as
-    disabled. Required so that LTMigrator (a non-admin limit setter) can
-    later call lt_allocate_stablecoins(old_lt, 0) to free its allocation."""
-    calldata = factory_owner.lt_allocate_stablecoins.prepare_calldata(
-        old_lt_addr, 0
-    )
-    return {"to": factory_owner.address, "data": calldata}
-
-
-def simulate_yb_vote(actions: list[dict]):
+def simulate_yb_vote(actions: list, label: str = ""):
     """Simulate a YB Aragon-OSx vote by raw_calling each action from the DAO.
-    Matches what the voting plugin does on executeVote.
-    See feedback_simulate_vote in repo memory."""
-    print(f"Simulating YB vote with {len(actions)} action(s) from {YB_DAO}…")
+    Matches what the voting plugin does on executeVote."""
+    tag = f" ({label})" if label else ""
+    print(f"Simulating YB vote{tag} with {len(actions)} action(s) from {YB_DAO}…")
     with boa.env.prank(YB_DAO):
         for action in actions:
-            boa.env.raw_call(to_address=action["to"], data=action["data"])
-    print("YB vote actions executed.")
+            boa.env.raw_call(to_address=action.to, data=action.data)
+    print(f"YB vote{tag} actions executed.")
+
+
+# --- Aragon proposer accounts ------------------------------------------------
+
+def keystore_address(name: str) -> str:
+    """Read the EOA address from a brownie keystore file. The address is
+    stored in plaintext alongside the encrypted key, so this does NOT prompt
+    for the password — used in fork mode to prank-create proposals."""
+    path = os.path.expanduser(
+        os.path.join("~", ".brownie", "accounts", name + ".json")
+    )
+    with open(path) as f:
+        return "0x" + json.load(f)["address"]
+
+
+# --- IPFS metadata pinning (production proposals) ----------------------------
+
+def pin_to_ipfs(content: dict) -> str:
+    url = "https://api.pinata.cloud/pinning/pinJSONToIPFS"
+    headers = {
+        "Authorization": f"Bearer {PINATA_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "pinataContent": content,
+        "pinataMetadata": {"name": "pinnie.json"},
+        "pinataOptions": {"cidVersion": 1},
+    }
+    response = requests.post(url, json=payload, headers=headers, timeout=30)
+    assert 200 <= response.status_code < 400, response.text
+    return "ipfs://" + response.json()["IpfsHash"]
 
 
 # --- bootstrap initial liquidity --------------------------------------------
@@ -339,9 +401,6 @@ def _find_lt_holder(lt_addr: str) -> str:
 
 def test_lt_migration(factory, lt_interface, spec: dict, new_market_id: int,
                       holder: str, balance: int, migrator):
-    """Use the supplied LTMigrator to migrate a real on-chain holder's
-    position from old market `spec['replaces_market_id']` to `new_market_id`.
-    Raises if it fails."""
     old_market_id = spec["replaces_market_id"]
     old_lt = lt_interface.at(factory.markets(old_market_id).lt)
     new_lt = lt_interface.at(factory.markets(new_market_id).lt)
@@ -382,35 +441,55 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 # --- implementation refresh -------------------------------------------------
 #
-# Checked once (manually, not at runtime): AMM and LT bytecode have diverged
-# from on-chain; VirtualPool still matches the deployed blueprint exactly.
-# So the v3 vote deploys fresh AMM + LT blueprints and installs them via
-# factory_owner.set_implementations; VirtualPool / price_oracle / staker
-# are passed empty so the factory leaves them as-is.
+# Verified manually: AMM + LT bytecode have diverged from on-chain, but
+# VirtualPool still matches the deployed blueprint — so v3 only refreshes
+# AMM + LT and leaves VirtualPool / price_oracle / staker untouched.
 
-def install_new_implementations(yb_factory, factory_owner):
-    amm_blueprint = boa.load_partial("contracts/AMM.vy").deploy_as_blueprint()
-    lt_blueprint = boa.load_partial("contracts/LT.vy").deploy_as_blueprint()
-    print(f"  New AMM blueprint: {amm_blueprint.address}")
-    print(f"  New LT  blueprint: {lt_blueprint.address}")
-    with boa.env.prank(YB_DAO):
-        factory_owner.set_implementations(
-            amm_blueprint.address,
-            lt_blueprint.address,
-            ZERO_ADDRESS,  # VirtualPool: unchanged
-            ZERO_ADDRESS,  # PriceOracle: unchanged
-            ZERO_ADDRESS,  # Staker: unchanged
-        )
-    assert yb_factory.amm_impl() == amm_blueprint.address
-    assert yb_factory.lt_impl() == lt_blueprint.address
-    print("  set_implementations installed AMM + LT.")
+def verify_on_etherscan(contract, etherscan):
+    """Submit `contract` for Etherscan verification, retrying on transient errors."""
+    while True:
+        try:
+            sleep(VERIFY_RETRY_SECONDS)
+            boa_verify(contract, etherscan, wait=True)
+            return
+        except ValueError as e:
+            print(e)
+            if "Already Verified" in str(e):
+                return
+
+
+def deploy_new_implementations(etherscan=None):
+    """Deploy fresh AMM + LT blueprints. If `etherscan` is provided, each
+    blueprint is also submitted to Etherscan for source verification."""
+    amm_bp = boa.load_partial("contracts/AMM.vy").deploy_as_blueprint()
+    lt_bp = boa.load_partial("contracts/LT.vy").deploy_as_blueprint()
+    print(f"  New AMM blueprint: {amm_bp.address}")
+    print(f"  New LT  blueprint: {lt_bp.address}")
+    if etherscan is not None:
+        # Blueprints have no constructor args, but boa needs ctor_calldata
+        # set explicitly for the verifier to know that.
+        amm_bp.ctor_calldata = b""
+        lt_bp.ctor_calldata = b""
+        verify_on_etherscan(amm_bp, etherscan)
+        verify_on_etherscan(lt_bp, etherscan)
+    return amm_bp, lt_bp
+
+
+def deploy_new_migrator(yb_factory, factory_owner, etherscan=None):
+    migrator = boa.load(
+        "contracts/LTMigrator.vy",
+        yb_factory.STABLECOIN(),
+        factory_owner.address,
+    )
+    print(f"Deployed new LTMigrator: {migrator.address}")
+    if etherscan is not None:
+        verify_on_etherscan(migrator, etherscan)
+    return migrator
 
 
 # --- pool initialization (whitelist) -----------------------------------------
 
 def initialize_pool_whitelist(pool, executor: str, allowlist: list[str], spec: dict):
-    """Call pool.initialize() from TEST_EXECUTOR with the LP allowlist.
-    Requires the pool to have been deployed in bootstrap mode (magic gamma)."""
     admin_fee = 0                     # LPs get the full admin share
     with boa.env.prank(executor):
         pool.initialize(
@@ -423,9 +502,45 @@ def initialize_pool_whitelist(pool, executor: str, allowlist: list[str], spec: d
     print(f"Pool initialized with allowlist: {allowlist}")
 
 
-# --- main flow ---------------------------------------------------------------
+# --- entrypoint --------------------------------------------------------------
 
-def run_test_flow():
+def _account_load(fname: str):
+    from eth_account import account
+    from getpass import getpass
+    key_path = os.path.expanduser(
+        os.path.join("~", ".brownie", "accounts", fname + ".json")
+    )
+    with open(key_path, "r") as f:
+        pkey = account.decode_keyfile_json(json.load(f), getpass())
+    return account.Account.from_key(pkey)
+
+
+def main():
+    """Single deploy + governance flow. Production runs every step.
+    --test mode runs the SAME steps on a fork and then adds:
+      * pre-flight: execute Curve vote 1408 if needed,
+      * a negative test (a market vote must revert before Vote 1),
+      * a DAO-pranked simulation of each vote's actions,
+      * per-market pool init + LT seeding + LTMigrator end-to-end test.
+    Keeping both modes in one function guarantees the production path is
+    exactly what the fork exercises."""
+    test_mode = "--test" in sys.argv[1:]
+
+    if test_mode:
+        boa.fork(NETWORK)
+        boa.env.eoa = TEST_EXECUTOR
+        etherscan = None
+    else:
+        # Initial signer = first proposer; covers all pre-vote deployments
+        # (blueprints, migrator, Curve pools). The createProposal loop
+        # below switches the active EOA per vote.
+        boa.set_network_env(NETWORK)
+        boa.env.add_account(
+            _account_load(PROPOSER_ACCOUNT_NAMES[0]), force_eoa=True
+        )
+        etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
+
+    # --- shared contract handles ------------------------------------------
     twocrypto_factory = boa.load_partial(
         "contracts/twocrypto_pool/contracts/main/TwocryptoFactory.vy"
     ).at(TWOCRYPTO_FACTORY)
@@ -437,61 +552,175 @@ def run_test_flow():
     factory_owner = boa.load_partial("contracts/HybridFactoryOwner.vy").at(
         yb_factory.admin()
     )
+    comparator = boa.load_partial("contracts/dao/CallComparator.vy").at(
+        CALL_COMPARATOR
+    )
+    voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
+        YB_VOTING_PLUGIN
+    )
     assert factory_owner.ADMIN() == YB_DAO, (
         f"FactoryOwner admin is {factory_owner.ADMIN()}, expected YB DAO {YB_DAO}"
     )
 
-    ensure_curve_vote_executed(CURVE_VOTE_ID)
-    activated = twocrypto_factory.pool_implementations(NEW_TWOCRYPTO_IMPL_ID)
-    print(f"Activated pool implementation: {activated}")
-    assert activated != "0x0000000000000000000000000000000000000000", (
-        "Implementation slot is empty after vote 1408 — wrong id?"
-    )
-
-    boa.env.set_balance(TEST_EXECUTOR, 100 * 10**18)
-
-    # Install the upgraded AMM + LT blueprints so add_market below uses them.
-    # VirtualPool is unchanged on-chain — see install_new_implementations.
-    print("\n=== Installing new AMM + LT implementations ===")
-    install_new_implementations(yb_factory, factory_owner)
-
-    # Deploy + register the upgraded LTMigrator (cross-cryptopool aware).
-    # The existing on-chain migrator's debt math assumes lt_from and lt_to
-    # share a cryptopool; v3 migrations don't. After registering the new
-    # one, we also unregister the old one so users can't accidentally route
-    # v3 migrations through buggy debt math.
-    with boa.env.prank(TEST_EXECUTOR):
-        migrator = boa.load(
-            "contracts/LTMigrator.vy",
-            yb_factory.STABLECOIN(),
-            factory_owner.address,
+    # --- TEST-ONLY: make sure the new Curve impl is active on the fork ----
+    if test_mode:
+        ensure_curve_vote_executed(CURVE_VOTE_ID)
+        activated = twocrypto_factory.pool_implementations(
+            NEW_TWOCRYPTO_IMPL_ID
         )
-    print(f"Deployed new LTMigrator: {migrator.address}")
-    with boa.env.prank(YB_DAO):
-        factory_owner.set_limit_setter(migrator.address, True)
-        factory_owner.set_limit_setter(EXISTING_LT_MIGRATOR, False)
-    print("Registered new LTMigrator; unregistered old LTMigrator "
-          f"@ {EXISTING_LT_MIGRATOR}.")
-    assert factory_owner.limit_setters(migrator.address) is True
-    assert factory_owner.limit_setters(EXISTING_LT_MIGRATOR) is False
+        print(f"Activated pool implementation: {activated}")
+        assert activated != ZERO_ADDRESS, (
+            "Implementation slot is empty after vote 1408 — wrong id?"
+        )
+        boa.env.set_balance(TEST_EXECUTOR, 100 * 10**18)
 
+    # --- Deploy new blueprints + LTMigrator (pre-vote, off-chain) ---------
+    print("\n=== Deploying new AMM + LT blueprints ===")
+    amm_bp, lt_bp = deploy_new_implementations(etherscan=etherscan)
+    migrator = deploy_new_migrator(yb_factory, factory_owner, etherscan=etherscan)
+
+    # --- Vote 1: install new AMM + LT impls + switch registered migrator.
+    # VirtualPool / PriceOracle / Staker are passed empty so the factory
+    # leaves them as-is.
+    vote1 = {
+        "title": "YB v3: install new AMM + LT implementations and migrator",
+        "summary": (
+            f"Install new AMM blueprint {amm_bp.address} and LT blueprint "
+            f"{lt_bp.address}; register new LTMigrator {migrator.address} "
+            f"and unregister old LTMigrator {EXISTING_LT_MIGRATOR}."
+        ),
+        "actions": [
+            Action(to=factory_owner.address, value=0,
+                   data=factory_owner.set_implementations.prepare_calldata(
+                       amm_bp.address, lt_bp.address,
+                       ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS)),
+            Action(to=factory_owner.address, value=0,
+                   data=factory_owner.set_limit_setter.prepare_calldata(
+                       migrator.address, True)),
+            Action(to=factory_owner.address, value=0,
+                   data=factory_owner.set_limit_setter.prepare_calldata(
+                       EXISTING_LT_MIGRATOR, False)),
+        ],
+    }
+
+    # --- Votes 2-5: per-market add_market + disable old LT.
+    # Each guarded by check_equal(Factory.amm_impl / lt_impl) on the new
+    # blueprints, so the comparator reverts unless Vote 1 has executed.
+    market_votes = []
     for spec in POOL_SPECS:
         print(
-            f"\n=== Deploying YB v3 pool replacing market "
+            f"\n=== Deploying Curve pool for market replacing "
             f"#{spec['replaces_market_id']} ==="
         )
-
         spec["initial_price"] = fetch_initial_price(spec["coingecko_id"])
         pool_addr = deploy_curve_pool(twocrypto_factory, spec)
-        pool = pool_interface.at(pool_addr)
-
-        n_before = yb_factory.market_count()
         old_lt_addr = yb_factory.markets(spec["replaces_market_id"]).lt
-        actions = [
-            build_yb_add_market_action(factory_owner, pool_addr, spec),
-            build_disable_old_lt_action(factory_owner, old_lt_addr),
-        ]
-        simulate_yb_vote(actions)
+        market_votes.append({
+            "spec": spec,
+            "pool_addr": pool_addr,
+            "pool": pool_interface.at(pool_addr),
+            "old_lt_addr": old_lt_addr,
+            "title": f"YB v3: add {spec['symbol']} market",
+            "summary": (
+                f"Add YB market on new {spec['symbol']} Curve pool "
+                f"({pool_addr}) and disable old LT {old_lt_addr}. "
+                "Guarded: only executes once Vote 1 has installed the new "
+                "AMM + LT implementations."
+            ),
+            "actions": [
+                Action(to=comparator.address, value=0,
+                       data=comparator.check_equal.prepare_calldata(
+                           yb_factory.address, AMM_IMPL_SELECTOR,
+                           addr_as_uint256(amm_bp.address))),
+                Action(to=comparator.address, value=0,
+                       data=comparator.check_equal.prepare_calldata(
+                           yb_factory.address, LT_IMPL_SELECTOR,
+                           addr_as_uint256(lt_bp.address))),
+                Action(to=factory_owner.address, value=0,
+                       data=factory_owner.add_market.prepare_calldata(
+                           pool_addr, spec["leverage_fee"], spec["rate"],
+                           spec["debt_cap"])),
+                Action(to=factory_owner.address, value=0,
+                       data=factory_owner.lt_allocate_stablecoins.prepare_calldata(
+                           old_lt_addr, 0)),
+            ],
+        })
+
+    all_votes = [vote1] + market_votes
+
+    # --- TEST-ONLY: market vote must revert before Vote 1 executes --------
+    if test_mode:
+        print("\n=== Negative test: Vote 2 (WBTC) before Vote 1 ===")
+        try:
+            with boa.env.prank(YB_DAO):
+                for action in market_votes[0]["actions"]:
+                    boa.env.raw_call(to_address=action.to, data=action.data)
+            raise AssertionError(
+                "Vote 2 simulated successfully BEFORE Vote 1 — guard is broken."
+            )
+        except Exception as e:
+            print(f"  Correctly reverted: {e}")
+
+    # --- Create each Aragon proposal, rotating proposer EOAs --------------
+    print(f"\n=== Creating {len(all_votes)} Aragon proposals ===")
+    for idx, (acct_name, vote) in enumerate(
+        zip(PROPOSER_ACCOUNT_NAMES, all_votes), start=1
+    ):
+        proposer = keystore_address(acct_name)
+        if test_mode:
+            metadata = b""
+        else:
+            print(f"\n--- Loading creator account {acct_name} for Vote {idx} ---")
+            boa.env.add_account(_account_load(acct_name), force_eoa=True)
+            metadata = pin_to_ipfs({
+                "title": vote["title"],
+                "summary": vote["summary"],
+                "resources": [],
+            }).encode()
+
+        if test_mode:
+            with boa.env.prank(proposer):
+                proposal_id = voting.createProposal(*Proposal(
+                    metadata=metadata,
+                    actions=vote["actions"],
+                    allowFailureMap=0,
+                    startDate=0,
+                    endDate=0,
+                    voteOption=0,
+                    tryEarlyExecution=True,
+                ))
+        else:
+            proposal_id = voting.createProposal(*Proposal(
+                metadata=metadata,
+                actions=vote["actions"],
+                allowFailureMap=0,
+                startDate=0,
+                endDate=0,
+                voteOption=0,
+                tryEarlyExecution=True,
+            ))
+        print(f"Vote {idx} from {acct_name} ({proposer}): proposalId={proposal_id}")
+
+    if not test_mode:
+        return
+
+    # --- TEST-ONLY: simulate each vote's actions from the DAO + bootstrap -
+    print("\n=== Simulating Vote 1 (install impls + switch migrator) ===")
+    simulate_yb_vote(vote1["actions"], label="Vote 1")
+    assert yb_factory.amm_impl() == amm_bp.address
+    assert yb_factory.lt_impl() == lt_bp.address
+    assert factory_owner.limit_setters(migrator.address) is True
+    assert factory_owner.limit_setters(EXISTING_LT_MIGRATOR) is False
+    print("  Vote 1 post-state OK: impls installed, migrator switched.")
+
+    for i, vote in enumerate(market_votes, start=2):
+        spec = vote["spec"]
+        print(
+            f"\n=== Simulating Vote {i} ({spec['symbol']}, replaces market "
+            f"#{spec['replaces_market_id']}) ==="
+        )
+        n_before = yb_factory.market_count()
+        simulate_yb_vote(vote["actions"], label=f"Vote {i}")
         n_after = yb_factory.market_count()
         assert n_after == n_before + 1, (
             f"market_count did not increment ({n_before} -> {n_after})"
@@ -503,11 +732,10 @@ def run_test_flow():
         print(f"New YB market #{n_after - 1}: lt={lt_addr} virtual_pool={vpool_addr}")
 
         initialize_pool_whitelist(
-            pool, TEST_EXECUTOR, [TEST_EXECUTOR, lt_addr, vpool_addr], spec
+            vote["pool"], TEST_EXECUTOR,
+            [TEST_EXECUTOR, lt_addr, vpool_addr], spec,
         )
 
-        # 5. Find the migration test holder up front so we can size the
-        #    seed deposit against their balance.
         global GAUGE_HOLDERS_TO_SKIP
         old_market_id = spec["replaces_market_id"]
         old_lt = lt_interface.at(yb_factory.markets(old_market_id).lt)
@@ -515,47 +743,13 @@ def run_test_flow():
         holder = _find_lt_holder(old_lt.address)
         balance = old_lt.balanceOf(holder)
 
-        # 6. Seed the new LT proportionally so amm.max_debt() can absorb
-        #    the migration. Use the asset amount the migrator will actually
-        #    deposit (LT shares are leveraged, so face value understates it).
         migration_assets = old_lt.preview_withdraw(balance)
         new_lt = lt_interface.at(lt_addr)
         seed_new_lt(new_lt, migration_assets)
 
-        # 7. Verify the new LTMigrator moves funds from the old market
-        #    into the new one (different cryptopools → cross-pool path).
         test_lt_migration(
             yb_factory, lt_interface, spec, n_after - 1,
-            holder, balance, migrator
-        )
-
-
-# --- entrypoint --------------------------------------------------------------
-
-def main():
-    test_mode = "--test" in sys.argv[1:]
-
-    if test_mode:
-        boa.fork(NETWORK)
-        boa.env.eoa = TEST_EXECUTOR
-        run_test_flow()
-    else:
-        from eth_account import account
-        from getpass import getpass
-
-        key_path = os.path.expanduser(
-            os.path.join("~", ".brownie", "accounts", "yb-deployer.json")
-        )
-        with open(key_path, "r") as f:
-            pkey = account.decode_keyfile_json(json.load(f), getpass())
-        signer = account.Account.from_key(pkey)
-
-        boa.set_network_env(NETWORK)
-        boa.env.add_account(signer)
-
-        raise NotImplementedError(
-            "Production deploy path (real createProposal + on-chain pool "
-            "deploy) not wired up yet."
+            holder, balance, migrator,
         )
 
 
