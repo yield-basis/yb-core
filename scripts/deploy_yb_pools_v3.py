@@ -206,16 +206,16 @@ SEED_DEBT_CAP = 10_000 * 10**18
 _BTC_BASE = {
     "coin0": CRVUSD,
     "coingecko_id": "bitcoin",
-    "A": 5 * 10000 * 2**2,
-    "mid_fee": int(0.0025 * 10**10),
-    "out_fee": int(0.0045 * 10**10),
-    "fee_gamma": int(0.01 * 10**18),
-    "adjustment_step_min": int(0.0001 / 100 * 10**18),
-    "adjustment_step_max": int(10 / 100 * 10**18),
-    "ma_exp_time": 600,
-    "reserved_profit_fraction": 5 * 10**9,  # 50% in 1e10 precision
-    "leverage_fee": int(0.0092 * 10**18),
-    "rate": int(0.035 * 10**18 // (86400 * 365)),
+    "A": 5 * 10000,
+    "mid_fee": int(0.012 * 10**10),
+    "out_fee": int(0.0163 * 10**10),
+    "fee_gamma": int(0.0085093697 * 10**18),
+    "adjustment_step_min": int(1e-10 * 10**18),
+    "adjustment_step_max": int(0.005 * 10**18),
+    "ma_exp_time": 865,
+    "reserved_profit_fraction": 4333333333,
+    "leverage_fee": int(0.013 * 10**18),
+    "rate": int(0.01873737373737374 * 2 * 10**18 // (86400 * 365)),
     "debt_cap": SEED_DEBT_CAP,
 }
 
@@ -224,37 +224,37 @@ _BTC_BASE = {
 _ETH_BASE = {
     "coin0": CRVUSD,
     "coingecko_id": "ethereum",
-    "A": 25_000,
-    "mid_fee": 60_000_000,        # 0.6%
-    "out_fee": 220_000_000,       # 2.2%
-    "fee_gamma": 1_395_000_000_000_000,  # 0.001395
-    "adjustment_step_min": int(0.0001 / 100 * 10**18),
-    "adjustment_step_max": int(10 / 100 * 10**18),
-    "ma_exp_time": 866,
-    "reserved_profit_fraction": 5 * 10**9,
-    "leverage_fee": int(0.014 * 10**18),
-    "rate": int(2 * 0.005 * 10**18 // (86400 * 365)),
+    "A": 5 * 10000,
+    "mid_fee": int(0.005 * 10**10),
+    "out_fee": int(0.0288 * 10**10),
+    "fee_gamma": int(8.1854673e16),
+    "adjustment_step_min": int(1e-10 * 10**18),
+    "adjustment_step_max": int(0.005 * 10**18),
+    "ma_exp_time": 865,
+    "reserved_profit_fraction": int(0.3414141414 * 10**10),
+    "leverage_fee": int(0.013 * 10**18),
+    "rate": int(0.04621212121212121 * 2 * 10**18 // (86400 * 365)),
     "debt_cap": SEED_DEBT_CAP,
 }
 
 POOL_SPECS = [
-    {**_BTC_BASE, "name": "Yield Basis WBTC",  "symbol": "YB-WBTC",
-     "coin1": WBTC,  "replaces_market_id": 3},
+    {**_BTC_BASE, "name": "Yield Basis WBTC", "symbol": "YB-WBTC",
+     "coin1": WBTC, "replaces_market_id": 3},
     {**_BTC_BASE, "name": "Yield Basis cbBTC", "symbol": "YB-cbBTC",
      "coin1": CBBTC, "replaces_market_id": 4},
-    {**_BTC_BASE, "name": "Yield Basis tBTC",  "symbol": "YB-tBTC",
-     "coin1": TBTC,  "replaces_market_id": 5},
-    {**_ETH_BASE, "name": "Yield Basis WETH",  "symbol": "YB-WETH",
-     "coin1": WETH,  "replaces_market_id": 6},
+    {**_BTC_BASE, "name": "Yield Basis tBTC", "symbol": "YB-tBTC",
+     "coin1": TBTC, "replaces_market_id": 5},
+    {**_ETH_BASE, "name": "Yield Basis WETH", "symbol": "YB-WETH",
+     "coin1": WETH, "replaces_market_id": 6},
 ]
 
 # Collateral, in human units, that --activate seeds into each new market.
 # The activation account must hold these before running --activate.
 SEED_AMOUNTS = {
-    "YB-WBTC":  0.01,
+    "YB-WBTC": 0.01,
     "YB-cbBTC": 0.01,
-    "YB-tBTC":  0.01,
-    "YB-WETH":  0.1,
+    "YB-tBTC": 0.01,
+    "YB-WETH": 0.1,
 }
 
 
