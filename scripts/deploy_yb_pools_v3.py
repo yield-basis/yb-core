@@ -215,7 +215,7 @@ MAGIC_GAMMA = 11111111111  # Twocrypto bootstrap-mode gamma
 # raises lt_to's allocation to cover the migrated position and pulls the
 # freed allocation off lt_from (LTMigrator.vy _migrate_plain). The cap
 # only has to clear the seed deposit's amm.max_debt() // 2 >= value check.
-SEED_DEBT_CAP = 10_000 * 10**18
+SEED_DEBT_CAP = 2_000_000 * 10**18
 
 # Shared cryptopool + YB params for the three BTC variants.
 _BTC_BASE = {
