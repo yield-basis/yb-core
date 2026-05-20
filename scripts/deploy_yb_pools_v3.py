@@ -250,20 +250,44 @@ SEED_AMOUNTS = {
 
 
 COINGECKO_PRICE_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINGECKO_MAX_RETRIES = 6
+COINGECKO_RETRY_SECONDS = 15
+
+# In-memory cache: each coingecko_id is fetched at most once per run.
+_PRICE_CACHE: dict[str, int] = {}
 
 
 def fetch_initial_price(coingecko_id: str) -> int:
     """Fetch coin1 USD spot from CoinGecko and return it scaled to 1e18
-    (price of coin1 in coin0 = crvUSD, treated as 1 USD)."""
-    response = requests.get(
-        COINGECKO_PRICE_URL,
-        params={"ids": coingecko_id, "vs_currencies": "usd"},
-        timeout=15,
-    )
-    response.raise_for_status()
-    price_usd = float(response.json()[coingecko_id]["usd"])
-    print(f"CoinGecko {coingecko_id} = ${price_usd:,.2f}")
-    return int(price_usd * 10**18)
+    (price of coin1 in coin0 = crvUSD, treated as 1 USD). Cached per
+    coingecko_id for the lifetime of the run; retries on 429 rate-limit /
+    5xx, since the free tier throttles bursts of requests."""
+    if coingecko_id in _PRICE_CACHE:
+        price = _PRICE_CACHE[coingecko_id]
+        print(f"CoinGecko {coingecko_id} = ${price / 1e18:,.2f} (cached)")
+        return price
+    for attempt in range(1, COINGECKO_MAX_RETRIES + 1):
+        response = requests.get(
+            COINGECKO_PRICE_URL,
+            params={"ids": coingecko_id, "vs_currencies": "usd"},
+            timeout=15,
+        )
+        if response.status_code == 429 or response.status_code >= 500:
+            if attempt == COINGECKO_MAX_RETRIES:
+                response.raise_for_status()
+            print(
+                f"CoinGecko {response.status_code} for {coingecko_id} — "
+                f"retry {attempt}/{COINGECKO_MAX_RETRIES} in "
+                f"{COINGECKO_RETRY_SECONDS}s"
+            )
+            sleep(COINGECKO_RETRY_SECONDS)
+            continue
+        response.raise_for_status()
+        price_usd = float(response.json()[coingecko_id]["usd"])
+        print(f"CoinGecko {coingecko_id} = ${price_usd:,.2f}")
+        price = int(price_usd * 10**18)
+        _PRICE_CACHE[coingecko_id] = price
+        return price
 
 
 def deploy_curve_pool(twocrypto_factory, spec: dict) -> str:
@@ -585,9 +609,10 @@ def run_activation(yb_factory, pool_interface, lt_interface) -> bool:
         if pool.lp_allowlist(market.lt):
             print("  pool already initialized — skipping")
         else:
+            initial_price = fetch_initial_price(spec["coingecko_id"])
             initialize_pool(
                 pool, [account, market.lt, market.virtual_pool],
-                spec["reserved_profit_fraction"], pool.price_scale(),
+                spec["reserved_profit_fraction"], initial_price,
             )
 
         if lt.totalSupply() > 0:
