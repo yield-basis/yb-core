@@ -795,6 +795,14 @@ def main():
         except Exception as e:
             print(f"  Correctly reverted: {e}")
 
+    # --- Checkpoint veYB before creating votes (VotingEscrow workaround) --
+    print("\n=== Checkpointing veYB (VotingEscrow) before creating votes ===")
+    ve_yb = boa.load_partial("contracts/dao/VotingEscrow.vy").at(
+        voting.getVotingToken()
+    )
+    ve_yb.checkpoint()
+    print(f"  checkpoint() called on veYB {ve_yb.address}")
+
     # --- Create each Aragon proposal, rotating proposer EOAs --------------
     print(f"\n=== Creating {len(all_votes)} Aragon proposals ===")
     for idx, (acct_name, vote) in enumerate(
