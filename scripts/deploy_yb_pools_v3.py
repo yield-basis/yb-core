@@ -649,19 +649,12 @@ def _account_load(fname: str):
     return account.Account.from_key(pkey)
 
 
-def run_activate_mode(test_mode: bool):
+def run_activate_mode():
     """`--activate`: post-vote activation. Runs after Votes 2-5 have executed
     on-chain — discovers the new markets, reports the collateral the activation
-    account must hold, and initializes + seeds each market. `--activate --test`
-    forks the network for a dry-run (real balances, no real txs)."""
-    if test_mode:
-        boa.fork(NETWORK)
-        boa.env.eoa = keystore_address(PROPOSER_ACCOUNT_NAMES[0])
-    else:
-        boa.set_network_env(NETWORK)
-        boa.env.add_account(
-            _account_load(PROPOSER_ACCOUNT_NAMES[0]), force_eoa=True
-        )
+    account must hold, and initializes + seeds each market. The network env is
+    set up by main() before this is called; `--activate --test` forks for a
+    dry-run (real balances, no real txs)."""
     yb_factory = boa.load_partial("contracts/Factory.vy").at(YB_FACTORY)
     pool_interface = boa.load_partial(
         "contracts/twocrypto_pool/contracts/main/Twocrypto.vy"
@@ -681,23 +674,27 @@ def main():
     test_mode = "--test" in sys.argv[1:]
     activate_mode = "--activate" in sys.argv[1:]
 
-    if activate_mode:
-        run_activate_mode(test_mode)
-        return
-
+    # --- network env -------------------------------------------------------
+    # Initial signer = first proposer; covers all pre-vote deployments
+    # (blueprints, migrator, Curve pools) and post-vote activation. The
+    # createProposal loop below switches the active EOA per vote.
     if test_mode:
         boa.fork(NETWORK)
-        boa.env.eoa = TEST_EXECUTOR
+        boa.env.eoa = (
+            keystore_address(PROPOSER_ACCOUNT_NAMES[0])
+            if activate_mode else TEST_EXECUTOR
+        )
         etherscan = None
     else:
-        # Initial signer = first proposer; covers all pre-vote deployments
-        # (blueprints, migrator, Curve pools). The createProposal loop
-        # below switches the active EOA per vote.
         boa.set_network_env(NETWORK)
         boa.env.add_account(
             _account_load(PROPOSER_ACCOUNT_NAMES[0]), force_eoa=True
         )
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
+
+    if activate_mode:
+        run_activate_mode()
+        return
 
     # --- shared contract handles ------------------------------------------
     twocrypto_factory = boa.load_partial(
