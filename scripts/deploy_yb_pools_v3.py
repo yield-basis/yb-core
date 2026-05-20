@@ -241,14 +241,14 @@ _ETH_BASE = {
     "coingecko_id": "ethereum",
     "A": 5 * 10000,
     "mid_fee": int(0.005 * 10**10),
-    "out_fee": int(0.0251 * 10**10),
-    "fee_gamma": int(6.7001875e+16),
+    "out_fee": int(0.0209 * 10**10),
+    "fee_gamma": int(8.1854673e+16),
     "adjustment_step_min": int(1e-10 * 10**18),
     "adjustment_step_max": int(0.005 * 10**18),
     "ma_exp_time": 865,
-    "reserved_profit_fraction": 3333333333,
+    "reserved_profit_fraction": 2969696970,
     "leverage_fee": int(0.013 * 10**18),
-    "rate": int(0.04393939393939394 * 2 * 10**18 // (86400 * 365)),
+    "rate": int(0.03636363636363636 * 2 * 10**18 // (86400 * 365)),
     "debt_cap": SEED_DEBT_CAP,
 }
 
@@ -266,10 +266,10 @@ POOL_SPECS = [
 # Collateral, in human units, that --activate seeds into each new market.
 # The activation account must hold these before running --activate.
 SEED_AMOUNTS = {
-    "YB-WBTC": 0.01,
-    "YB-cbBTC": 0.01,
-    "YB-tBTC": 0.01,
-    "YB-WETH": 0.1,
+    "YB-WBTC": 0.001,
+    "YB-cbBTC": 0.001,
+    "YB-tBTC": 0.001,
+    "YB-WETH": 0.01,
 }
 
 
