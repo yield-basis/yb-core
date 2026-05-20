@@ -193,6 +193,14 @@ MAGIC_GAMMA = 11111111111  # Twocrypto bootstrap-mode gamma
 # runtime from CoinGecko (price of coin1 in coin0, 1e18 precision); each
 # pool entry shares one of the base specs below.
 
+# Initial add_market debt ceiling. Deliberately tiny — just enough for
+# --activate to seed each market (SEED_AMOUNTS). Real capacity is NOT set
+# here: LTMigrator is a registered limit setter, so each migrate_*() call
+# raises lt_to's allocation to cover the migrated position and pulls the
+# freed allocation off lt_from (LTMigrator.vy _migrate_plain). The cap
+# only has to clear the seed deposit's amm.max_debt() // 2 >= value check.
+SEED_DEBT_CAP = 10_000 * 10**18
+
 # Shared cryptopool + YB params for the three BTC variants.
 _BTC_BASE = {
     "coin0": CRVUSD,
@@ -207,7 +215,7 @@ _BTC_BASE = {
     "reserved_profit_fraction": 5 * 10**9,  # 50% in 1e10 precision
     "leverage_fee": int(0.0092 * 10**18),
     "rate": int(0.035 * 10**18 // (86400 * 365)),
-    "debt_cap": 2 * 10**6 * 10**18,
+    "debt_cap": SEED_DEBT_CAP,
 }
 
 # WETH pool — wider gamma + fees, longer MA. Tracks the existing on-chain
@@ -225,7 +233,7 @@ _ETH_BASE = {
     "reserved_profit_fraction": 5 * 10**9,
     "leverage_fee": int(0.014 * 10**18),
     "rate": int(2 * 0.005 * 10**18 // (86400 * 365)),
-    "debt_cap": 2 * 25_000_000 * 10**18,
+    "debt_cap": SEED_DEBT_CAP,
 }
 
 POOL_SPECS = [
@@ -922,21 +930,15 @@ def main():
         new_id = new_markets[spec["symbol"]]
         old_id = spec["replaces_market_id"]
         old_lt = lt_interface.at(yb_factory.markets(old_id).lt)
-        new_market = yb_factory.markets(new_id)
-        new_lt = lt_interface.at(new_market.lt)
-        new_pool = pool_interface.at(new_market.cryptopool)
 
         GAUGE_HOLDERS_TO_SKIP = yb_factory.markets(old_id).staker
         holder = _find_lt_holder(old_lt.address)
         balance = old_lt.balanceOf(holder)
 
-        # Top up beyond the SEED_AMOUNTS bootstrap so amm.max_debt() can absorb
-        # this holder's migration (≈2× the migrated assets).
-        topup = 2 * old_lt.preview_withdraw(balance)
-        asset = _load_erc20(new_lt.ASSET_TOKEN())
-        _give_asset(asset, TEST_EXECUTOR, topup)
-        leverage_deposit(new_lt, asset, new_pool, topup)
-
+        # No pre-funding: the new market holds only the SEED_DEBT_CAP seed.
+        # LTMigrator._migrate_plain raises lt_to's allocation itself to absorb
+        # the migrated position, so the tiny debt_cap is sufficient — this is
+        # exactly what the test below exercises.
         test_lt_migration(
             yb_factory, lt_interface, spec, new_id, holder, balance, migrator,
         )
