@@ -43,6 +43,7 @@ discovers the new markets on-chain, reports how much of each collateral the
 activation account (yb-deployer, the pool deployer) must hold, and then
 initializes each pool's LP allowlist and seeds each LT. It is idempotent.
 """
+import contextlib
 import json
 import os
 import sys
@@ -328,12 +329,23 @@ def addr_as_uint256(addr: str) -> int:
     return int(addr, 16)
 
 
+@contextlib.contextmanager
+def measure_gas(label: str):
+    """Reset boa's gas tracker, run the wrapped block, then print the EVM gas
+    consumed inside it. Used to size votes against on-chain gas limits."""
+    boa.env.reset_gas_used()
+    try:
+        yield
+    finally:
+        print(f"  [GAS] {label}: {boa.env.get_gas_used():,} gas")
+
+
 def simulate_yb_vote(actions: list, label: str = ""):
     """Simulate a YB Aragon-OSx vote by raw_calling each action from the DAO.
     Matches what the voting plugin does on executeVote."""
     tag = f" ({label})" if label else ""
     print(f"Simulating YB vote{tag} with {len(actions)} action(s) from {YB_DAO}…")
-    with boa.env.prank(YB_DAO):
+    with boa.env.prank(YB_DAO), measure_gas(f"vote{tag}"):
         for action in actions:
             boa.env.raw_call(to_address=action.to, data=action.data)
     print(f"YB vote{tag} actions executed.")
