@@ -921,12 +921,22 @@ def main():
     for idx, (acct_name, vote) in enumerate(
         zip(PROPOSER_ACCOUNT_NAMES, all_votes), start=1
     ):
-        proposer = keystore_address(acct_name)
         if test_mode:
+            proposer = keystore_address(acct_name)
             metadata = b""
         else:
             print(f"\n--- Loading creator account {acct_name} for Vote {idx} ---")
-            boa.env.add_account(_account_load(acct_name), force_eoa=True)
+            account = _account_load(acct_name)
+            # Switch the signing EOA to this proposer. Each vote MUST be
+            # created from its own key — TokenVoting's per-address 1-day
+            # cooldown rejects a second proposal from the same creator.
+            # set_eoa() == add_account(account, force_eoa=True).
+            boa.env.set_eoa(account)
+            proposer = account.address
+            assert boa.env.eoa == proposer, (
+                f"EOA switch failed: env.eoa={boa.env.eoa}, expected {proposer}"
+            )
+            print(f"  signing EOA switched to {proposer}")
             metadata = pin_to_ipfs({
                 "title": vote["title"],
                 "summary": vote["summary"],
