@@ -25,12 +25,17 @@ YB DAO votes (created on Aragon-OSx via TokenVoting createProposal):
   Vote 3 — add_market for new cbBTC pool + disable old cbBTC LT.
   Vote 4 — add_market for new tBTC pool + disable old tBTC LT.
   Vote 5 — add_market for new WETH pool + disable old WETH LT.
+  Vote 6 — switch HybridVaultFactory pool limits: enable the 4 new
+           markets for HybridVault deposits and disable the old WETH
+           market it currently points at.
 
 Votes 2-5 are guarded by the on-chain CallComparator (same pattern as
 scripts/voting/change_btc_fees_2.py): each can only execute once Vote 1 has
 flipped Factory.amm_impl() / lt_impl() to the new blueprints, AND only at
 an exact Factory.market_count() — which chains them to execute strictly in
-deploy order (WBTC, cbBTC, tBTC, WETH) and exactly once each.
+deploy order (WBTC, cbBTC, tBTC, WETH) and exactly once each. Vote 6 is
+likewise guarded on market_count so it cannot disable the old HybridVault
+market before the 4 new markets exist.
 
 In --test mode the script also:
   - simulates Vote 2 BEFORE Vote 1 and confirms it reverts at the guard,
@@ -104,6 +109,14 @@ CALL_COMPARATOR = "0xd3BFa85dc668Aab38121bE12D69dd180301dec25"
 # an upgraded LTMigrator (cross-pool aware) and register it as a limit setter.
 EXISTING_LT_MIGRATOR = "0x2cdb9f485e718f551cfeea6c33cb7062ed37066c"
 
+# HybridVaultFactory gates HybridVault deposits per market via pool_limits[id].
+# Discovered on-chain via SetLimitSetter logs on the HybridFactoryOwner. Today
+# only the old WETH market (CURRENT_HYBRID_POOL_ID) is enabled; Vote 6 switches
+# the limits onto the 4 new markets and disables the old one.
+HYBRID_VAULT_FACTORY = "0xBdC32268851C324c6185809271dfe6d8dab8dC5b"
+CURRENT_HYBRID_POOL_ID = 6                  # old WETH market, the only one enabled now
+HYBRID_POOL_LIMIT = 50_000_000 * 10**18     # per-market HybridVault crvUSD limit
+
 # Any address; executeVote is permissionless. Also acts as the Twocrypto
 # pool deployer (tx.origin), which gives it initialize() rights via the
 # magic-gamma bootstrap path.
@@ -113,14 +126,16 @@ AMM_IMPL_SELECTOR = method_id("amm_impl()")
 LT_IMPL_SELECTOR = method_id("lt_impl()")
 MARKET_COUNT_SELECTOR = method_id("market_count()")
 
-# Aragon-OSx TokenVoting limits a creator to one active proposal at a time
-# (≈1 vote per day per address), so the 5 votes are spread across 5 keys.
+# TokenVoting enforces a per-address proposal-creation cooldown
+# (proposalCooldownPeriod = 1 day), so the 6 proposals created back-to-back
+# in one run need 6 distinct proposer keys.
 PROPOSER_ACCOUNT_NAMES = [
     "yb-deployer",
     "yb-deployer-a",
     "yb-deployer-b",
     "yb-deployer-c",
     "yb-deployer-2",
+    "yb-deployer-3",
 ]
 
 Proposal = namedtuple(
@@ -723,6 +738,9 @@ def main():
     comparator = boa.load_partial("contracts/dao/CallComparator.vy").at(
         CALL_COMPARATOR
     )
+    hybrid_vault_factory = boa.load_partial(
+        "contracts/HybridVaultFactory.vy"
+    ).at(HYBRID_VAULT_FACTORY)
     voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
         YB_VOTING_PLUGIN
     )
@@ -822,7 +840,48 @@ def main():
             ],
         })
 
-    all_votes = [vote1] + market_votes
+    # --- Vote 6: switch HybridVault to the new markets.
+    # HybridVaultFactory.pool_limits[id] caps HybridVault deposits per market;
+    # an id with limit 0 is effectively unsupported. Today only the old WETH
+    # market is enabled, so this vote enables the 4 new markets and disables
+    # the old one. Guarded on market_count == n_markets + 4 so it cannot
+    # disable the old market before the new ones have been created.
+    enabled_old = [
+        i for i in range(n_markets)
+        if hybrid_vault_factory.pool_limits(i) > 0
+    ]
+    assert enabled_old == [CURRENT_HYBRID_POOL_ID], (
+        f"HybridVault has markets {enabled_old} enabled, expected only "
+        f"[{CURRENT_HYBRID_POOL_ID}] — review Vote 6 before deploying."
+    )
+    new_market_ids = [n_markets + i for i in range(len(POOL_SPECS))]
+    vote6 = {
+        "title": "YB v3: switch HybridVault to the new markets",
+        "summary": (
+            f"Set HybridVault deposit limits to "
+            f"{HYBRID_POOL_LIMIT // 10**18:,} crvUSD for the 4 new markets "
+            f"{new_market_ids} and disable the old WETH market "
+            f"#{CURRENT_HYBRID_POOL_ID}. Guarded: only executes once "
+            f"market_count == {n_markets + len(POOL_SPECS)} (Votes 2-5 done)."
+        ),
+        "actions": [
+            Action(to=comparator.address, value=0,
+                   data=comparator.check_equal.prepare_calldata(
+                       yb_factory.address, MARKET_COUNT_SELECTOR,
+                       n_markets + len(POOL_SPECS))),
+        ] + [
+            Action(to=hybrid_vault_factory.address, value=0,
+                   data=hybrid_vault_factory.set_pool_limit.prepare_calldata(
+                       market_id, HYBRID_POOL_LIMIT))
+            for market_id in new_market_ids
+        ] + [
+            Action(to=hybrid_vault_factory.address, value=0,
+                   data=hybrid_vault_factory.set_pool_limit.prepare_calldata(
+                       CURRENT_HYBRID_POOL_ID, 0)),
+        ],
+    }
+
+    all_votes = [vote1] + market_votes + [vote6]
 
     # --- TEST-ONLY: market vote must revert before Vote 1 executes --------
     if test_mode:
@@ -833,6 +892,18 @@ def main():
                     boa.env.raw_call(to_address=action.to, data=action.data)
             raise AssertionError(
                 "Vote 2 simulated successfully BEFORE Vote 1 — guard is broken."
+            )
+        except Exception as e:
+            print(f"  Correctly reverted: {e}")
+
+        print("\n=== Negative test: Vote 6 before the market votes ===")
+        try:
+            with boa.env.prank(YB_DAO):
+                for action in vote6["actions"]:
+                    boa.env.raw_call(to_address=action.to, data=action.data)
+            raise AssertionError(
+                "Vote 6 simulated successfully BEFORE the market votes — "
+                "guard is broken."
             )
         except Exception as e:
             print(f"  Correctly reverted: {e}")
@@ -921,6 +992,21 @@ def main():
         assert n_after == n_before + 1, (
             f"market_count did not increment ({n_before} -> {n_after})"
         )
+
+    # --- TEST-ONLY: simulate Vote 6 (HybridVault market switch) ----------
+    print("\n=== Simulating Vote 6 (HybridVault market switch) ===")
+    simulate_yb_vote(vote6["actions"], label="Vote 6")
+    for market_id in new_market_ids:
+        assert hybrid_vault_factory.pool_limits(market_id) == HYBRID_POOL_LIMIT, (
+            f"HybridVault pool_limits[{market_id}] not set to the new limit"
+        )
+    assert hybrid_vault_factory.pool_limits(CURRENT_HYBRID_POOL_ID) == 0, (
+        f"old HybridVault market #{CURRENT_HYBRID_POOL_ID} still enabled"
+    )
+    print(
+        f"  Vote 6 post-state OK: markets {new_market_ids} enabled, "
+        f"old #{CURRENT_HYBRID_POOL_ID} disabled."
+    )
 
     # --- TEST-ONLY: exercise the --activate path on the fork -------------
     # Production funds the activation account by real transfer; on the fork
