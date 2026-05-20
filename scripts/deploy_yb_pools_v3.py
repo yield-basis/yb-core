@@ -241,14 +241,14 @@ _ETH_BASE = {
     "coingecko_id": "ethereum",
     "A": 5 * 10000,
     "mid_fee": int(0.005 * 10**10),
-    "out_fee": int(0.0288 * 10**10),
-    "fee_gamma": int(8.1854673e16),
+    "out_fee": int(0.0251 * 10**10),
+    "fee_gamma": int(6.7001875e+16),
     "adjustment_step_min": int(1e-10 * 10**18),
     "adjustment_step_max": int(0.005 * 10**18),
     "ma_exp_time": 865,
-    "reserved_profit_fraction": int(0.3414141414 * 10**10),
+    "reserved_profit_fraction": 3333333333,
     "leverage_fee": int(0.013 * 10**18),
-    "rate": int(0.04621212121212121 * 2 * 10**18 // (86400 * 365)),
+    "rate": int(0.04393939393939394 * 2 * 10**18 // (86400 * 365)),
     "debt_cap": SEED_DEBT_CAP,
 }
 
