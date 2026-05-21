@@ -246,9 +246,9 @@ _ETH_BASE = {
     "adjustment_step_min": int(1e-10 * 10**18),
     "adjustment_step_max": int(0.005 * 10**18),
     "ma_exp_time": 865,
-    "reserved_profit_fraction": int(0.47 * 10**10),
+    "reserved_profit_fraction": int(0.45 * 10**10),
     "leverage_fee": int(0.013 * 10**18),
-    "rate": int(0.05151515152 * 2 * 10**18 // (86400 * 365)),
+    "rate": int(0.05 * 2 * 10**18 // (86400 * 365)),
     "debt_cap": SEED_DEBT_CAP,
 }
 
