@@ -4,6 +4,7 @@
 @author Yield Basis
 @license GNU Affero General Public License v3.0
 @notice Sends tokens if they were not sent yet, single-use only
+@dev For each index k entries users[k] and amounts[k] match by position; i counter follows that index even if a recipient was already paid
 """
 from ethereum.ercs import IERC20
 
@@ -21,7 +22,9 @@ def __init__(token: IERC20):
 
 @external
 def send(users: DynArray[address, 500], amounts: DynArray[uint256, 500]):
-    assert msg.sender == ADMIN  # otherwise someone could set the already_sent!
+    assert msg.sender == ADMIN # otherwise someone could set the already_sent!
+
+    assert len(users) == len(amounts)
 
     i: uint256 = 0
     for user: address in users:
