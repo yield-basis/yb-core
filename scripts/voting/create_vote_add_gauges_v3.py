@@ -35,7 +35,7 @@ from getpass import getpass
 import boa
 import requests
 from eth_account import account
-from eth_utils import keccak
+from eth_utils import keccak, to_checksum_address
 from vyper.utils import method_id
 
 from networks import NETWORK, PINATA_TOKEN
@@ -45,13 +45,12 @@ YB_DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"
 YB_FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 CALL_COMPARATOR = "0xd3BFa85dc668Aab38121bE12D69dd180301dec25"
 
-# Test proposer (forked dry-run only): the voting plugin requires the proposer
-# to hold veYB (minProposerVotingPower), so this must be a real veYB holder
-# whose lock outlasts the test's time-travel. Picked from find_ve_voters.py -
-# the largest holder, ~8.2M veYB. The production hot wallet is created
-# separately - set PROD_PROPOSER_KEYSTORE to its brownie keystore name.
-TEST_PROPOSER = "0xD10782f4D4fE20f5E15f3347E5D59aB3eC6D63d6"
-PROD_PROPOSER_KEYSTORE = None
+# The proposer that creates the vote, as a brownie keystore name. The voting
+# plugin requires the proposer to hold veYB (minProposerVotingPower) with a
+# lock that stays active through the vote's snapshot. Used by both modes:
+# --test pranks this account's address on the fork, prod loads its key and
+# broadcasts.
+PROPOSER_KEYSTORE = "yb-deployer-4"
 
 # The 4 new YB v3 market gauges (LiquidityGauge == market.staker) and their
 # LTs. CREATE-deterministic - computed and verified by scripts/predict_gauges.py.
@@ -239,10 +238,20 @@ def pin_to_ipfs(content: dict) -> str:
     return "ipfs://" + response.json()["IpfsHash"]
 
 
-def account_load(name: str):
-    path = os.path.expanduser(
+def _keystore_path(name: str) -> str:
+    return os.path.expanduser(
         os.path.join("~", ".brownie", "accounts", name + ".json"))
-    with open(path) as f:
+
+
+def keystore_address(name: str) -> str:
+    """Read a brownie keystore's EOA address without the password - the address
+    is stored in plaintext alongside the encrypted key."""
+    with open(_keystore_path(name)) as f:
+        return to_checksum_address("0x" + json.load(f)["address"])
+
+
+def account_load(name: str):
+    with open(_keystore_path(name)) as f:
         pkey = account.decode_keyfile_json(json.load(f), getpass())
     return account.Account.from_key(pkey)
 
@@ -250,7 +259,9 @@ def account_load(name: str):
 # --- entrypoints -------------------------------------------------------------
 
 def run_test():
-    boa.fork(NETWORK)
+    # Fork at the chain head - boa otherwise forks at a finalized/safe block,
+    # which lags the head and is slower to settle on.
+    boa.fork(NETWORK, block_identifier="latest")
     latest_block = boa.env.evm.patch.block_number
     factory, comparator, gc, voting, ve = load_contracts()
 
@@ -295,9 +306,11 @@ def run_test():
     print("\n=== Checkpointing VotingEscrow ===")
     ve.checkpoint()
 
-    print(f"\n=== Creating the gauge vote from {TEST_PROPOSER} ===")
+    proposer = keystore_address(PROPOSER_KEYSTORE)
+    print(f"\n=== Creating the gauge vote from {PROPOSER_KEYSTORE} "
+          f"({proposer}) ===")
     actions = build_vote_actions(comparator, gc)
-    with boa.env.prank(TEST_PROPOSER):
+    with boa.env.prank(proposer):
         pid7 = voting.createProposal(*Proposal(
             metadata=b"", actions=actions, allowFailureMap=0,
             startDate=0, endDate=0, voteOption=0, tryEarlyExecution=True))
@@ -321,10 +334,8 @@ def run_test():
 
 
 def run_prod():
-    if not PROD_PROPOSER_KEYSTORE:
-        sys.exit("Set PROD_PROPOSER_KEYSTORE to the hot-wallet keystore name.")
     boa.set_network_env(NETWORK)
-    boa.env.add_account(account_load(PROD_PROPOSER_KEYSTORE), force_eoa=True)
+    boa.env.add_account(account_load(PROPOSER_KEYSTORE), force_eoa=True)
     factory, comparator, gc, voting, ve = load_contracts()
 
     print("=== Checkpointing VotingEscrow ===")
