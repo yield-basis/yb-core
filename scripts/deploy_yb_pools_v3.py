@@ -119,6 +119,16 @@ HYBRID_VAULT_FACTORY = "0xBdC32268851C324c6185809271dfe6d8dab8dC5b"
 CURRENT_HYBRID_POOL_ID = 6                  # old WETH market, the only one enabled now
 HYBRID_POOL_LIMIT = 50_000_000 * 10**18     # per-market HybridVault crvUSD limit
 
+# Largest HybridVault holder in the old WETH market — used by --activate
+# --test to reproduce the production scenario where a HybridVault withdrawal
+# flips disabled_lts[lt_from] back to False (which broke the legacy limit=0
+# deallocation path in LTMigrator). Discovered + ranked by
+# scripts/find_hybrid_weth_holder.py; the user may have withdrawn by the
+# time --test runs, in which case the test silently falls back to the
+# ADMIN-prank simulation.
+WETH_HYBRID_VAULT_USER = "0xaaC0C7bdaB6335a925CFC9C181C1aE176B8866D7"
+WETH_HYBRID_VAULT      = "0x310181E1Ffd470ac32023f2633355A44Fc24A240"
+
 # Any address; executeVote is permissionless. Also acts as the Twocrypto
 # pool deployer (tx.origin), which gives it initialize() rights via the
 # magic-gamma bootstrap path.
@@ -247,10 +257,12 @@ def _pass_vote(voting, pid: int):
         )
 
 
-def execute_pending_dao_votes():
+def execute_pending_dao_votes() -> list[int]:
     """Forked-test helper: push any unexecuted recent Aragon-OSx proposals
     through to execution so --activate can find the new markets. Idempotent —
-    proposals already executed on-chain are skipped, so it's safe to re-run."""
+    proposals already executed on-chain are skipped, so it's safe to re-run.
+    Returns the proposal ids in creation order (Vote 1 first), so callers can
+    inspect their actions on-chain via voting.getProposal()."""
     voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
         YB_VOTING_PLUGIN
     )
@@ -261,7 +273,7 @@ def execute_pending_dao_votes():
     pending = [pid for pid in recent if not voting.getProposal(pid)[1]]
     if not pending:
         print("No pending DAO votes to execute on the fork.")
-        return
+        return recent
 
     print(f"\n=== Executing {len(pending)} pending DAO vote(s) on the fork ===")
     for pid in pending:
@@ -276,6 +288,7 @@ def execute_pending_dao_votes():
             raise RuntimeError(f"Proposal {pid} cannot execute after voting")
         voting.execute(pid)
         print(f"  proposal {pid} executed")
+    return recent
 
 
 # --- vote execution ----------------------------------------------------------
@@ -821,6 +834,171 @@ def run_activate_mode():
         sys.exit(f"Activation aborted: {e}")
 
 
+SET_LIMIT_SETTER_SELECTOR = method_id("set_limit_setter(address,bool)")
+
+
+def _on_chain_migrator(voting, factory_owner_addr: str,
+                       vote1_pid: int) -> str:
+    """Decode Vote 1's actions to recover the address of the LTMigrator that
+    the production deploy_yb_pools_v3.py run deployed and registered. That
+    is the migrator the script uses by default (no --new-migrator)."""
+    actions = voting.getProposal(vote1_pid)[4]
+    for to, _value, data in actions:
+        if (to.lower() == factory_owner_addr.lower()
+                and bytes(data[:4]) == SET_LIMIT_SETTER_SELECTOR
+                and int.from_bytes(data[36:68], "big") == 1):
+            addr = "0x" + bytes(data[4 + 12: 4 + 32]).hex()
+            if addr.lower() == EXISTING_LT_MIGRATOR.lower():
+                continue   # this entry disables the OLD pre-v3 migrator
+            return addr
+    raise RuntimeError("Could not extract new LTMigrator from Vote 1 actions")
+
+
+def _try_hybridvault_withdraw(yb_factory, factory_owner, lt_interface,
+                              old_id: int) -> bool:
+    """If WETH_HYBRID_VAULT_USER still holds a position in market `old_id`,
+    prank them to withdraw a quarter via HybridVault.withdraw() — the
+    production re-enable trigger that breaks the legacy limit=0 deallocation
+    path. Returns True if the withdrawal happened (disabled_lts now False)."""
+    market = yb_factory.markets(old_id)
+    old_lt = lt_interface.at(market.lt)
+    hybrid_vault = boa.load_partial("contracts/HybridVault.vy").at(
+        WETH_HYBRID_VAULT)
+    staker = boa.load_partial("contracts/dao/LiquidityGauge.vy").at(
+        market.staker)
+    gauge_bal = staker.balanceOf(WETH_HYBRID_VAULT)
+    lt_bal = old_lt.balanceOf(WETH_HYBRID_VAULT)
+    if gauge_bal == 0 and lt_bal == 0:
+        print(f"  HybridVault {WETH_HYBRID_VAULT} no longer holds WETH LT "
+              "- skipping the real re-enable trigger.")
+        return False
+    unstake = gauge_bal > 0
+    shares = (gauge_bal // 4) if unstake else (lt_bal // 4)
+    assert shares > 0, "computed 0 withdrawal shares"
+    with boa.env.prank(WETH_HYBRID_VAULT_USER):
+        hybrid_vault.withdraw(old_id, shares, 0, unstake)
+    assert not factory_owner.disabled_lts(old_lt.address), (
+        "HybridVault withdrawal did not flip disabled_lts back to False"
+    )
+    print(f"  HybridVault withdrew {shares / 1e18:.4f} WETH LT shares "
+          f"({'unstaked' if unstake else 'direct'}) — disabled_lts cleared")
+    return True
+
+
+def run_lt_migration_test(vote_proposal_ids: list[int],
+                          withdraw_hybrid: bool,
+                          use_new_migrator: bool):
+    """Forked-test: exercise LTMigrator end-to-end on each market.
+
+    Migrator selection (the key flag):
+      default          - call the ON-CHAIN migrator (the address Vote 1 set
+                         as limit_setter). This is the build with the legacy
+                         lt_allocate_stablecoins(lt_from, 0) call.
+      --new-migrator   - deploy a fresh local LTMigrator (current source)
+                         and register it via ADMIN prank.
+
+    Re-enable selection:
+      default            - leave disabled_lts[lt_from] = True. Both the
+                           on-chain and the fresh migrator take the legacy
+                           limit=0 path and succeed.
+      --withdraw-hybrid  - for the WETH market only: prank
+                           WETH_HYBRID_VAULT_USER to withdraw from
+                           WETH_HYBRID_VAULT, the production trigger that
+                           flips disabled_lts[lt_from] back to False. Now:
+                             * the on-chain (default) migrator REVERTS with
+                               'Not disabled' - bug demonstrated;
+                             * --new-migrator takes the limit=1 fallback,
+                               leaves lt_from at sentinel allocation=1,
+                               and refuses a migrate-back into lt_from.
+
+    BTC markets are never re-enabled (no HybridVault holds them), so for
+    them both migrators simply succeed via the legacy limit=0 path."""
+    yb_factory = boa.load_partial("contracts/Factory.vy").at(YB_FACTORY)
+    factory_owner = boa.load_partial("contracts/HybridFactoryOwner.vy").at(
+        yb_factory.admin())
+    pool_interface = boa.load_partial(
+        "contracts/twocrypto_pool/contracts/main/Twocrypto.vy")
+    lt_interface = boa.load_partial("contracts/LT.vy")
+    voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
+        YB_VOTING_PLUGIN)
+
+    if use_new_migrator:
+        migrator = boa.load("contracts/LTMigrator.vy",
+                            yb_factory.STABLECOIN(), factory_owner.address)
+        with boa.env.prank(factory_owner.ADMIN()):
+            factory_owner.set_limit_setter(migrator.address, True)
+        print(f"\n=== LTMigrator test - FRESH local migrator "
+              f"{migrator.address} ===")
+    else:
+        on_chain_addr = _on_chain_migrator(
+            voting, factory_owner.address, vote_proposal_ids[0])
+        migrator = boa.load_partial(
+            "contracts/LTMigrator.vy").at(on_chain_addr)
+        print(f"\n=== LTMigrator test - ON-CHAIN migrator "
+              f"{on_chain_addr} (Vote 1 registered) ===")
+
+    new_markets = discover_new_markets(yb_factory, pool_interface)
+    global GAUGE_HOLDERS_TO_SKIP
+    for spec in POOL_SPECS:
+        old_id = spec["replaces_market_id"]
+        new_id = new_markets[spec["symbol"]]
+        old_lt = lt_interface.at(yb_factory.markets(old_id).lt)
+        new_lt = lt_interface.at(yb_factory.markets(new_id).lt)
+
+        print(f"\n--- {spec['symbol']} (market #{old_id} -> #{new_id}) ---")
+
+        re_enabled = False
+        if withdraw_hybrid and spec["symbol"] == "YB-WETH":
+            re_enabled = _try_hybridvault_withdraw(
+                yb_factory, factory_owner, lt_interface, old_id)
+
+        GAUGE_HOLDERS_TO_SKIP = yb_factory.markets(old_id).staker
+        holder = _find_lt_holder(old_lt.address)
+        balance = old_lt.balanceOf(holder)
+
+        # On-chain (buggy) migrator + re-enabled lt_from -> expected revert.
+        if re_enabled and not use_new_migrator:
+            print("  expecting on-chain migrator to REVERT (bug demo)...")
+            reverted = False
+            with boa.env.prank(holder):
+                old_lt.approve(migrator.address, 2**256 - 1)
+                try:
+                    migrator.migrate_plain(
+                        old_lt.address, new_lt.address, balance, 0)
+                except Exception as e:
+                    reverted = True
+                    print(f"  reverted: "
+                          f"{str(e).splitlines()[-1][:120]}")
+            if not reverted:
+                raise AssertionError(
+                    f"{spec['symbol']}: on-chain migrator did NOT revert "
+                    "after HybridVault re-enabled disabled_lts - fix is "
+                    "no longer needed?")
+            continue
+
+        test_lt_migration(
+            yb_factory, lt_interface, spec, new_id, holder, balance, migrator,
+        )
+
+        if use_new_migrator and re_enabled:
+            assert old_lt.stablecoin_allocation() == 1, (
+                f"{spec['symbol']}: lt_from allocation="
+                f"{old_lt.stablecoin_allocation()}, expected sentinel 1")
+            print("  lt_from soft-deprecated (allocation=1)")
+
+        # migrate-back must be refused. The on-chain migrator catches it via
+        # the disabled_lts guard (still True after the legacy limit=0 path);
+        # the new migrator catches it via either guard.
+        try:
+            migrator.preview_migrate_plain(new_lt.address, old_lt.address, 1)
+            raise AssertionError(
+                f"{spec['symbol']}: preview accepted migrate-back")
+        except Exception as e:
+            if "lt_to deprecated" not in str(e):
+                raise
+            print("  migrate-back correctly rejected")
+
+
 def main():
     """`--test`        — forked dry-run of the full deploy + 5-vote flow.
     `--activate`    — post-vote activation (initialize + seed the new markets).
@@ -828,6 +1006,8 @@ def main():
     no flags        — production: deploy, verify, and create the 5 votes."""
     test_mode = "--test" in sys.argv[1:]
     activate_mode = "--activate" in sys.argv[1:]
+    withdraw_hybrid = "--withdraw-hybrid" in sys.argv[1:]
+    use_new_migrator = "--new-migrator" in sys.argv[1:]
 
     # --- network env -------------------------------------------------------
     # Initial signer = first proposer; covers all pre-vote deployments
@@ -853,14 +1033,18 @@ def main():
         # finds them, and mint the per-market seed collateral to the activation
         # EOA so run_activation isn't underfunded. Both no-ops are harmless on a
         # fork where the votes are already executed / the account is funded.
+        proposal_ids = []
         if test_mode:
-            execute_pending_dao_votes()
+            proposal_ids = execute_pending_dao_votes()
             for spec in POOL_SPECS:
                 asset = _load_erc20(spec["coin1"])
                 raw = int(round(
                     SEED_AMOUNTS[spec["symbol"]] * 10**asset.decimals()))
                 _give_asset(asset, boa.env.eoa, raw)
         run_activate_mode()
+        if test_mode:
+            run_lt_migration_test(proposal_ids, withdraw_hybrid,
+                                  use_new_migrator)
         return
 
     # --- shared contract handles ------------------------------------------
