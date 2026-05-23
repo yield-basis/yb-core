@@ -332,7 +332,10 @@ def run_prod():
         "contracts/LTMigrator.vy", factory.STABLECOIN(),
         factory_owner.address)
     print(f"  new migrator: {new_migrator.address}")
+
+    print(f"\n=== Verifying {new_migrator.address} on Etherscan ===")
     verify_on_etherscan(new_migrator, etherscan)
+    print("  verified")
 
     print("\n=== Checkpointing VotingEscrow ===")
     ve.checkpoint()
