@@ -882,22 +882,11 @@ def run_activate_mode():
 
 SET_LIMIT_SETTER_SELECTOR = method_id("set_limit_setter(address,bool)")
 
-
-def _on_chain_migrator(voting, factory_owner_addr: str,
-                       vote1_pid: int) -> str:
-    """Decode Vote 1's actions to recover the address of the LTMigrator that
-    the production deploy_yb_pools_v3.py run deployed and registered. That
-    is the migrator the script uses by default (no --new-migrator)."""
-    actions = voting.getProposal(vote1_pid)[4]
-    for to, _value, data in actions:
-        if (to.lower() == factory_owner_addr.lower()
-                and bytes(data[:4]) == SET_LIMIT_SETTER_SELECTOR
-                and int.from_bytes(data[36:68], "big") == 1):
-            addr = "0x" + bytes(data[4 + 12: 4 + 32]).hex()
-            if addr.lower() == EXISTING_LT_MIGRATOR.lower():
-                continue   # this entry disables the OLD pre-v3 migrator
-            return addr
-    raise RuntimeError("Could not extract new LTMigrator from Vote 1 actions")
+# v3 cross-pool LTMigrator deployed and registered (as limit_setter) by Vote 1.
+# Hard-coded here so the LT-migration test doesn't depend on Vote 1 still being
+# in the recent-proposal window (the n=6 cap in _discover_our_proposals can
+# age it out once unrelated proposals are created from the same accounts).
+V3_LT_MIGRATOR = "0xDfD6fe3A540F68601002E889E33117a7E8A0669D"
 
 
 def _try_hybridvault_withdraw(yb_factory, factory_owner, lt_interface,
@@ -931,8 +920,7 @@ def _try_hybridvault_withdraw(yb_factory, factory_owner, lt_interface,
     return True
 
 
-def run_lt_migration_test(vote_proposal_ids: list[int],
-                          withdraw_hybrid: bool,
+def run_lt_migration_test(withdraw_hybrid: bool,
                           use_new_migrator: bool):
     """Forked-test: exercise LTMigrator end-to-end on each market.
 
@@ -965,8 +953,6 @@ def run_lt_migration_test(vote_proposal_ids: list[int],
     pool_interface = boa.load_partial(
         "contracts/twocrypto_pool/contracts/main/Twocrypto.vy")
     lt_interface = boa.load_partial("contracts/LT.vy")
-    voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
-        YB_VOTING_PLUGIN)
 
     if use_new_migrator:
         migrator = boa.load("contracts/LTMigrator.vy",
@@ -976,12 +962,10 @@ def run_lt_migration_test(vote_proposal_ids: list[int],
         print(f"\n=== LTMigrator test - FRESH local migrator "
               f"{migrator.address} ===")
     else:
-        on_chain_addr = _on_chain_migrator(
-            voting, factory_owner.address, vote_proposal_ids[0])
         migrator = boa.load_partial(
-            "contracts/LTMigrator.vy").at(on_chain_addr)
+            "contracts/LTMigrator.vy").at(V3_LT_MIGRATOR)
         print(f"\n=== LTMigrator test - ON-CHAIN migrator "
-              f"{on_chain_addr} (Vote 1 registered) ===")
+              f"{V3_LT_MIGRATOR} (Vote 1 registered) ===")
 
     new_markets = discover_new_markets(yb_factory, pool_interface)
     global GAUGE_HOLDERS_TO_SKIP
@@ -1094,9 +1078,8 @@ def main():
         # finds them, and mint the per-market seed collateral to the activation
         # EOA so run_activation isn't underfunded. Both no-ops are harmless on a
         # fork where the votes are already executed / the account is funded.
-        proposal_ids = []
         if test_mode:
-            proposal_ids = execute_pending_dao_votes()
+            execute_pending_dao_votes()
             for spec in POOL_SPECS:
                 asset = _load_erc20(spec["coin1"])
                 raw = int(round(
@@ -1104,8 +1087,7 @@ def main():
                 _give_asset(asset, boa.env.eoa, raw)
         run_activate_mode()
         if test_mode:
-            run_lt_migration_test(proposal_ids, withdraw_hybrid,
-                                  use_new_migrator)
+            run_lt_migration_test(withdraw_hybrid, use_new_migrator)
         return
 
     # --- shared contract handles ------------------------------------------
