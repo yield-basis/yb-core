@@ -4,10 +4,12 @@ Deploy new YB v3 pools, a cross-pool LTMigrator, and the 5 Aragon-OSx
 votes that the YB DAO needs to ratify them.
 
 Usage:
-  python deploy_yb_pools_v3.py             # production: deploy + create votes
-  python deploy_yb_pools_v3.py --test      # forked dry-run via boa.fork
-  python deploy_yb_pools_v3.py --activate  # post-vote: initialize + seed markets
-  python deploy_yb_pools_v3.py --activate --test   # forked dry-run of activation
+  python deploy_yb_pools_v3.py                  # production: deploy + create votes
+  python deploy_yb_pools_v3.py --test           # forked dry-run via boa.fork
+  python deploy_yb_pools_v3.py --execute-votes  # call execute() on ready DAO votes
+  python deploy_yb_pools_v3.py --execute-votes --test  # forked dry-run
+  python deploy_yb_pools_v3.py --activate       # post-vote: initialize + seed markets
+  python deploy_yb_pools_v3.py --activate --test       # forked dry-run of activation
 
 Off-vote actions (the deployer EOA does these directly):
   1. Execute Curve Ownership-DAO vote 1408 (activates the new Twocrypto
@@ -47,6 +49,12 @@ In --test mode the script also:
 discovers the new markets on-chain, reports how much of each collateral the
 activation account (yb-deployer, the pool deployer) must hold, and then
 initializes each pool's LP allowlist and seeds each LT. It is idempotent.
+
+--execute-votes is a standalone helper that calls execute() on any of the
+6 DAO votes that are ready (passed quorum/duration, not yet executed). It
+processes them in creation order so the per-vote market_count guards line
+up. execute() is permissionless on TokenVoting, so the signing EOA only
+needs gas — no proposer/admin rights required. Idempotent.
 """
 import contextlib
 import json
@@ -255,6 +263,44 @@ def _pass_vote(voting, pid: int):
         raise RuntimeError(
             f"Proposal {pid} did not reach quorum ({cast} whales voted)"
         )
+
+
+def execute_ready_dao_votes() -> list[int]:
+    """Production --activate helper: discover our recent Aragon-OSx proposals
+    and call execute() on each that is ready (canExecute() == True and not
+    already executed). Iterates in creation order so the per-vote
+    CallComparator guards (market_count) are satisfied. Idempotent: anything
+    already executed or not yet executable is skipped, so re-running is safe.
+
+    execute() on TokenVoting is permissionless, so the caller just needs ETH
+    for gas — no proposer/admin rights required."""
+    voting = boa.load_abi(YB_VOTING_ABI_PATH, name="AragonVoting").at(
+        YB_VOTING_PLUGIN
+    )
+    latest = int(_rpc("eth_blockNumber", []), 16)
+    creators = {keystore_address(n) for n in PROPOSER_ACCOUNT_NAMES}
+    recent = _discover_our_proposals(
+        latest, len(PROPOSER_ACCOUNT_NAMES), creators
+    )
+    if not recent:
+        print("No recent DAO votes from our proposer accounts.")
+        return []
+
+    print(f"\n=== Checking {len(recent)} recent DAO vote(s) for execution ===")
+    executed = []
+    for pid in recent:
+        if voting.getProposal(pid)[1]:
+            print(f"  proposal {pid} already executed - skipping")
+            continue
+        if not voting.canExecute(pid):
+            print(f"  proposal {pid} not yet executable "
+                  "(quorum/duration not met) - skipping")
+            continue
+        print(f"  executing proposal {pid}...")
+        voting.execute(pid)
+        executed.append(pid)
+        print(f"  proposal {pid} executed")
+    return executed
 
 
 def execute_pending_dao_votes() -> list[int]:
@@ -1000,14 +1046,19 @@ def run_lt_migration_test(vote_proposal_ids: list[int],
 
 
 def main():
-    """`--test`        — forked dry-run of the full deploy + 5-vote flow.
-    `--activate`    — post-vote activation (initialize + seed the new markets).
-    `--activate --test` — forked dry-run of activation.
-    no flags        — production: deploy, verify, and create the 5 votes."""
+    """`--test`            — forked dry-run of the full deploy + 6-vote flow.
+    `--execute-votes`     — call execute() on ready DAO votes (idempotent).
+    `--execute-votes --test` — forked dry-run of vote execution.
+    `--activate`          — post-vote activation (initialize + seed the new markets).
+    `--activate --test`   — forked dry-run of activation.
+    no flags              — production: deploy, verify, and create the 6 votes."""
     test_mode = "--test" in sys.argv[1:]
     activate_mode = "--activate" in sys.argv[1:]
+    execute_votes_mode = "--execute-votes" in sys.argv[1:]
     withdraw_hybrid = "--withdraw-hybrid" in sys.argv[1:]
     use_new_migrator = "--new-migrator" in sys.argv[1:]
+
+    eoa_account_modes = activate_mode or execute_votes_mode
 
     # --- network env -------------------------------------------------------
     # Initial signer = first proposer; covers all pre-vote deployments
@@ -1017,7 +1068,7 @@ def main():
         boa.fork(NETWORK, block_identifier="latest")
         boa.env.eoa = (
             keystore_address(PROPOSER_ACCOUNT_NAMES[0])
-            if activate_mode else TEST_EXECUTOR
+            if eoa_account_modes else TEST_EXECUTOR
         )
         etherscan = None
     else:
@@ -1026,6 +1077,16 @@ def main():
             _account_load(PROPOSER_ACCOUNT_NAMES[0]), force_eoa=True
         )
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
+
+    if execute_votes_mode:
+        # On the fork the votes haven't been ratified yet — push them through
+        # whales/time-travel first; in production canExecute() already gates
+        # which ones are ready to land.
+        if test_mode:
+            execute_pending_dao_votes()
+        else:
+            execute_ready_dao_votes()
+        return
 
     if activate_mode:
         # In --test mode the new markets haven't been ratified on the fork yet;
