@@ -45,6 +45,11 @@ ERC20_ABI_PATH = os.path.join(os.path.dirname(__file__), "erc20.abi.json")
 # An allowance >= this is treated as "effectively infinite" and not re-set.
 APPROVAL_THRESHOLD = 2**128
 
+# Fixed gas limit for swap txs. boa's gas estimation has been falling short on
+# the VirtualPool flash-loan path (OOG on send), so we pin it well above the
+# observed worst-case instead of estimating per tx.
+SWAP_GAS = 2_000_000
+
 
 def _load_erc20(addr: str):
     return boa.load_abi(ERC20_ABI_PATH, name="ERC20").at(addr)
@@ -91,12 +96,12 @@ def roundtrip(pool, asset, crvusd, swap_raw: int, label: str) -> int:
     asset_before = asset.balanceOf(eoa)
     crvusd_before = crvusd.balanceOf(eoa)
 
-    pool.exchange(1, 0, swap_raw, 0)
+    pool.exchange(1, 0, swap_raw, 0, gas=SWAP_GAS)
     crvusd_received = crvusd.balanceOf(eoa) - crvusd_before
     print(f"  [{label}] {swap_raw / 10**asset_decimals:.10f} {asset_symbol} "
           f"-> {crvusd_received / 1e18:.6f} crvUSD")
 
-    pool.exchange(0, 1, crvusd_received, 0)
+    pool.exchange(0, 1, crvusd_received, 0, gas=SWAP_GAS)
     asset_returned = asset.balanceOf(eoa) - (asset_before - swap_raw)
     cost = swap_raw - asset_returned
     print(f"  [{label}] {crvusd_received / 1e18:.6f} crvUSD -> "
