@@ -148,27 +148,27 @@ def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
     @param lt Address of the LT contract
     @param limit New stablecoin allocation limit (0 to deallocate, max_value for trying to reach current allocation)
     """
-    if limit != 0:
+    amm: AMM = staticcall lt.amm()
+    lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
+    # Set to no less than 95% of collateral value
+    available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18 * 95 // 100
+
+    # Handle enable/disable
+    if msg.sender == ADMIN:
+        self.disabled_lts[lt] = (limit == 0)
+
+    if not self.disabled_lts[lt]:
         assert msg.sender == ADMIN or self.limit_setters[msg.sender], "Access"
         self.disabled_lts[lt] = False
-        extcall lt.allocate_stablecoins(limit)
+        extcall lt.allocate_stablecoins(max(limit, available_limit))
 
     else:
-        if msg.sender == ADMIN:
-            self.disabled_lts[lt] = True
-
-        else:
-            assert self.disabled_lts[lt], "Not disabled"
-
-            # Deallocate as much as available, and allow anyone to do it
-            amm: AMM = staticcall lt.amm()
-            lp_price: uint256 = extcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price_w()
-            available_limit: uint256 = lp_price * (staticcall amm.collateral_amount()) // 10**18
-            allocated: uint256 = staticcall lt.stablecoin_allocated()
-            safe_limit: uint256 = (staticcall amm.value_oracle()).value * 3 // 4
-            if available_limit < allocated:  # Do not revert if we have less but do nothing
-                assert available_limit >= safe_limit, "Not enough reserves"
-                extcall lt.allocate_stablecoins(available_limit)
+        # Deallocate as much as available, and allow anyone to do it
+        allocated: uint256 = staticcall lt.stablecoin_allocated()
+        safe_limit: uint256 = (staticcall amm.value_oracle()).value * 3 // 4
+        if available_limit < allocated:  # Do not revert if we have less but do nothing
+            assert available_limit >= safe_limit, "Not enough reserves"
+            extcall lt.allocate_stablecoins(available_limit)
 
 
 @external
