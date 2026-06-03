@@ -172,7 +172,7 @@ if __name__ == '__main__':
                     '>=95% of collateral value. Transfer Factory ownership from the current '
                     'HybridFactoryOwner to the new one, re-set the current limit setters '
                     '(HybridVaultFactory and keeper), and disable the old markets (3,4,5,6). '
-                    'This unblocks withdrawals that currently revert.'
+                    'This unblocks some withdrawals that currently revert.'
                 ),
                 'resources': []}).encode(),
             actions=actions,
