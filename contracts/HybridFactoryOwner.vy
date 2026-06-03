@@ -138,6 +138,7 @@ def lt_in_factory(lt: address) -> bool:
     return (staticcall STABLECOIN.allowance(FACTORY.address, lt)) > 0
 
 
+@nonreentrant
 @external
 def lt_allocate_stablecoins(lt: LT, limit: uint256 = max_value(uint256)):
     """
