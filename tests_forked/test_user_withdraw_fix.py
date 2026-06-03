@@ -100,6 +100,7 @@ def test_user_withdraw_after_owner_fix(forked_env):
         assets = vault.withdraw(POOL_ID, SHARES, MIN_ASSETS)
 
     assert assets > 0
+    print(assets)
 
     # 6. The market-6 vault can now withdraw too: market 6 is disabled (step 4),
     #    so its lt_allocate_stablecoins(lt6, 0) becomes a no-op instead of
@@ -108,3 +109,4 @@ def test_user_withdraw_after_owner_fix(forked_env):
         market6_assets = market6_vault.withdraw(MARKET6_POOL_ID, SHARES, MIN_ASSETS)
 
     assert market6_assets > 0
+    print(market6_assets)
