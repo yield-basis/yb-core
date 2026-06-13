@@ -877,8 +877,8 @@ vyper = "0.4.3"
 [package.source]
 type = "git"
 url = "https://github.com/curvefi/curve-std.git"
-reference = "09ad21756cd573cd6ac7afb32fb299fef32429cc"
-resolved_reference = "09ad21756cd573cd6ac7afb32fb299fef32429cc"
+reference = "949ae6c0a2c3dfb9e6808aa6d2ca9b737a5afd59"
+resolved_reference = "949ae6c0a2c3dfb9e6808aa6d2ca9b737a5afd59"
 
 [[package]]
 name = "cytoolz"
@@ -3721,4 +3721,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<4"
-content-hash = "32ed77c687812fdee5e8db9164809f276d9287038851d8ba43654c550753dcae"
+content-hash = "52da39bb11ec1c6404a3654ccf797c28cbb3f444afa110b11084773135aa6add"
