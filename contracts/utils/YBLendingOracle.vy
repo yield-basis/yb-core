@@ -176,6 +176,7 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     yb_oracle: uint256 = 0
     success: bool = False
     response: Bytes[96] = empty(Bytes[96])
+    gas_before: uint256 = msg.gas
     success, response = raw_call(
         amm.address,
         method_id("get_state()"),
@@ -183,6 +184,14 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
         revert_on_failure=False,
         is_static_call=True
     )
+    if not success and not use_balances:
+        # Distinguish a genuine "AMM too imbalanced" revert from a 63/64-rule gas-starvation
+        # OOG: an OOG consumes its whole ~63/64 gas allotment and leaves only ~1/64 behind,
+        # while a real revert is far cheaper and leaves most of the gas. If too little gas
+        # survived, the caller starved get_state() to force the balance fallback (which prices
+        # differently) -> refuse rather than silently flip. Ratio-based on purpose: invariant
+        # to any global gas-schedule repricing (e.g. Glamsterdam), unlike a hardcoded floor.
+        assert msg.gas > gas_before // 16, "GAS"
 
     lv_total: uint256 = 0
     lv_admin: int256 = 0
