@@ -157,6 +157,16 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     amm: LevAMM = staticcall lt.amm()
     agg_price: uint256 = staticcall (staticcall lt.agg()).price()
 
+    # Read-only reentrancy guard: revert if we are being read mid-operation. The AMM's
+    # reads (get_state/collateral_amount/get_debt) are plain views, so probe its lock
+    # explicitly via the @nonreentrant @view check (reverts if the lock is held). The pool
+    # side self-guards: price_oracle()/price_scale() below are themselves @nonreentrant and
+    # revert if the cryptopool lock is held.
+    reentrancy_ok: bool = raw_call(
+        amm.address, method_id("check_nonreentrant()"),
+        max_outsize=0, is_static_call=True, revert_on_failure=False)
+    assert reentrancy_ok, "AMM reentrancy"
+
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
     vprice: uint256 = staticcall pool.virtual_price()

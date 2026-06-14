@@ -5,7 +5,7 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001**–**#006**.
+This document records the Yield Basis team's response to findings **#001**–**#007**.
 The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
 code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
@@ -469,3 +469,53 @@ single-digit one) and the path is not view-callable in a way that benefits an at
 a starved call reverts the withdrawal rather than silently flipping a returned value.
 Measured by `tests/lt/test_emergency_withdraw_gas_006.py`, which pins
 `63 · rest ≫ value_oracle`.
+
+---
+
+## #007 — Missing Reentrancy Check in YBLendingOracle — **Fixed (read-only reentrancy guard)**
+
+### The finding
+
+The oracle reads AMM / LT / cryptopool state via `staticcall` without verifying none of
+them are mid-execution. If `_price()` were called from a callback during an in-flight AMM
+operation it could read intermediate state and return a manipulated price (read-only
+reentrancy). The report notes no such callback path exists today — all handled tokens are
+plain ERC-20 without transfer hooks and market creation is admin-gated — so it is currently
+hypothetical, but a future integration or token allowlisting could introduce one.
+
+### Resolution
+
+The oracle now probes the AMM's reentrancy lock before reading its state:
+
+```vyper
+reentrancy_ok: bool = raw_call(
+    amm.address, method_id("check_nonreentrant()"),
+    max_outsize=0, is_static_call=True, revert_on_failure=False)
+assert reentrancy_ok, "AMM reentrancy"
+```
+
+`amm.check_nonreentrant()` is an `@nonreentrant @view` that reverts if the AMM lock is held.
+It is staticcall-safe (check-only, no state write — confirmed by the oracle pricing normally
+under the forked test); `LT` already calls the same method before its own sensitive
+operations.
+
+The cryptopool side needs no extra probe: the oracle already reads `pool.price_oracle()` and
+`pool.price_scale()`, which are themselves `@nonreentrant @view` in Twocrypto and revert if
+the pool lock is held. So a callback during the classic vector — `cryptopool.remove_liquidity`
+— is caught by those reads, and a callback during an AMM operation is caught by
+`check_nonreentrant()`.
+
+### Residual
+
+A callback in an LT-only window (LT lock held but neither the AMM nor the cryptopool lock
+held) would not be caught. That requires a transfer hook on the stablecoin/asset token
+firing mid-LT-operation — i.e. a callback-capable token, the precondition the report notes is
+currently absent. If such a token is ever allowlisted, an LT-side `check_nonreentrant` probe
+should be added too.
+
+### Tests
+
+`tests/lt/test_oracle_reentrancy_007.py` — a mock AMM whose `check_nonreentrant()` reverts
+("lock held") makes `price_in_usd` / `price_in_asset` revert with `"AMM reentrancy"`,
+confirming the guard fires; the forked oracle test confirms normal pricing is unaffected
+(no-lock case).
