@@ -113,6 +113,10 @@ def __init__(lt_contract: address,
 
     COLLATERAL_PRECISION = 10**(18 - staticcall COLLATERAL.decimals())
     assert staticcall STABLECOIN.decimals() == 18
+    # The math here is written for a general leverage, but the rest of the system fixes
+    # leverage at 2 * 10**18: Factory.vy passes its `LEVERAGE` constant (= 2 * 10**18) on
+    # every deployment, and YBLendingOracle hardcodes the same (its L = 2 formulas, and the
+    # equilibrium threshold in exchange() below). Only deploy with leverage == 2 * 10**18.
     assert leverage > 10**18
 
     denominator: uint256 = 2 * leverage - 10**18
@@ -340,6 +344,10 @@ def exchange(i: uint256, j: uint256, in_amount: uint256, min_out: uint256, _for:
         coll_vs_debt_after = max_value(uint256)
 
     check_state: bool = True # Init here separately
+    # 2 * 10**18 is the equilibrium collateral/debt ratio LEVERAGE / (LEVERAGE - 10**18),
+    # which equals 2.0 only because the system fixes LEVERAGE = 2 * 10**18 (see __init__).
+    # For any other leverage this threshold would misclassify trades; deploying such an AMM
+    # is unsupported and not reachable through the Factory.
     if coll_vs_debt_after > 2 * 10**18:
         if coll_vs_debt_before > coll_vs_debt_after:
             # We improved -> relax the check

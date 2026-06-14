@@ -5,9 +5,9 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001** and
-**#002**. The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the
-relevant code paths with `YBLendingOracle.vy` and is treated identically throughout.
+This document records the Yield Basis team's response to findings **#001**, **#002**
+and **#003**. The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares
+the relevant code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
 ---
 
@@ -307,3 +307,40 @@ gross liquidity value and stays positive for any position holding collateral.
   (`gap = 2·equity·(√ratio − 1)²`; identical at `ratio = 1`).
 - `tests/lt/test_insolvency_boundary.py` — the boundary table; pins coverage `≥ 1.0×`
   at the clamp floor for all A, and the `A_true ≈ 12` return-0 crossover.
+
+---
+
+## #003 — Hardcoded Equilibrium Threshold Assumes Leverage of 2 — **Acknowledged (documented; not an issue for YB)**
+
+### The finding
+
+`AMM.exchange()`'s relaxed safety check compares `coll_vs_debt` against a hardcoded
+`2 * 10**18` to decide whether the system is above or below equilibrium. The equilibrium
+collateral/debt ratio is `LEVERAGE / (LEVERAGE - 10**18)`, which equals 2 only when
+`LEVERAGE = 2 * 10**18`. The AMM constructor takes `leverage` as a parameter and asserts
+only `leverage > 10**18`, so for any other leverage the hardcoded threshold would
+misclassify trades.
+
+### Why this is not an issue for Yield Basis
+
+Leverage is fixed at 2 system-wide, by construction — it is not a per-market parameter:
+
+- **The only way to deploy an AMM is `Factory.add_market`**, which creates the AMM via
+  `create_from_blueprint(self.amm_impl, ..., LEVERAGE, ...)`. `Factory.vy` declares
+  `LEVERAGE: public(constant(uint256)) = 2 * 10**18` and passes that constant on every
+  deployment. No reachable code path constructs an AMM with a different leverage. (A raw
+  blueprint is not a usable AMM until instantiated through the Factory.)
+- **`YBLendingOracle` assumes the same**: its valuation hardcodes `L = 2` (the
+  `(2L)/(2L-1)` leverage factor, the `9/16` boundary, etc.). An AMM with a leverage other
+  than 2 would break the oracle regardless of the threshold.
+
+So `2 * 10**18` is correct everywhere it appears, because the system's single, fixed
+leverage makes the equilibrium ratio exactly 2. We have **documented this assumption in
+`AMM.vy`** — at the constructor (where `leverage` enters) and at the threshold in
+`exchange()` — so the coupling is explicit to future readers.
+
+We consider generalizing the threshold to `LEVERAGE / (LEVERAGE - 10**18)` unnecessary:
+supporting a non-2 leverage would require generalizing the oracle's `L` (and several
+other `L = 2`-derived constants) as well, i.e. a system-wide change well beyond this one
+expression. Should YB ever pursue a different leverage, both the threshold and the oracle
+must be generalized together.
