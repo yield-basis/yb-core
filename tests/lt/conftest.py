@@ -221,3 +221,28 @@ def yb_staker(gauge_interface, yb_market, yb_lt, accounts, admin):
         with boa.env.prank(addr):
             yb_lt.approve(staker.address, 2**256-1)
     return staker
+
+
+# --- Shared deployers for the oracle test suite (compile once, not per test) ---
+
+@pytest.fixture(scope="session")
+def lending_oracle():
+    # Stateless (takes the LT as a call arg); safe to share read-only across tests.
+    return boa.load('contracts/utils/YBLendingOracle.vy')
+
+
+@pytest.fixture(scope="session")
+def ratio_probe():
+    return boa.load('contracts/testing/YBOracleRatioProbe.vy')
+
+
+@pytest.fixture(scope="session")
+def lp_oracle_2():
+    import curve_std
+    return boa.load(list(curve_std.__path__)[0] + '/stableswap/lp_oracle_2.vy')
+
+
+@pytest.fixture(scope="session")
+def ll_deployer():
+    # Needs the LT as a constructor arg -> load_partial once, deploy per test.
+    return boa.load_partial('contracts/utils/YBLendingOracleLL.vy')

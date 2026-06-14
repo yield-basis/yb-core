@@ -14,10 +14,6 @@ p >= 0.5. This test tabulates the boundary p for each, and pins the structural f
     is never balance-insolvent at the oracle price for any A -- the clamp guarantees it;
   - the return-0 boundary only rises above 0.5 (becomes reachable) for A_true >~ 12.
 """
-import boa
-
-
-LP_ORACLE_2 = ".venv/lib/pypy3.11/site-packages/curve_std/stableswap/lp_oracle_2.vy"
 WAD = 10**18
 INSOLVENT = WAD // 2          # portfolio_value = 0.5
 RETURN0 = 9 * WAD // 16       # portfolio_value = 9/16
@@ -40,8 +36,8 @@ def _solve_p(lp, A_raw, target):
     return hi
 
 
-def test_insolvency_and_return0_boundary_table():
-    lp = boa.load(LP_ORACLE_2)
+def test_insolvency_and_return0_boundary_table(lp_oracle_2):
+    lp = lp_oracle_2
 
     print(f"\n{'A_true':>8} {'A_raw':>10} {'cover@p=0.5':>11} {'p_insolvent':>11} {'p_return0':>11}  reachable?")
     for A_true in A_TRUES:

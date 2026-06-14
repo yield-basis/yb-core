@@ -56,8 +56,8 @@ def agg() -> address:
 """
 
 
-def test_oracle_reverts_when_amm_lock_held():
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
+def test_oracle_reverts_when_amm_lock_held(lending_oracle):
+    oracle = lending_oracle
     locked_amm = boa.loads(LOCKED_AMM)
     agg = boa.loads(MOCK_AGG)
     mock_lt = boa.loads(MOCK_LT, locked_amm.address, locked_amm.address, agg.address)

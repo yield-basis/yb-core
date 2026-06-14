@@ -20,10 +20,10 @@ def _ok(fn, *a):
 
 def test_price_in_usd_matches_portfolio_minus_debt(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool,
+    accounts, admin, yb_allocated, seed_cryptopool, lending_oracle, ratio_probe,
 ):
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    probe = boa.load("contracts/testing/YBOracleRatioProbe.vy")
+    oracle = lending_oracle
+    probe = ratio_probe
 
     whale = accounts[2]
     stablecoin._mint_for_testing(whale, 50 * 100_000 * 10**18)

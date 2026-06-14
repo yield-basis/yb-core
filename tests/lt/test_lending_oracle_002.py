@@ -29,7 +29,6 @@ import boa
 
 
 UNDERFLOW = 9 * 10**18 // 16  # 0.5625e18
-LP_ORACLE_2 = ".venv/lib/pypy3.11/site-packages/curve_std/stableswap/lp_oracle_2.vy"
 
 # Deployed fxswap pools (mainnet, June 2026): pool A in {25000, 50000, 90000} ->
 # A_raw = A_pool * 1e4 // (2 * 1e4) = A_pool // 2  in {12500, 25000, 45000}.
@@ -43,9 +42,9 @@ def _ok(fn, *a):
         return False, str(e)
 
 
-def test_underflow_is_A_gated_at_the_price_clamp():
+def test_underflow_is_A_gated_at_the_price_clamp(lp_oracle_2):
     """portfolio_value(A, 0.5) — the ratio floor — stays above 9/16 only for low A."""
-    lp = boa.load(LP_ORACLE_2)
+    lp = lp_oracle_2
     half = 10**18 // 2
 
     # Deployed pools: the floor stays comfortably above the 9/16 underflow threshold.
@@ -71,15 +70,15 @@ def test_underflow_is_A_gated_at_the_price_clamp():
 
 def test_getstate_does_not_revert_before_underflow(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool,
+    accounts, admin, yb_allocated, seed_cryptopool, ratio_probe, lending_oracle,
 ):
     """
     Live pool/position (A_true=10, just below the crossover): crash the spot price to the
     EMA clamp floor and confirm (a) the ratio bottoms just ABOVE 9/16 so the oracle never
     underflows, and (b) get_state() stays solvent throughout — it does not revert first.
     """
-    probe = boa.load("contracts/testing/YBOracleRatioProbe.vy")
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
+    probe = ratio_probe
+    oracle = lending_oracle
 
     whale = accounts[2]
     stablecoin._mint_for_testing(whale, 50 * 100_000 * 10**18)

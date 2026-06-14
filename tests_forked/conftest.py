@@ -149,3 +149,18 @@ def setup_approvals(vault, funded_account, wbtc, weth, crvusd):
         wbtc.approve(vault.address, 2**256 - 1)
         weth.approve(vault.address, 2**256 - 1)
         crvusd.approve(vault.address, 2**256 - 1)
+
+
+@pytest.fixture(scope="module")
+def lending_oracle(forked_env):
+    return boa.load("contracts/utils/YBLendingOracle.vy")
+
+
+@pytest.fixture(scope="module")
+def lt_deployer(forked_env):
+    return boa.load_partial("contracts/LT.vy")
+
+
+@pytest.fixture(scope="module")
+def amm_deployer(forked_env):
+    return boa.load_partial("contracts/AMM.vy")

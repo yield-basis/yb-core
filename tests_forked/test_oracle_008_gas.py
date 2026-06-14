@@ -9,9 +9,9 @@ cheaper -- a regression that re-introduces the call would shrink the gap.
 import boa
 
 
-def test_use_balances_skips_get_state(factory):
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_p = boa.load_partial("contracts/LT.vy")
+def test_use_balances_skips_get_state(factory, lending_oracle, lt_deployer):
+    oracle = lending_oracle
+    lt_p = lt_deployer
     lt = lt_p.at(factory.markets(3).lt)
 
     # warm both paths, then measure

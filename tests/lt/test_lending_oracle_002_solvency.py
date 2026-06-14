@@ -58,10 +58,10 @@ def _high_a_pool(stablecoin, collateral_token, admin, accounts, A_pool):
 
 def test_underflow_region_is_practically_insolvent(
     stablecoin, collateral_token, admin, accounts,
-    factory, amm_interface, lt_interface, dummy_gc, mock_agg,
+    factory, amm_interface, lt_interface, dummy_gc, mock_agg, ratio_probe, lending_oracle,
 ):
-    probe = boa.load("contracts/testing/YBOracleRatioProbe.vy")
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
+    probe = ratio_probe
+    oracle = lending_oracle
     pool = _high_a_pool(stablecoin, collateral_token, admin, accounts, A_pool=600_000)  # A_true=30
 
     # Add a YB market on the high-A pool.

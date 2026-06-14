@@ -59,12 +59,12 @@ GAS_SWEEP = range(20_000, 260_001, 2_000)
 MIN_HEADROOM = 2.0
 
 
-def test_no_silent_fallback_flip(factory):
+def test_no_silent_fallback_flip(factory, lending_oracle, amm_deployer, lt_deployer):
     """No gas budget can make the oracle silently return the fallback price."""
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
+    oracle = lending_oracle
     attacker = boa.loads(ATTACKER_SRC)
-    amm_p = boa.load_partial("contracts/AMM.vy")
-    lt_p = boa.load_partial("contracts/LT.vy")
+    amm_p = amm_deployer
+    lt_p = lt_deployer
 
     checked = 0
     for mid in range(factory.market_count()):
@@ -92,10 +92,10 @@ def test_no_silent_fallback_flip(factory):
     assert checked > 0, "no market exercised the get_state vs fallback divergence"
 
 
-def test_get_state_gas_margin(factory):
+def test_get_state_gas_margin(factory, amm_deployer, lt_deployer):
     """get_state() stays well below 63 * fallback-tail, so the flip is infeasible."""
-    amm_p = boa.load_partial("contracts/AMM.vy")
-    lt_p = boa.load_partial("contracts/LT.vy")
+    amm_p = amm_deployer
+    lt_p = lt_deployer
 
     def warm_gas(contract, fn):
         # Run a few times so storage is warm (attacker-optimal: smallest tail), then measure.

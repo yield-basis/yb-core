@@ -61,16 +61,26 @@ def guard():
     return boa.loads(GUARD_SRC)
 
 
-def test_genuine_cheap_revert_passes_guard(guard):
+@pytest.fixture(scope="module")
+def cheap_revert():
+    return boa.loads(CHEAP_REVERT_SRC)
+
+
+@pytest.fixture(scope="module")
+def gas_burner():
+    return boa.loads(GAS_BURNER_SRC)
+
+
+def test_genuine_cheap_revert_passes_guard(guard, cheap_revert):
     """A real imbalance revert is cheap -> guard passes -> oracle would use the fallback."""
-    cheap = boa.loads(CHEAP_REVERT_SRC)
+    cheap = cheap_revert
     # Ample gas: get_state reverts cheaply, almost all gas survives, guard does not trip.
     assert guard.guarded_call(cheap.address) is False  # success == False -> fallback taken, no revert
 
 
-def test_gas_starvation_is_blocked(guard):
+def test_gas_starvation_is_blocked(guard, gas_burner):
     """An OOG'd get_state can never be silently reported as a (fallback-triggering) failure."""
-    burner = boa.loads(GAS_BURNER_SRC)
+    burner = gas_burner
     blocked = 0
     for gas_limit in range(50_000, 2_000_001, 50_000):
         # The burner consumes far more than any budget here, so it always OOGs.
@@ -83,12 +93,12 @@ def test_gas_starvation_is_blocked(guard):
     assert blocked > 0
 
 
-def test_guard_threshold_is_ratio_based(guard):
+def test_guard_threshold_is_ratio_based(guard, cheap_revert):
     """
     The guard floor scales with the gas supplied (gas_before // 16), not an absolute
     constant, so a 10x change in the ambient gas schedule leaves behaviour identical.
     Demonstrated by the cheap-revert path passing across very different gas budgets.
     """
-    cheap = boa.loads(CHEAP_REVERT_SRC)
+    cheap = cheap_revert
     for gas_limit in (200_000, 2_000_000, 20_000_000):
         assert guard.guarded_call(cheap.address, gas=gas_limit) is False

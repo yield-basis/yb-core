@@ -27,11 +27,11 @@ def _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, a
 
 def test_ll_ema(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool,
+    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
 ):
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = boa.load("contracts/utils/YBLendingOracleLL.vy", yb_lt.address)
-    yb = boa.load("contracts/utils/YBLendingOracle.vy")
+    ll = ll_deployer.deploy(yb_lt.address)
+    yb = lending_oracle
 
     raw0 = yb.price_in_asset(yb_lt.address)
     # Unseeded: EMA returns the raw price (cached_price == 0).
@@ -85,11 +85,11 @@ def test_ll_ema(
 
 def test_ll_ema_downward(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool,
+    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
 ):
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = boa.load("contracts/utils/YBLendingOracleLL.vy", yb_lt.address)
-    yb = boa.load("contracts/utils/YBLendingOracle.vy")
+    ll = ll_deployer.deploy(yb_lt.address)
+    yb = lending_oracle
 
     raw0 = yb.price_in_asset(yb_lt.address)
     ll.price_w()   # seed at raw0
