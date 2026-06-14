@@ -5,7 +5,7 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001**–**#007**.
+This document records the Yield Basis team's response to findings **#001**–**#008**.
 The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
 code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
@@ -519,3 +519,30 @@ should be added too.
 ("lock held") makes `price_in_usd` / `price_in_asset` revert with `"AMM reentrancy"`,
 confirming the guard fires; the forked oracle test confirms normal pricing is unaffected
 (no-lock case).
+
+---
+
+## #008 — Unnecessary `get_state()` Call in YBLendingOracle — **Fixed**
+
+### The finding
+
+`_price()` called `get_state()` via `raw_call` on every invocation, but when
+`use_balances` is true the x0 branch is unreachable (it requires `success and not
+use_balances`). The call — which runs `get_x0` plus several AMM storage reads — was pure
+waste on that path.
+
+### Resolution
+
+The `get_state()` `raw_call` is now gated behind `not use_balances`, so an explicit
+balance-path read skips it entirely. The #001 gas-starvation guard, which is only relevant
+to the `get_state()` path, is naturally scoped inside the same block. Behaviour is
+otherwise unchanged (forked parity retained). Measured saving on the deployed markets:
+**~43k gas** (`use_balances=True`: ~85k vs ~128k for the x0 path).
+
+The `YBLendingOracleLL.vy` variant has no `use_balances` parameter and always needs
+`get_state()`, so this finding does not apply to it.
+
+### Tests
+
+`tests_forked/test_oracle_008_gas.py` measures both paths and pins the ~43k saving
+(a regression that re-introduces the call would shrink the gap).

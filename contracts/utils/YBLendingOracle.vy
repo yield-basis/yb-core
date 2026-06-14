@@ -182,26 +182,30 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     )
     lp_price_oracle: uint256 = portfolio_value * D // pool_supply
 
-    # Try to get AMM state (may revert if AMM is too imbalanced for x0 calculation)
+    # Try to get AMM state (may revert if AMM is too imbalanced for x0 calculation).
+    # Skipped entirely when use_balances is set: the caller has explicitly requested the
+    # balance fallback, and the x0 branch below needs `success and not use_balances`, so the
+    # call (which runs get_x0 + several AMM storage reads) would be pure waste.
     yb_oracle: uint256 = 0
     success: bool = False
     response: Bytes[96] = empty(Bytes[96])
-    gas_before: uint256 = msg.gas
-    success, response = raw_call(
-        amm.address,
-        method_id("get_state()"),
-        max_outsize=96,
-        revert_on_failure=False,
-        is_static_call=True
-    )
-    if not success and not use_balances:
-        # Distinguish a genuine "AMM too imbalanced" revert from a 63/64-rule gas-starvation
-        # OOG: an OOG consumes its whole ~63/64 gas allotment and leaves only ~1/64 behind,
-        # while a real revert is far cheaper and leaves most of the gas. If too little gas
-        # survived, the caller starved get_state() to force the balance fallback (which prices
-        # differently) -> refuse rather than silently flip. Ratio-based on purpose: invariant
-        # to any global gas-schedule repricing (e.g. Glamsterdam), unlike a hardcoded floor.
-        assert msg.gas > gas_before // 16, "GAS"
+    if not use_balances:
+        gas_before: uint256 = msg.gas
+        success, response = raw_call(
+            amm.address,
+            method_id("get_state()"),
+            max_outsize=96,
+            revert_on_failure=False,
+            is_static_call=True
+        )
+        if not success:
+            # Distinguish a genuine "AMM too imbalanced" revert from a 63/64-rule gas-starvation
+            # OOG: an OOG consumes its whole ~63/64 gas allotment and leaves only ~1/64 behind,
+            # while a real revert is far cheaper and leaves most of the gas. If too little gas
+            # survived, the caller starved get_state() to force the balance fallback (which
+            # prices differently) -> refuse rather than silently flip. Ratio-based on purpose:
+            # invariant to any global gas-schedule repricing (e.g. Glamsterdam).
+            assert msg.gas > gas_before // 16, "GAS"
 
     lv_total: uint256 = 0
     lv_admin: int256 = 0
