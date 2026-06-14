@@ -3,11 +3,24 @@
 **Audit:** *Code Assessment of the AMM + LT Hardening & YBLendingOracle Smart Contracts* (Draft, 2026-04-21), by ChainSecurity
 **Reviewed version:** commit `fb3c7466567822ba3fe9fe587e3ea15afe8a1502`
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
-**Response date:** 2026-06-13
+**Response date:** 2026-06-14
 
 This document records the Yield Basis team's response to findings **#001**–**#008**.
 The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
 code paths with `YBLendingOracle.vy` and is treated identically throughout.
+
+## Summary
+
+| # | Severity | Finding | Disposition |
+|---|----------|---------|-------------|
+| 001 | Medium | Low Gas Attack on `get_state()` Call | **Fixed** — ratio-based gas-starvation guard |
+| 002 | Medium | Reverts on Price Oracle Divergence | **Fixed** — returns 0 instead of underflowing |
+| 003 | Low | Hardcoded Equilibrium Threshold Assumes Leverage of 2 | **Acknowledged** — leverage 2 is a Factory-enforced invariant; documented |
+| 004 | Low | Oracle Fallback Reverts on Insolvency | **Fixed** — returns 0 (same change as #002) |
+| 005 | Low | Stale Accounting Causes Systematic Price Deviation | **Fixed** — `_calculate_fresh_lv` replicates `_calculate_values` |
+| 006 | Info | Low Gas Attack on `value_oracle()` Call | **Acknowledged** — 63/64 attack infeasible by ~270×; documented |
+| 007 | Info | Missing Reentrancy Check | **Fixed** — read-only reentrancy guard |
+| 008 | Info | Unnecessary `get_state()` Call | **Fixed** — skipped when `use_balances` is set |
 
 ---
 
