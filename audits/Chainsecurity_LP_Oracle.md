@@ -5,9 +5,9 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001**, **#002**
-and **#003**. The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares
-the relevant code paths with `YBLendingOracle.vy` and is treated identically throughout.
+This document records the Yield Basis team's response to findings **#001**–**#004**.
+The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
+code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
 ---
 
@@ -344,3 +344,37 @@ supporting a non-2 leverage would require generalizing the oracle's `L` (and sev
 other `L = 2`-derived constants) as well, i.e. a system-wide change well beyond this one
 expression. Should YB ever pursue a different leverage, both the threshold and the oracle
 must be generalized together.
+
+---
+
+## #004 — Oracle Fallback Reverts on Insolvency Instead of Returning Zero — **Fixed**
+
+### The finding
+
+The fallback (balance-based) branch computed
+`collateral * lp_price_oracle * agg_price - debt`, which underflows and reverts when the
+oracle-priced collateral value is below the debt. Since the fallback is the recovery path
+for when `get_state()` reverts, a genuinely insolvent position could leave *both* the
+primary and fallback paths unavailable — bricking a lending integrator's liquidation
+exactly when it is needed.
+
+### Resolution
+
+This is the fallback-branch half of the same return-0 change made for #002 (the success
+branch was the other half). The branch now computes the collateral value first and only
+subtracts the debt when it is covered, returning 0 otherwise:
+
+```vyper
+coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
+if coll_value > debt:
+    yb_oracle = coll_value - debt
+# else yb_oracle stays 0
+```
+
+So an insolvent position reports 0 instead of reverting, on **both** the success (x0) and
+fallback (balances) paths, leaving the position liquidatable. As with #002 this state is
+structurally hard to reach at the oracle price — the pool clamps `p ≥ 0.5`, which keeps
+the EMA-priced collateral coverage above 1.0× for the deployed low-A pools — so the change
+is fail-safe insurance for high-A / stale-price states rather than a change to normal
+behaviour. It is exercised by the same return-0 mechanism asserted in
+`tests/lt/test_lending_oracle_002_solvency.py` (`price_in_usd` returns 0, never reverts).
