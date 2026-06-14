@@ -201,9 +201,12 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
         # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
         # yb_oracle_value *= f_lp / lt_supply / price_oracle
         amm_state: AMMState = abi_decode(response, AMMState)
-        yb_oracle = amm_state.x0 * (
-            isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1) - 10**18
-        ) // 10**18
+        # The factor goes <= 10**18 once the leveraged equity has been wiped out (ratio < 9/16);
+        # return 0 instead of underflowing so a lending integrator can still liquidate the
+        # (insolvent) position rather than being bricked by a reverting price.
+        factor: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1)
+        if factor > 10**18:
+            yb_oracle = amm_state.x0 * (factor - 10**18) // 10**18
 
         # Compute fresh liquidity values (replicates LT._calculate_values)
         p_o: uint256 = price_scale * agg_price // PRECISION
@@ -214,7 +217,11 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
         # Balances can't change in this state, so compute value from balances directly.
         collateral: uint256 = staticcall amm.collateral_amount()
         debt: uint256 = staticcall amm.get_debt()
-        yb_oracle = collateral * lp_price_oracle // 10**18 * agg_price // 10**18 - debt
+        # Return 0 for an insolvent position (collateral value below debt) instead of
+        # underflowing, for the same liquidation-availability reason as above.
+        coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
+        if coll_value > debt:
+            yb_oracle = coll_value - debt
 
         # Fall back to cached liquidity values
         lv: LiquidityValues = staticcall lt.liquidity()

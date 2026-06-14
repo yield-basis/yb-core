@@ -5,9 +5,9 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to finding **#001**. The
-`YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
-code path with `YBLendingOracle.vy` and is treated identically throughout.
+This document records the Yield Basis team's response to findings **#001** and
+**#002**. The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the
+relevant code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
 ---
 
@@ -186,3 +186,124 @@ the success path too.
   gas-burner that always OOGs is always blocked (reverts, never a silent failure), and
   the threshold behaves identically across 200k / 2M / 20M gas budgets
   (ratio-invariance).
+
+---
+
+## #002 — YBLendingOracle Reverts on Price Oracle Divergence — **Fixed (returns 0)**
+
+### The finding
+
+In the `get_state()`-success branch, `_price` computes
+`isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2L)//(2L-1) - 10**18`, which
+underflows (reverts) when `lp_price_oracle / lp_price_ps < (3/4)^2 = 9/16`. As
+ChainSecurity notes, this is distinct from the AMM's own `get_x0()` revert:
+`get_state()` can succeed while this expression underflows, so `price_in_asset` /
+`price_in_usd` revert during a crash — exactly when a lending integrator needs a price.
+
+### What drives the underflow
+
+The ratio is exactly the StableSwap portfolio value. Since
+`lp_price_ps = 2·vprice·√price_scale = D/totalSupply` and
+`lp_price_oracle = portfolio_value(A, p)·D/totalSupply`,
+
+```
+ratio = lp_price_oracle / lp_price_ps = portfolio_value(A, p),   p = price_oracle / price_scale
+```
+
+Two structural facts bound it:
+
+- The Twocrypto pool clamps the EMA input to `[price_scale/2, 2·price_scale]`
+  (`Twocrypto.vy`: `min(max(last_prices, price_scale/2), 2·price_scale)`), so
+  `p ∈ [0.5, 2]`. Hence `ratio ≥ portfolio_value(A, 0.5)`.
+- `portfolio_value(A, 0.5)` decreases monotonically in `A` and crosses `9/16` at
+  `A_raw ≈ 119k` (`A_true ≈ 12`). So the underflow is reachable only for high-A pools.
+
+Measured `portfolio_value(A, 0.5)` (the ratio floor) per deployed pool:
+
+| markets | A_true | A_raw | portfolio_value(0.5) | vs 9/16 |
+|---|---|---|---|---|
+| 6 | 1.2 | 12.5k | 0.641 | safe |
+| 7–10 | 2.5 | 25k | 0.614 | safe |
+| 0–5 | 4.5 | 45k | 0.593 | safe |
+
+All deployed pools use `A_true ≤ 4.5`, so the ratio floors at 0.59–0.64, above `9/16`
+— **the underflow is unreachable on every current market.**
+
+### `get_state()` does not revert first
+
+The intuition that the AMM's `get_x0()` revert (`d/cv ≥ 9/16`) precedes the oracle
+underflow does not hold: `get_state()` values collateral via `price_scale` (the
+`CryptopoolLPOracle`), which is sticky on a one-sided crash, while the underflow is
+driven by `price_oracle/price_scale`. The two are governed by different prices and are
+decoupled. In a reproduction, `get_state()` stayed solvent through a 50% spot crash
+while the EMA fell to the clamp floor.
+
+### Is the underflow region insolvent?
+
+The success-branch (x0) value and the balances value are exactly
+`yb_S = equity·(4√ratio − 3)` and `yb_B = equity·(2·ratio − 1)`, so
+`yb_B − yb_S = 2·equity·(√ratio − 1)² ≥ 0` — the x0 branch is the more conservative,
+and the two agree exactly at `ratio = 1`. The underflow (`yb_S ≤ 0`) begins at
+`ratio = 9/16`, where `yb_B` is still `+0.125·equity`. So at the oracle (EMA) price the
+position is not yet insolvent when the success branch underflows.
+
+Going further, assuming `p_real = p_oracle`, the balances-insolvency boundary is
+`portfolio_value(A, p) = 1/2`, which occurs at `p < 0.5` for every A (since
+`portfolio_value(A, 0.5) > 0.5`, approaching 0.5 only as `A → ∞`). Because the pool
+clamps `p ≥ 0.5`, the collateral coverage at the oracle price is
+`≥ 2·portfolio_value(A, 0.5) ≥ 1.0×` — **the position is never balance-insolvent at the
+oracle price, for any A.** Genuine insolvency arises only through `price_oracle`
+staleness (`p_real < p_oracle`, the report's SC2): once the true price is below the
+clamped EMA, the position can be deeply underwater while `get_state` still values it at
+the stale `price_scale`.
+
+Boundary table (2× position; `p = price_oracle/price_scale`; clamp floor `p = 0.5`).
+Deployed markets: `A_true = 1.25` (market 6), `2.5` (markets 7–10), `4.5` (markets 0–5).
+
+| A_true | A_raw | coverage at clamp `p=0.5` | `p` insolvent (pv=1/2) | `p` returns 0 (pv=9/16) |
+|---|---|---|---|---|
+| 1 (min A) | 10k | 1.298× | 0.346 | 0.408 — < clamp, never |
+| 1.5 | 15k | 1.268× | 0.364 | 0.426 — < clamp, never |
+| 2 | 20k | 1.245× | 0.376 | 0.438 — < clamp, never |
+| 2.5 *(mkts 7–10)* | 25k | 1.228× | 0.385 | 0.447 — < clamp, never |
+| 3 | 30k | 1.214× | 0.392 | 0.454 — < clamp, never |
+| 3.5 | 35k | 1.203× | 0.398 | 0.460 — < clamp, never |
+| 4 | 40k | 1.193× | 0.403 | 0.465 — < clamp, never |
+| 4.5 *(mkts 0–5)* | 45k | 1.185× | 0.407 | 0.469 — < clamp, never |
+| 5 | 50k | 1.178× | 0.411 | 0.473 — < clamp, never |
+| 6 | 60k | 1.166× | 0.417 | 0.479 — < clamp, never |
+| 7 | 70k | 1.156× | 0.422 | 0.484 — < clamp, never |
+| 8 | 80k | 1.148× | 0.426 | 0.489 — < clamp, never |
+| 9 | 90k | 1.141× | 0.430 | 0.492 — < clamp, never |
+| 10 | 100k | 1.135× | 0.433 | 0.495 — < clamp, never |
+| ~12 | ~119k | 1.125× | 0.438 | 0.500 — **crossover** |
+| 20 | 200k | 1.100× | 0.450 | 0.513 — reachable |
+| 30 | 300k | 1.083× | 0.458 | 0.521 — reachable |
+| 100 | 1M | 1.048× | 0.476 | 0.539 — reachable |
+| 1000 | 10M | 1.016× | 0.492 | 0.555 — reachable |
+| 100000 (max A) | 1e9 | 1.0016× | 0.499 | 0.562 — reachable |
+
+### Resolution
+
+Both branches now **return 0 instead of underflowing**: the success branch returns 0
+once the leveraged-equity factor `(2L/(2L-1))·√ratio` drops to `≤ 1` (`ratio ≤ 9/16`),
+and the fallback branch returns 0 when collateral value `≤` debt. A reverting price
+bricks a lending market's liquidation path; returning 0 lets a (loss-taking) liquidator
+clear the position. The same change also resolves the fallback's revert-on-insolvency
+(report #004). It is value-only and does not affect normal pricing (forked parity within
+1% retained); `0` flows through the per-token scaling cleanly because `lv_total` is the
+gross liquidity value and stays positive for any position holding collateral.
+
+### Tests
+
+- `tests/lt/test_lending_oracle_002.py` — the A-gated boundary at the solver level, plus
+  a live pool/position crash showing `get_state()` stays solvent and the ratio floors
+  just above `9/16` for the deployed A.
+- `tests/lt/test_lending_oracle_002_solvency.py` — high-A pool: enters the underflow
+  region, shows the position is insolvent at the true price (staleness gap
+  `v_true ≤ v_oracle ≤ v_scale`), and asserts `price_in_usd` returns 0 rather than
+  reverting.
+- `tests/lt/test_lending_oracle_consistency.py` — the `yb_S` vs `yb_B` law
+  (`gap = 2·equity·(√ratio − 1)²`; identical at `ratio = 1`).
+- `tests/lt/test_insolvency_boundary.py` — the boundary table; pins coverage `≥ 1.0×`
+  at the clamp floor for all A, and the `A_true ≈ 12` return-0 crossover.
