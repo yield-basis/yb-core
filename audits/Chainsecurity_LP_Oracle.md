@@ -5,7 +5,7 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001**–**#004**.
+This document records the Yield Basis team's response to findings **#001**–**#005**.
 The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
 code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
@@ -378,3 +378,41 @@ the EMA-priced collateral coverage above 1.0× for the deployed low-A pools — 
 is fail-safe insurance for high-A / stale-price states rather than a change to normal
 behaviour. It is exercised by the same return-0 mechanism asserted in
 `tests/lt/test_lending_oracle_002_solvency.py` (`price_in_usd` returns 0, never reverts).
+
+---
+
+## #005 — Stale Accounting Causes Systematic Price Deviation — **Fixed**
+
+### The finding
+
+At the reviewed commit (`fb3c746`), `_price` read the stored `lt.liquidity()` and
+`lt.totalSupply()` directly and used them to scale the per-token price, without
+replicating `LT._calculate_values()`'s between-checkpoint drift. Two effects accumulate
+between checkpoints — admin-fee accrual (pushes the price up) and the missing supply burn
+(pushes it down) — producing a deviation that scales with staking ratio and accrued fees,
+up to ~9.6% at 99% staking in the report's example.
+
+### Resolution
+
+Fixed after the review, in commit `45949eb`, by adding `_calculate_fresh_lv()`, which
+replicates `LT._calculate_values()` to recompute the up-to-date liquidity total, admin-fee
+balance (`f_a` → `admin`), and token supply including the supply burn (`token_reduction` →
+`supply_tokens`). The normal pricing path (`get_state()` success) now scales by these fresh
+values rather than the stored cache:
+
+```vyper
+lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o, amm_value)
+```
+
+so the reported price tracks the LT's effective post-checkpoint value, eliminating the
+staking-ratio- and fee-dependent deviation. The forked oracle test
+(`tests_forked/test_lending_oracle.py`) corroborates this end-to-end: `price_in_asset`
+agrees with the LT's `preview_withdraw` within 1% across markets.
+
+### Residual
+
+The fallback branch (entered only when `get_state()` reverts — deep AMM imbalance) still
+reads the stored `lt.liquidity()` / `lt.totalSupply()`, because the fresh calculation needs
+the `x0`-derived `amm_value` that `get_state()` provides and that is unavailable on that
+path. The drift there is bounded and the path is rare; in that regime the position is also
+near the insolvency boundary and frequently prices to 0 (see #002/#004).
