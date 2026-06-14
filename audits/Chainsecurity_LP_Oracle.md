@@ -5,7 +5,7 @@
 **Scope:** `contracts/LT.vy`, `contracts/AMM.vy`, `contracts/utils/YBLendingOracle.vy` (delta review; `liboracle.vy` reviewed by a separate team)
 **Response date:** 2026-06-13
 
-This document records the Yield Basis team's response to findings **#001**–**#005**.
+This document records the Yield Basis team's response to findings **#001**–**#006**.
 The `YBLendingOracleLL.vy` variant (capped-virtual-price oracle) shares the relevant
 code paths with `YBLendingOracle.vy` and is treated identically throughout.
 
@@ -416,3 +416,56 @@ reads the stored `lt.liquidity()` / `lt.totalSupply()`, because the fresh calcul
 the `x0`-derived `amm_value` that `get_state()` provides and that is unavailable on that
 path. The drift there is bounded and the path is rare; in that regime the position is also
 near the insolvency boundary and frequently prices to 0 (see #002/#004).
+
+---
+
+## #006 — Low Gas Attack on `value_oracle()` Call — **Acknowledged (not exploitable; documented)**
+
+### The finding
+
+`emergency_withdraw()` reads `value_oracle()` via `raw_call(revert_on_failure=False)` and,
+on failure (`killed or not success`), takes the killed-style proportional path, skipping
+`_calculate_values`. This is the same EIP-150 63/64-rule swallowed-call class as #001: a
+caller could try to gas-starve `value_oracle()` into OOG to force the proportional path on
+a live (non-killed) AMM.
+
+### Why it is not exploitable
+
+Unlike #001 — where the work after the swallowed call was a couple of cheap staticcalls —
+the work after `value_oracle()` here is the **entire withdrawal**: `amm._withdraw`,
+`CRYPTOPOOL.remove_liquidity`, several token transfers, and `_burn`. The flip is feasible
+only if
+
+```
+cost(value_oracle) > 63 * cost(rest-of-emergency_withdraw)
+```
+
+(the calling frame keeps only 1/64 of the gas-at-call, and the rest of
+`emergency_withdraw` must complete within it). Measured:
+
+| quantity | gas |
+|---|---|
+| `value_oracle()` (deployed AMMs, warm) | ~36.5k |
+| rest of `emergency_withdraw` (withdrawal machinery) | ~157k |
+| flip requires `value_oracle > 63 × 157k` | ≈ 9.9M |
+
+So the flip would need `value_oracle()` to cost ~9.9M gas; it costs ~36.5k — **infeasible
+by ~270×** (≈1800× in a lighter harness). An attacker who starves the call merely OOGs the
+whole transaction: it reverts, no state changes, and they gain nothing.
+
+### Upcoming gas repricing (Glamsterdam / EIP-7904)
+
+The margin is governed by the relative pricing of `value_oracle()` (compute-heavy — the
+`get_x0` quadratic) versus the withdrawal tail (almost entirely **state access** — external
+calls, SSTOREs, token transfers). EIP-7904 reprices compute *down* and leaves state
+persistence *flat*, so `value_oracle()` becomes relatively cheaper while the tail stays —
+**widening** the already-enormous margin. The repricing makes #006 safer, not riskier, in
+any plausible direction; a ~270× margin would have to invert for the attack to appear.
+
+### Disposition
+
+No fix applied. The #001-style ratio guard is unnecessary here (270×+ margin, vs #001's
+single-digit one) and the path is not view-callable in a way that benefits an attacker —
+a starved call reverts the withdrawal rather than silently flipping a returned value.
+Measured by `tests/lt/test_emergency_withdraw_gas_006.py`, which pins
+`63 · rest ≫ value_oracle`.
