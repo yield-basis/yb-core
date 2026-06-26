@@ -2,9 +2,11 @@ import boa
 import pytest
 from tests_forked.networks import NETWORK
 
-# Confirms, at the CURRENT chain head, that the LTMigrator swap fixes the
-# reported "Access" failure: the OLD migrator (0xE707...) still reverts, while
-# the redeployed NEW migrator (0x3e6D...) lets the user migrate end-to-end.
+# Confirms, at the block this test was committed (see FORK_BLOCK below), that
+# the LTMigrator swap fixes the reported "Access" failure: the OLD migrator
+# (0xE707...) still reverts, while the redeployed NEW migrator (0x3e6D...) lets
+# the user migrate end-to-end. The fork is pinned because these assertions read
+# live on-chain state that has since moved on past "latest".
 #
 # Background (the bug the redeploy fixes):
 #   The OLD LTMigrator was deployed wired to a STALE HybridFactoryOwner
@@ -37,10 +39,17 @@ CURRENT_OWNER = "0xb8BA33CD1Ccb091a8468572950bD3669723FA5C6"  # live Factory.adm
 OWNER_ADMIN = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"  # DAO Ownership agent
 
 
+# Block mined at this test's commit time (05c250e, 2026-06-04 18:09:49 UTC).
+# These tests assert live on-chain state that was only true when committed
+# (e.g. the reported user still holds lt_from, the migration not yet done), so
+# we pin the fork to that block instead of a moving "latest" head.
+FORK_BLOCK = 25245721
+
+
 @pytest.fixture(scope="module", autouse=True)
 def forked_env():
-    # Fork the chain head so we test against current on-chain state.
-    with boa.fork(NETWORK, block_identifier="latest"):
+    # Fork at the commit-time block so on-chain state matches the assertions.
+    with boa.fork(NETWORK, block_identifier=FORK_BLOCK):
         yield
 
 
@@ -97,10 +106,9 @@ def test_new_migrator_succeeds(owner):
     Ownership agent -- so registering it REQUIRED A DAO VOTE
     (scripts/voting/create_vote_redeploy_migrator_owner.py).
 
-    That vote has already executed on-chain, so at head the new migrator is
-    already registered. We still apply the approval here if (and only if) the
-    forked block predates the vote's execution, by pranking the owner ADMIN to
-    simulate the executed vote -- keeping this test valid against any head.
+    At FORK_BLOCK the vote may or may not have executed yet, so we apply the
+    approval here if (and only if) the new migrator is not already a registered
+    limit setter, by pranking the owner ADMIN to simulate the executed vote.
     """
     new = boa.load_partial("contracts/LTMigrator.vy").at(NEW_MIGRATOR)
     lt_from = boa.load_partial("contracts/LT.vy").at(LT_FROM)
