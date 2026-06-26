@@ -1,28 +1,31 @@
-[tool.poetry]
+[project]
 name = "yb-core"
-version = "0.1.0"
+version = "1.0"
 description = ""
-authors = ["Michael Egorov <michael@curve.fi>"]
-packages = []
-package-mode = false
+authors = [{ name = "Michael Egorov", email = "michwill@yieldbasis.com" }]
+requires-python = ">=3.11,<4"
+dependencies = [
+    "vyper==0.4.3",
+    "titanoboa",
+    "hypothesis>=6,<7",
+    "pdbpp>=0.11.6,<0.12",
+    "jedi>=0.19.1,<0.20",
+    "pytest-xdist>=3.6,<4",
+    "pytest-forked>=1.6.0,<2",
+    "ipython>=9,<10",
+    # "matplotlib>=3,<4"  # Only for graphs, otherwise not needed
+    "snekmate==0.1.2",
+    "numpy>=2,<3",
+    "curve-std",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.11,<4"
-vyper = "0.4.3"
-poetry = "^1"
-titanoboa = {git = "https://github.com/vyperlang/titanoboa.git", rev = "5360bbae07950ddfd44bc61fd14f656d036c0315"}
+[tool.uv]
+package = false
+# curve-std's pinned rev declares titanoboa>=0.2.8, but the pinned titanoboa
+# rev reports 0.2.7. Force our git-pinned titanoboa (matches poetry behaviour).
+override-dependencies = ["titanoboa"]
+
+[tool.uv.sources]
+titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "5360bbae07950ddfd44bc61fd14f656d036c0315" }
 # titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "ff16d2d295b8ce60b8a45e3ced06784e8f404afb" }
-hypothesis = "^6"
-pdbpp = "^0.11.6"
-jedi = "^0.19.1"
-pytest-xdist = "^3.6"
-pytest-forked = "^1.6.0"
-ipython = "^9"
-# matplotlib = "^3"  # Only for graphs, otherwise not needed
-snekmate = "0.1.2"
-numpy = "^2"
-curve-std = {git = "https://github.com/curvefi/curve-std.git", rev = "949ae6c0a2c3dfb9e6808aa6d2ca9b737a5afd59"}
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+curve-std = { git = "https://github.com/curvefi/curve-std.git", rev = "949ae6c0a2c3dfb9e6808aa6d2ca9b737a5afd59" }

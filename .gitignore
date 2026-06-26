@@ -7,5 +7,7 @@ __pycache__
 /.venv
 /scripts/keys.py
 /scripts/networks.py
+/scripts/fork_test/networks.py
+/scripts/voting/networks.py
 /tests_forked/networks.py
 /abi
