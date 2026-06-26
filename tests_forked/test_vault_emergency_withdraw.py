@@ -3,7 +3,8 @@ from tests_forked.conftest import WBTC, SCRVUSD
 
 
 def test_emergency_withdraw_default(
-    vault, funded_account, wbtc, crvusd, setup_approvals, factory, twocrypto, erc20
+    vault, funded_account, wbtc, crvusd, setup_approvals, factory, twocrypto, erc20,
+    lt_deployer
 ):
     """Test emergency_withdraw with default crvusd_from_wallet=False uses the backing vault."""
     pool_id = 3
@@ -35,12 +36,13 @@ def test_emergency_withdraw_default(
     assert wbtc_user_after > wbtc_user_before
 
     # LT shares should be fully withdrawn
-    lt = boa.load_partial("contracts/LT.vy").at(market.lt)
+    lt = lt_deployer.at(market.lt)
     assert lt.balanceOf(vault.address) == 0
 
 
 def test_emergency_withdraw_crvusd_from_wallet(
-    vault, funded_account, wbtc, crvusd, setup_approvals, factory, twocrypto, erc20
+    vault, funded_account, wbtc, crvusd, setup_approvals, factory, twocrypto, erc20,
+    lt_deployer
 ):
     """Test emergency_withdraw with crvusd_from_wallet=True pulls crvUSD from caller, not the backing vault."""
     pool_id = 3
@@ -76,5 +78,5 @@ def test_emergency_withdraw_crvusd_from_wallet(
     assert wbtc_user_after > wbtc_user_before
 
     # LT shares should be fully withdrawn
-    lt = boa.load_partial("contracts/LT.vy").at(market.lt)
+    lt = lt_deployer.at(market.lt)
     assert lt.balanceOf(vault.address) == 0

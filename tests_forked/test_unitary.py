@@ -273,7 +273,7 @@ def test_recover_tokens(
 
 
 def test_deposit_redeem_crvusd_and_scrvusd(
-    hybrid_vault_factory, hybrid_vault_deployer, erc20
+    hybrid_vault_factory, hybrid_vault_deployer, erc20, scrvusd_vault
 ):
     """
     Test deposit_crvusd/redeem_crvusd and deposit_scrvusd/withdraw_scrvusd
@@ -315,7 +315,6 @@ def test_deposit_redeem_crvusd_and_scrvusd(
 
     # --- Test deposit_scrvusd and withdraw_scrvusd ---
     # First, get some scrvUSD by depositing crvUSD directly to scrvUSD vault
-    scrvusd_vault = boa.load_partial("contracts/dao/erc4626.vy").at(SCRVUSD)
 
     with boa.env.prank(account):
         crvusd_token.approve(SCRVUSD, 2**256 - 1)
@@ -545,7 +544,7 @@ def test_crvusd_vault_limit(
 
 
 def test_withdrawable_crvusd_for(
-    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20
+    hybrid_vault_factory, hybrid_vault_deployer, factory, twocrypto, erc20, scrvusd_vault
 ):
     """
     Test withdrawable_crvusd_for: deposit a lot of crvUSD, a little bit of WBTC,
@@ -598,7 +597,6 @@ def test_withdrawable_crvusd_for(
 
     # Verify withdrawable amount is reasonable
     scrvusd_token = erc20.at(SCRVUSD)
-    scrvusd_vault = boa.load_partial("contracts/dao/erc4626.vy").at(SCRVUSD)
     crvusd_in_vault = scrvusd_vault.previewRedeem(scrvusd_token.balanceOf(vault.address))
 
     # After withdrawing the LT shares, no crvUSD would be required,

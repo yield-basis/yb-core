@@ -18,15 +18,33 @@ def mock_lp(mock_gov_token):
 
 
 @pytest.fixture(scope="session")
-def ve_mock(mock_gov_token, admin):
-    with boa.env.prank(admin):
-        return boa.load('contracts/dao/VotingEscrow.vy', mock_gov_token.address, "veValueless", "veGov", "gov._yb.eth")
+def voting_escrow_deployer():
+    # Compile VotingEscrow once; .deploy() per instance instead of re-loading.
+    return boa.load_partial('contracts/dao/VotingEscrow.vy')
 
 
 @pytest.fixture(scope="session")
-def ve_yb(yb, admin):
+def ve_mock(voting_escrow_deployer, mock_gov_token, admin):
     with boa.env.prank(admin):
-        return boa.load('contracts/dao/VotingEscrow.vy', yb.address, "veYB", "veYB", "gov._yb.eth")
+        return voting_escrow_deployer.deploy(mock_gov_token.address, "veValueless", "veGov", "gov._yb.eth")
+
+
+@pytest.fixture(scope="session")
+def ve_yb(voting_escrow_deployer, yb, admin):
+    with boa.env.prank(admin):
+        return voting_escrow_deployer.deploy(yb.address, "veYB", "veYB", "gov._yb.eth")
+
+
+@pytest.fixture(scope="session")
+def liquidity_gauge_deployer():
+    # Compile LiquidityGauge once; .deploy() per instance instead of re-loading.
+    return boa.load_partial('contracts/dao/LiquidityGauge.vy')
+
+
+@pytest.fixture(scope="session")
+def dummy_factory_deployer():
+    # Compile DummyFactoryForGauge once; .deploy() per instance.
+    return boa.load_partial('contracts/testing/DummyFactoryForGauge.vy')
 
 
 @pytest.fixture(scope="session")

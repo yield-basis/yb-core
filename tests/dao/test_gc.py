@@ -487,7 +487,8 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
 
 @pytest.mark.skip(reason="Only to be used as a script for manual checking")
 @pytest.mark.parametrize("use_flashloan", [False, True], ids=["no_flashloan", "with_flashloan"])
-def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_flashloan):
+def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_flashloan,
+                               liquidity_gauge_deployer, dummy_factory_deployer):
     """
     Test gauge controller behavior with total supply manipulation via flashloan-like operations.
 
@@ -501,13 +502,12 @@ def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_f
     lp_token2 = token_mock.deploy('LP Token 2', 'LP2', 18)
 
     # Create DummyFactory for deploying real LiquidityGauge contracts
-    dummy_factory = boa.load('contracts/testing/DummyFactoryForGauge.vy', admin, gc.address)
-    gauge_factory = boa.load_partial('contracts/dao/LiquidityGauge.vy')
+    dummy_factory = dummy_factory_deployer.deploy(admin, gc.address)
 
     # Create two real LiquidityGauge contracts through Factory
     with boa.env.prank(dummy_factory.address):
-        gauge1 = gauge_factory.deploy(lp_token1.address)
-        gauge2 = gauge_factory.deploy(lp_token2.address)
+        gauge1 = liquidity_gauge_deployer.deploy(lp_token1.address)
+        gauge2 = liquidity_gauge_deployer.deploy(lp_token2.address)
 
     # Add gauges to GaugeController and mint tokens (from admin)
     with boa.env.prank(admin):
@@ -612,13 +612,14 @@ def test_gc_total_supply_manip(ve_yb, yb, gc, accounts, admin, token_mock, use_f
     print(f"Final emissions: gauge1={final_emissions1}, gauge2={final_emissions2}")
 
 
-def test_weight_manipulation(ve_yb, yb, gc, admin, collateral_token, stablecoin):
+def test_weight_manipulation(ve_yb, yb, gc, admin, collateral_token, stablecoin,
+                             liquidity_gauge_deployer, dummy_factory_deployer):
     # Add new gauges to the GaugeController
     with boa.env.prank(admin):
-        dummy_factory = boa.load('contracts/testing/DummyFactoryForGauge.vy', admin, gc.address)
+        dummy_factory = dummy_factory_deployer.deploy(admin, gc.address)
     with boa.env.prank(dummy_factory.address):
-        btc_gauge = boa.load('contracts/dao/LiquidityGauge.vy', collateral_token.address)
-        usdc_gauge = boa.load('contracts/dao/LiquidityGauge.vy', stablecoin.address)
+        btc_gauge = liquidity_gauge_deployer.deploy(collateral_token.address)
+        usdc_gauge = liquidity_gauge_deployer.deploy(stablecoin.address)
     with boa.env.prank(admin):
         gc.add_gauge(btc_gauge.address)
         gc.add_gauge(usdc_gauge.address)

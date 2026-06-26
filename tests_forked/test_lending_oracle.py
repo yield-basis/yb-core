@@ -10,13 +10,12 @@ ERC20_ABI = """[
 ]"""
 
 
-def test_lending_oracle_vs_redemption(factory, forked_env):
+def test_lending_oracle_vs_redemption(factory, lending_oracle, lt_deployer):
     """
     Deploy YBLendingOracle and compare its price output to preview_withdraw
     for markets 3, 4, 5, 6. The difference should be no more than 1%.
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
+    oracle = lending_oracle
     erc20 = boa.loads_abi(ERC20_ABI)
 
     for market_id in MARKET_IDS:
@@ -44,13 +43,12 @@ def test_lending_oracle_vs_redemption(factory, forked_env):
         assert diff_pct < 1, f"Market {market_id}: oracle vs redemption diff {diff_pct:.4f}% exceeds 1%"
 
 
-def test_lending_oracle_balances_vs_default(factory, forked_env):
+def test_lending_oracle_balances_vs_default(factory, lending_oracle, lt_deployer):
     """
     Compare use_balances=True (balance-based fallback) to the default x0-based oracle.
     The two should be close under normal market conditions.
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
+    oracle = lending_oracle
 
     for market_id in MARKET_IDS:
         market = factory.markets(market_id)
@@ -69,19 +67,18 @@ def test_lending_oracle_balances_vs_default(factory, forked_env):
         assert diff_pct < 0.5, f"Market {market_id}: default vs balances diff {diff_pct:.4f}% exceeds 0.5%"
 
 
-def test_price_in_usd_consistency(factory, forked_env):
+def test_price_in_usd_consistency(factory, lending_oracle, lt_deployer, twocrypto,
+                                  cryptopool_lp_oracle_deployer):
     """
     Verify that price_in_usd == price_in_asset * asset_price_usd.
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
-    twocrypto = boa.load_partial("contracts/twocrypto_pool/contracts/main/Twocrypto.vy")
+    oracle = lending_oracle
 
     for market_id in MARKET_IDS:
         market = factory.markets(market_id)
         lt = lt_deployer.at(market.lt)
         pool = twocrypto.at(lt.CRYPTOPOOL())
-        agg_price = boa.load_partial("contracts/CryptopoolLPOracle.vy").at(lt.agg()).price()
+        agg_price = cryptopool_lp_oracle_deployer.at(lt.agg()).price()
 
         price_asset = oracle.price_in_asset(lt)
         price_usd = oracle.price_in_usd(lt)
@@ -103,12 +100,11 @@ def test_price_in_usd_consistency(factory, forked_env):
         assert diff_pct < 0.001, f"Market {market_id}: USD consistency diff {diff_pct:.6f}% exceeds 0.001%"
 
 
-def test_price_in_usd_balances_vs_default(factory, forked_env):
+def test_price_in_usd_balances_vs_default(factory, lending_oracle, lt_deployer):
     """
     Compare price_in_usd with use_balances=True vs default.
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
+    oracle = lending_oracle
 
     for market_id in MARKET_IDS:
         market = factory.markets(market_id)
@@ -127,15 +123,14 @@ def test_price_in_usd_balances_vs_default(factory, forked_env):
         assert diff_pct < 0.5, f"Market {market_id}: USD default vs balances diff {diff_pct:.4f}% exceeds 0.5%"
 
 
-def test_staked_price_matches_gauge_convert(factory, forked_env):
+def test_staked_price_matches_gauge_convert(factory, lending_oracle, lt_deployer,
+                                            gauge_deployer):
     """
     staked_price_in_{asset,usd} should equal the unstaked price scaled by
     LiquidityGauge.convertToAssets(1e18) / 1e18, since _staked_scale mirrors
     the gauge's ERC4626 share->asset conversion (post-rebase).
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
-    gauge_deployer = boa.load_partial("contracts/dao/LiquidityGauge.vy")
+    oracle = lending_oracle
 
     found_any = False
     for market_id in MARKET_IDS:
@@ -177,13 +172,13 @@ def test_staked_price_matches_gauge_convert(factory, forked_env):
         pytest.skip("no markets with a staker on this fork")
 
 
-def test_staked_price_usd_asset_consistency(factory, forked_env, twocrypto):
+def test_staked_price_usd_asset_consistency(factory, lending_oracle, lt_deployer,
+                                            twocrypto, cryptopool_lp_oracle_deployer):
     """
     staked_price_in_usd / staked_price_in_asset must equal the underlying
     asset_price_usd, same as the unstaked variants.
     """
-    oracle = boa.load("contracts/utils/YBLendingOracle.vy")
-    lt_deployer = boa.load_partial("contracts/LT.vy")
+    oracle = lending_oracle
 
     found_any = False
     for market_id in MARKET_IDS:
@@ -195,7 +190,7 @@ def test_staked_price_usd_asset_consistency(factory, forked_env, twocrypto):
         found_any = True
 
         pool = twocrypto.at(lt.CRYPTOPOOL())
-        agg_price = boa.load_partial("contracts/CryptopoolLPOracle.vy").at(lt.agg()).price()
+        agg_price = cryptopool_lp_oracle_deployer.at(lt.agg()).price()
         asset_price_usd = pool.price_oracle() * agg_price // 10**18
 
         staked_asset = oracle.staked_price_in_asset(lt)

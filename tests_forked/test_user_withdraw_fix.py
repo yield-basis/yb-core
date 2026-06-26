@@ -59,11 +59,28 @@ def forked_env():
         yield
 
 
-def test_user_withdraw_after_owner_fix(forked_env):
-    factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
-    vault = boa.load_partial("contracts/HybridVault.vy").at(VAULT)
-    old_owner = boa.load_partial("contracts/HybridFactoryOwner.vy").at(OLD_OWNER)
-    market6_vault = boa.load_partial("contracts/HybridVault.vy").at(MARKET6_VAULT)
+# Compile each contract once; .at()/.deploy() per use instead of re-loading.
+@pytest.fixture(scope="module")
+def factory_deployer(forked_env):
+    return boa.load_partial("contracts/Factory.vy")
+
+
+@pytest.fixture(scope="module")
+def hybrid_vault_deployer(forked_env):
+    return boa.load_partial("contracts/HybridVault.vy")
+
+
+@pytest.fixture(scope="module")
+def hybrid_factory_owner_deployer(forked_env):
+    return boa.load_partial("contracts/HybridFactoryOwner.vy")
+
+
+def test_user_withdraw_after_owner_fix(factory_deployer, hybrid_vault_deployer,
+                                       hybrid_factory_owner_deployer):
+    factory = factory_deployer.at(FACTORY)
+    vault = hybrid_vault_deployer.at(VAULT)
+    old_owner = hybrid_factory_owner_deployer.at(OLD_OWNER)
+    market6_vault = hybrid_vault_deployer.at(MARKET6_VAULT)
 
     # 1. Confirm the live (buggy) owner still makes the user's tx revert, and
     #    that a market-6 vault is likewise stuck (reverts "Not disabled")
@@ -76,7 +93,7 @@ def test_user_withdraw_after_owner_fix(forked_env):
 
     # 2. Deploy the fixed HybridFactoryOwner and hand it Factory ownership:
     #    old_owner -> DAO (transfer_ownership_back) -> new_owner (set_admin)
-    new_owner = boa.load("contracts/HybridFactoryOwner.vy", DAO, FACTORY)
+    new_owner = hybrid_factory_owner_deployer.deploy(DAO, FACTORY)
     with boa.env.prank(DAO):
         old_owner.transfer_ownership_back()
         factory.set_admin(new_owner.address, EMERGENCY_ADMIN)

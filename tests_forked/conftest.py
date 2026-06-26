@@ -164,3 +164,19 @@ def lt_deployer(forked_env):
 @pytest.fixture(scope="module")
 def amm_deployer(forked_env):
     return boa.load_partial("contracts/AMM.vy")
+
+
+@pytest.fixture(scope="module")
+def cryptopool_lp_oracle_deployer(forked_env):
+    return boa.load_partial("contracts/CryptopoolLPOracle.vy")
+
+
+@pytest.fixture(scope="module")
+def gauge_deployer(forked_env):
+    return boa.load_partial("contracts/dao/LiquidityGauge.vy")
+
+
+@pytest.fixture(scope="module")
+def scrvusd_vault(forked_env):
+    """The live scrvUSD ERC4626 vault."""
+    return boa.load_partial("contracts/dao/erc4626.vy").at(SCRVUSD)

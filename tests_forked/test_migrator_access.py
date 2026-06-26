@@ -63,26 +63,37 @@ def owner(factory):
     return boa.load_partial("contracts/HybridFactoryOwner.vy").at(factory.admin())
 
 
-def test_old_migrator_wired_to_stale_owner(factory):
+# Compile each contract once; .at() per use instead of re-loading.
+@pytest.fixture(scope="module")
+def migrator_deployer():
+    return boa.load_partial("contracts/LTMigrator.vy")
+
+
+@pytest.fixture(scope="module")
+def lt_deployer():
+    return boa.load_partial("contracts/LT.vy")
+
+
+def test_old_migrator_wired_to_stale_owner(factory, migrator_deployer):
     """The OLD migrator's immutable owner is not the current Factory admin."""
-    old = boa.load_partial("contracts/LTMigrator.vy").at(OLD_MIGRATOR)
+    old = migrator_deployer.at(OLD_MIGRATOR)
     assert old.FACTORY_OWNER().lower() == STALE_OWNER.lower()
     assert factory.admin().lower() == CURRENT_OWNER.lower()
     # This mismatch is the whole problem.
     assert old.FACTORY_OWNER().lower() != factory.admin().lower()
 
 
-def test_new_migrator_wired_to_current_owner(factory):
+def test_new_migrator_wired_to_current_owner(factory, migrator_deployer):
     """The NEW migrator is wired to the live Factory admin."""
-    new = boa.load_partial("contracts/LTMigrator.vy").at(NEW_MIGRATOR)
+    new = migrator_deployer.at(NEW_MIGRATOR)
     assert new.FACTORY_OWNER().lower() == factory.admin().lower()
     assert new.FACTORY_OWNER().lower() == CURRENT_OWNER.lower()
 
 
-def test_old_migrator_reverts_with_access():
+def test_old_migrator_reverts_with_access(migrator_deployer, lt_deployer):
     """User migration through the OLD migrator reverts 'Access'."""
-    old = boa.load_partial("contracts/LTMigrator.vy").at(OLD_MIGRATOR)
-    lt_from = boa.load_partial("contracts/LT.vy").at(LT_FROM)
+    old = migrator_deployer.at(OLD_MIGRATOR)
+    lt_from = lt_deployer.at(LT_FROM)
 
     shares = lt_from.balanceOf(USER)
     assert shares > 0, "user has no lt_from to migrate"
@@ -95,7 +106,7 @@ def test_old_migrator_reverts_with_access():
             old.migrate_plain(LT_FROM, LT_TO, shares, 0)
 
 
-def test_new_migrator_succeeds(owner):
+def test_new_migrator_succeeds(owner, migrator_deployer, lt_deployer):
     """
     The redeployed migrator (0x3e6D...) lets the reported user migrate
     end-to-end.
@@ -110,9 +121,9 @@ def test_new_migrator_succeeds(owner):
     approval here if (and only if) the new migrator is not already a registered
     limit setter, by pranking the owner ADMIN to simulate the executed vote.
     """
-    new = boa.load_partial("contracts/LTMigrator.vy").at(NEW_MIGRATOR)
-    lt_from = boa.load_partial("contracts/LT.vy").at(LT_FROM)
-    lt_to = boa.load_partial("contracts/LT.vy").at(LT_TO)
+    new = migrator_deployer.at(NEW_MIGRATOR)
+    lt_from = lt_deployer.at(LT_FROM)
+    lt_to = lt_deployer.at(LT_TO)
 
     # The approval (DAO-vote-gated set_limit_setter). Already in place at head;
     # applied here only if the fork predates the vote's execution.

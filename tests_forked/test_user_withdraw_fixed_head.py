@@ -41,9 +41,20 @@ def forked_env():
         yield
 
 
-def test_user_withdraw_no_longer_reverts(forked_env):
-    factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
-    vault = boa.load_partial("contracts/HybridVault.vy").at(VAULT)
+# Compile each contract once; .at() per use instead of re-loading.
+@pytest.fixture(scope="module")
+def factory_deployer(forked_env):
+    return boa.load_partial("contracts/Factory.vy")
+
+
+@pytest.fixture(scope="module")
+def hybrid_vault_deployer(forked_env):
+    return boa.load_partial("contracts/HybridVault.vy")
+
+
+def test_user_withdraw_no_longer_reverts(factory_deployer, hybrid_vault_deployer):
+    factory = factory_deployer.at(FACTORY)
+    vault = hybrid_vault_deployer.at(VAULT)
 
     # Sanity: the executed vote installed the fixed owner as Factory admin.
     assert factory.admin() == NEW_OWNER
@@ -57,8 +68,8 @@ def test_user_withdraw_no_longer_reverts(forked_env):
     print("pool 8 assets:", assets)
 
 
-def test_market6_withdraw_no_longer_reverts(forked_env):
-    market6_vault = boa.load_partial("contracts/HybridVault.vy").at(MARKET6_VAULT)
+def test_market6_withdraw_no_longer_reverts(hybrid_vault_deployer):
+    market6_vault = hybrid_vault_deployer.at(MARKET6_VAULT)
 
     # Market 6 was disabled by the executed migration, so this no longer
     # reverts "Not disabled".
