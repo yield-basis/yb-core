@@ -6,7 +6,7 @@ authors = [{ name = "Michael Egorov", email = "michwill@yieldbasis.com" }]
 requires-python = ">=3.11,<4"
 dependencies = [
     "vyper==0.4.3",
-    "titanoboa",
+    "titanoboa==0.2.8",
     "hypothesis>=6,<7",
     "pdbpp>=0.11.6,<0.12",
     "jedi>=0.19.1,<0.20",
@@ -21,11 +21,9 @@ dependencies = [
 
 [tool.uv]
 package = false
-# curve-std's pinned rev declares titanoboa>=0.2.8, but the pinned titanoboa
-# rev reports 0.2.7. Force our git-pinned titanoboa (matches poetry behaviour).
-override-dependencies = ["titanoboa"]
+exclude-newer = "1 week"
 
 [tool.uv.sources]
-titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "5360bbae07950ddfd44bc61fd14f656d036c0315" }
+# titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "5360bbae07950ddfd44bc61fd14f656d036c0315" }
 # titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "ff16d2d295b8ce60b8a45e3ced06784e8f404afb" }
 curve-std = { git = "https://github.com/curvefi/curve-std.git", rev = "949ae6c0a2c3dfb9e6808aa6d2ca9b737a5afd59" }
