@@ -23,6 +23,12 @@ dependencies = [
 package = false
 exclude-newer = "1 week"
 
+[tool.uv.audit]
+# vyper 0.4.3 is not affected by either advisory:
+# - PYSEC-2023-142 (GHSA-5824-cm3x-3c38): pre-0.4 reentrancy issue, long fixed
+# - GHSA-vgf2-gvx8-xwc3 (CVE-2025-21607): precompile success check, fixed in 0.4.1
+ignore = ["PYSEC-2023-142", "GHSA-vgf2-gvx8-xwc3"]
+
 [tool.uv.sources]
 # titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "5360bbae07950ddfd44bc61fd14f656d036c0315" }
 # titanoboa = { git = "https://github.com/vyperlang/titanoboa.git", rev = "ff16d2d295b8ce60b8a45e3ced06784e8f404afb" }
