@@ -18,6 +18,7 @@ We test each piece separately, at several pool/AMM balances:
      is NOT materially movable by a cryptopool swap or an AMM trade (it is built
      from the conserved invariant x0 and the EMA price_oracle).
 """
+import math
 import boa
 import pytest
 
@@ -66,8 +67,66 @@ def _setup(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
     _settle(cryptopool)
 
 
+def _pool_metrics_py(cryptopool, lp_oracle_2):
+    """Reproduce YBNetPressure._pool_metrics in Python: (x_frac, lp_oracle, lp_ps)."""
+    price_oracle = cryptopool.price_oracle()
+    price_scale = cryptopool.price_scale()
+    vprice = cryptopool.virtual_price()
+    D = cryptopool.D()
+    supply = cryptopool.totalSupply()
+    A_raw = cryptopool.A() // 2
+    p = price_oracle * 10**18 // price_scale
+    x, y = lp_oracle_2.internal._get_x_y(A_raw, p)
+    pv = x + p * y // 10**18
+    x_frac = x * 10**18 // pv
+    lp_price_oracle = pv * D // supply
+    lp_price_ps = 2 * vprice * math.isqrt(price_scale * 10**18) // 10**18
+    return x_frac, lp_price_oracle, lp_price_ps
+
+
 def _ratio(cryptopool):
     return cryptopool.price_oracle() / cryptopool.price_scale()
+
+
+def _arb_amm_to_price(yb_amm, cryptopool, ct, sc, acct, target):
+    """Arbitrage the YB AMM's marginal price get_p() to `target` (crvUSD/LP) with
+    closed-form constant-product steps. Returns the reached get_p()."""
+    with boa.env.prank(acct):
+        cryptopool.approve(yb_amm.address, 2**256 - 1)
+        sc.approve(yb_amm.address, 2**256 - 1)
+    for _ in range(60):
+        st = yb_amm.get_state()
+        x_initial = st.x0 - st.debt
+        gp = x_initial * 10**18 // st.collateral
+        if abs(gp - target) * 500 < target:        # within 0.2%
+            break
+        k = x_initial * st.collateral               # constant product (x0 ~ const)
+        coll_t = math.isqrt(k * 10**18 // target)
+        if coll_t > st.collateral:                  # lower get_p: sell LP into AMM
+            sell = min(coll_t - st.collateral, st.collateral // 4 + 1)  # cap step
+            b0, b1 = cryptopool.balances(0), cryptopool.balances(1)
+            supply = cryptopool.totalSupply()
+            need0 = b0 * sell // supply * 3 + 10**18  # balanced add -> no price move
+            need1 = b1 * sell // supply * 3 + 10**18
+            sc._mint_for_testing(acct, need0)
+            ct._mint_for_testing(acct, need1)
+            with boa.env.prank(acct):
+                cryptopool.add_liquidity([need0, need1], 0)
+                lp = cryptopool.balanceOf(acct)
+                try:
+                    yb_amm.exchange(1, 0, min(sell, lp), 0)
+                except Exception:
+                    break
+        else:                                       # raise get_p: buy LP from AMM
+            buy = min(st.debt - math.isqrt(k * target // 10**18), st.debt // 4 + 1)
+            sc._mint_for_testing(acct, buy + 10**18)
+            with boa.env.prank(acct):
+                try:
+                    yb_amm.exchange(0, 1, max(buy, 1), 0)
+                except Exception:
+                    break
+    st = yb_amm.get_state()
+    return (st.x0 - st.debt) * 10**18 // st.collateral
 
 
 def _open_ema_gap(cryptopool, token, acct, target=0.05):
@@ -287,6 +346,103 @@ def test_oracle_converges_to_trivial_only_at_equilibrium(
     # At r != 1 the sqrt(r) correction makes the two materially disagree.
     assert abs(net1 - triv1) > equity // 50, (
         f"expected divergence at p={p}: net={net1} trivial={triv1}")
+
+
+@pytest.mark.parametrize("extra_depth,deposit", BALANCE_CASES)
+def test_oracle_fallback_when_amm_non_tradable(
+    cryptopool, yb_lt, yb_amm, cryptopool_oracle, collateral_token, stablecoin,
+    accounts, admin, yb_allocated, seed_cryptopool, net_pressure, mock_agg,
+    lp_oracle_2, extra_depth, deposit,
+):
+    """
+    When get_state()/get_x0 revert (AMM non-tradable) the oracle backs off to the
+    AMM's raw collateral/debt but keeps the price_oracle crvUSD split (the Curve
+    pool never reverts). We force the revert by crashing agg so coll_value falls
+    below the get_x0 solvency bound.
+    """
+    _setup(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
+           extra_depth, deposit)
+
+    yb_amm.get_state()  # works before the crash
+    with boa.env.prank(admin):
+        mock_agg.set_price(10**17)  # coll_value << 16/9 * debt -> get_x0 reverts
+    with pytest.raises(Exception):
+        yb_amm.get_state()
+
+    # Oracle must still price (fallback branch), not revert.
+    net = net_pressure.net_pressure_oracle(yb_lt.address)
+
+    # Manual fallback: raw AMM amounts, oracle-based split.
+    debt = yb_amm.get_debt()
+    collateral = yb_amm.collateral_amount()
+    p_o_amm = cryptopool_oracle.price()
+    x_frac, lp_price_oracle, lp_price_ps = _pool_metrics_py(cryptopool, lp_oracle_2)
+    coll_value_ps = collateral * p_o_amm // 10**18
+    calc_coll_value = coll_value_ps * lp_price_oracle // lp_price_ps
+    expected = debt - calc_coll_value * x_frac // 10**18
+    assert net == expected
+
+    # The crvUSD split is still non-manipulable: a pool swap barely moves it,
+    # since collateral/debt are unchanged and the split rides on price_oracle.
+    attacker = accounts[1]
+    amt = (extra_depth + 1) * 3 * 10**18
+    collateral_token._mint_for_testing(attacker, amt)
+    with boa.env.prank(attacker):
+        collateral_token.approve(cryptopool.address, 2**256 - 1)
+        cryptopool.exchange(1, 0, amt, 0)
+    net1 = net_pressure.net_pressure_oracle(yb_lt.address)
+    assert abs(net1 - net) < debt // 50
+
+
+@pytest.mark.parametrize("extra_depth,deposit", [(50, 3 * 10**18), (10, 10**18)])
+def test_oracle_matches_naive_with_imbalanced_pool(
+    cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
+    yb_allocated, seed_cryptopool, net_pressure, lp_oracle_2, extra_depth, deposit,
+):
+    """
+    With agg == 1, oracle ~= naive should hold even when the Curve pool is
+    imbalanced (r != 1), *provided* (a) the YB AMM is arbitraged to the real LP
+    price and (b) price_oracle has had time to converge to the frozen spot
+    composition (so naive's spot split matches the oracle's price_oracle split).
+    The bonding-curve slide then cancels and only the AMM's residual imbalance
+    and rounding remain.
+    """
+    _setup(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
+           extra_depth, deposit)
+
+    # Push the pool price down a bit (a few small swaps), then WAIT long so the
+    # EMA price_oracle converges to last_prices; price_scale needs trades to
+    # repeg, so it stays put and r = price_oracle/price_scale != 1.
+    dumper = accounts[3]
+    with boa.env.prank(dumper):
+        collateral_token.approve(cryptopool.address, 2**256 - 1)
+    for _ in range(5):
+        amt = cryptopool.balances(1) // 12
+        collateral_token._mint_for_testing(dumper, amt)
+        with boa.env.prank(dumper):
+            try:
+                cryptopool.exchange(1, 0, amt, 0)
+            except Exception:
+                break
+        boa.env.time_travel(600)
+    for _ in range(40):                       # wait: price_oracle -> last_prices
+        boa.env.time_travel(1200)
+
+    r = _ratio(cryptopool)
+    assert abs(r - 1.0) > 0.02, f"pool not imbalanced enough: r={r}"
+
+    # Arbitrage the YB AMM to the real LP price (else it sits stale at lp_price_ps).
+    _, lp_price_oracle, _ = _pool_metrics_py(cryptopool, lp_oracle_2)
+    gp = _arb_amm_to_price(yb_amm, cryptopool, collateral_token, stablecoin,
+                           accounts[1], lp_price_oracle)
+
+    equity = yb_amm.get_state().x0 // 3
+    oracle = net_pressure.net_pressure_oracle(yb_lt.address)
+    naive = net_pressure.net_pressure_naive(yb_lt.address)
+    print(f"\n[depth={extra_depth}] r={r:.3f} get_p/target={gp/lp_price_oracle:.4f} "
+          f"equity={equity/1e18:.0f} oracle={oracle/1e18:.2f} naive={naive/1e18:.2f} "
+          f"diff/equity={abs(oracle-naive)/equity:.4f}")
+    assert abs(oracle - naive) < equity // 20   # within ~5% of equity despite r != 1
 
 
 @pytest.mark.parametrize("extra_depth,deposit", BALANCE_CASES)

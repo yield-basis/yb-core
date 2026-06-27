@@ -152,6 +152,10 @@ def crvusd_value_fraction(lt: LT) -> uint256:
 def net_pressure_oracle(lt: LT) -> int256:
     """
     @notice Manipulation-resistant net pressure (debt - crvUSD in LP).
+    @dev When get_state()/get_x0 revert (AMM too imbalanced to be tradable) the
+         bonding-curve slide is unavailable, so fall back to the AMM's raw
+         collateral/debt. The Curve pool never reverts, so the crvUSD split stays
+         oracle-based (non-manipulable) in both branches.
     @param lt The YB LT (market) contract.
     @return Net pressure; positive => crvUSD buy pressure on unwind.
     """
@@ -159,26 +163,42 @@ def net_pressure_oracle(lt: LT) -> int256:
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
 
-    state: AMMState = staticcall amm.get_state()
     p_o_amm: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
-
     m: PoolMetrics = self._pool_metrics(pool)
 
-    # Slide debt/collateral along the bonding curve from the AMM's price to the
-    # price_oracle price. coll_value_ps == p_o_amm * collateral is exactly the
-    # coll_value get_x0 used for x0; coll_value_true marks it at lp_price_oracle.
-    x_initial: uint256 = state.x0 - state.debt                      # x = x0 - debt
-    coll_value_ps: uint256 = state.collateral * p_o_amm // PRECISION
-    coll_value_true: uint256 = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
-    # sqrt(k * m*) = sqrt(x_initial * coll_value_true); k = x_initial*collateral
-    # is conserved, so this rides on lp_price_oracle, not the spot split.
-    calc_x_initial: uint256 = isqrt(x_initial * coll_value_true)
+    # x0 / get_x0 revert when the AMM is too imbalanced for the leverage math.
+    gas_before: uint256 = msg.gas
+    success: bool = False
+    response: Bytes[96] = empty(Bytes[96])
+    success, response = raw_call(
+        amm.address, method_id("get_state()"),
+        max_outsize=96, revert_on_failure=False, is_static_call=True)
 
-    # net = calculated_debt - crvUSD_in_LP
-    #     = (x0 - calc_x_initial) - calc_x_initial * x_frac
-    #     = x0 - calc_x_initial * (1 + x_frac)
-    crvusd_side: uint256 = calc_x_initial * (PRECISION + m.x_frac) // PRECISION
-    return convert(state.x0, int256) - convert(crvusd_side, int256)
+    calc_coll_value: uint256 = 0  # AMM collateral marked at the price_oracle price
+    calc_debt: uint256 = 0
+    if success:
+        state: AMMState = abi_decode(response, AMMState)
+        # coll_value_ps == p_o_amm * collateral is exactly the coll_value get_x0
+        # used for x0; coll_value_true marks it at lp_price_oracle. Then slide
+        # debt/collateral along the bonding curve to that price:
+        # sqrt(k * m*) = sqrt(x_initial * coll_value_true), with k = x_initial *
+        # collateral conserved, so this rides on the oracle price not the spot split.
+        coll_value_ps: uint256 = state.collateral * p_o_amm // PRECISION
+        coll_value_true: uint256 = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
+        calc_coll_value = isqrt((state.x0 - state.debt) * coll_value_true)
+        calc_debt = state.x0 - calc_coll_value
+    else:
+        # AMM non-tradable: distinguish a genuine revert from a 63/64-rule gas
+        # starvation (mirrors YBLendingOracle), then use the AMM's raw amounts -
+        # they can't change in this state. The split stays oracle-based.
+        assert msg.gas > gas_before // 16, "GAS"
+        coll_value_ps: uint256 = (staticcall amm.collateral_amount()) * p_o_amm // PRECISION
+        calc_coll_value = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
+        calc_debt = staticcall amm.get_debt()
+
+    # net = calc_debt - crvUSD_in_LP;  crvUSD_in_LP = calc_coll_value * x_frac
+    crvusd_in_lp: uint256 = calc_coll_value * m.x_frac // PRECISION
+    return convert(calc_debt, int256) - convert(crvusd_in_lp, int256)
 
 
 @external
