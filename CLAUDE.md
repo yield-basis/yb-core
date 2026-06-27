@@ -10,23 +10,23 @@ YB-Core (Yield Basis) is a Vyper smart contract project for DeFi yield optimizat
 
 ### Setup
 ```bash
-poetry install
+uv sync
 ```
 
 ### Testing
 ```bash
-pytest                          # Run all tests
-pytest tests/amm/               # Run AMM tests
-pytest tests/lt/                # Run leveraged trading tests
-pytest tests/dao/               # Run DAO/governance tests
-pytest tests_forked/            # Run fork-based integration tests
-pytest -n auto                  # Run tests in parallel
-pytest tests/amm/test_unitary.py::test_name  # Run single test
+uv run pytest -vv                          # Run all tests
+uv run pytest -vv tests/amm/               # Run AMM tests
+uv run pytest -vv tests/lt/                # Run leveraged trading tests
+uv run pytest -vv tests/dao/               # Run DAO/governance tests
+uv run pytest -vv tests_forked/            # Run fork-based integration tests
+uv run pytest -vv -n auto                  # Run tests in parallel
+uv run pytest -vv tests/amm/test_unitary.py::test_name  # Run single test
 ```
 
 ### Linting
 ```bash
-flake8                          # Uses .flake8 config (max-line-length=160)
+uv run flake8                          # Uses .flake8 config (max-line-length=160)
 ```
 
 ## Architecture

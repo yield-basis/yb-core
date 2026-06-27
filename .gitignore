@@ -11,3 +11,4 @@ __pycache__
 /scripts/voting/networks.py
 /tests_forked/networks.py
 /abi
+/scripts/deployment-addresses.md
