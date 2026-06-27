@@ -83,6 +83,11 @@ struct AMMState:
     debt: uint256
     x0: uint256
 
+struct PoolMetrics:
+    x_frac: uint256           # crvUSD value fraction of the LP at price_oracle (1e18)
+    lp_price_oracle: uint256  # LP price implied by price_oracle (lp_oracle_2)
+    lp_price_ps: uint256      # LP price from price_scale (== PRICE_ORACLE_CONTRACT / agg)
+
 
 PRECISION: constant(uint256) = 10**18
 # The whole system fixes LEVERAGE = 2 * 10**18 (AMM.__init__, Factory,
@@ -104,12 +109,9 @@ def _assert_not_reentrant(amm: LevAMM):
 
 @internal
 @view
-def _pool_metrics(pool: Pool) -> (uint256, uint256, uint256):
+def _pool_metrics(pool: Pool) -> PoolMetrics:
     """
-    @return (x_frac, lp_price_oracle, lp_price_ps), all 1e18-scaled:
-            x_frac           crvUSD value fraction of the LP at price_oracle,
-            lp_price_oracle  LP price implied by price_oracle (lp_oracle_2),
-            lp_price_ps      LP price from price_scale (== PRICE_ORACLE_CONTRACT / agg).
+    @return PoolMetrics (x_frac, lp_price_oracle, lp_price_ps), all 1e18-scaled.
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
@@ -125,10 +127,11 @@ def _pool_metrics(pool: Pool) -> (uint256, uint256, uint256):
     y: uint256 = 0
     x, y = LPOracle.lp_oracle_2._get_x_y(A_raw, p)
     pv_norm: uint256 = x + p * y // PRECISION                 # D=1 portfolio value
-    x_frac: uint256 = x * PRECISION // pv_norm
-    lp_price_oracle: uint256 = pv_norm * D // pool_supply
-    lp_price_ps: uint256 = 2 * vprice * isqrt(price_scale * PRECISION) // PRECISION
-    return (x_frac, lp_price_oracle, lp_price_ps)
+    return PoolMetrics(
+        x_frac=x * PRECISION // pv_norm,
+        lp_price_oracle=pv_norm * D // pool_supply,
+        lp_price_ps=2 * vprice * isqrt(price_scale * PRECISION) // PRECISION,
+    )
 
 
 @external
@@ -141,7 +144,7 @@ def crvusd_value_fraction(lt: LT) -> uint256:
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
-    return self._pool_metrics(pool)[0]
+    return self._pool_metrics(pool).x_frac
 
 
 @external
@@ -159,17 +162,14 @@ def net_pressure_oracle(lt: LT) -> int256:
     state: AMMState = staticcall amm.get_state()
     p_o_amm: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
 
-    x_frac: uint256 = 0
-    lp_price_oracle: uint256 = 0
-    lp_price_ps: uint256 = 0
-    x_frac, lp_price_oracle, lp_price_ps = self._pool_metrics(pool)
+    m: PoolMetrics = self._pool_metrics(pool)
 
     # Slide debt/collateral along the bonding curve from the AMM's price to the
     # price_oracle price. coll_value_ps == p_o_amm * collateral is exactly the
     # coll_value get_x0 used for x0; coll_value_true marks it at lp_price_oracle.
     x_initial: uint256 = state.x0 - state.debt                      # x = x0 - debt
     coll_value_ps: uint256 = state.collateral * p_o_amm // PRECISION
-    coll_value_true: uint256 = coll_value_ps * lp_price_oracle // lp_price_ps
+    coll_value_true: uint256 = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
     # sqrt(k * m*) = sqrt(x_initial * coll_value_true); k = x_initial*collateral
     # is conserved, so this rides on lp_price_oracle, not the spot split.
     calc_x_initial: uint256 = isqrt(x_initial * coll_value_true)
@@ -177,7 +177,7 @@ def net_pressure_oracle(lt: LT) -> int256:
     # net = calculated_debt - crvUSD_in_LP
     #     = (x0 - calc_x_initial) - calc_x_initial * x_frac
     #     = x0 - calc_x_initial * (1 + x_frac)
-    crvusd_side: uint256 = calc_x_initial * (PRECISION + x_frac) // PRECISION
+    crvusd_side: uint256 = calc_x_initial * (PRECISION + m.x_frac) // PRECISION
     return convert(state.x0, int256) - convert(crvusd_side, int256)
 
 
