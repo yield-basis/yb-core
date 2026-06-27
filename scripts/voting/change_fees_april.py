@@ -11,10 +11,8 @@ from getpass import getpass
 from networks import NETWORK
 from networks import ETHERSCAN_API_KEY
 from networks import PINATA_TOKEN
-from time import sleep, time
 
 from boa.explorer import Etherscan
-from boa.verifiers import verify as boa_verify
 
 
 MARKETS = [3, 4, 5]

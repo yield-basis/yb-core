@@ -21,14 +21,11 @@ def test_emergency_withdraw_default(
         shares = vault.deposit(pool_id, assets, debt, 0, False, True)
         assert shares > 0
 
-    scrvusd = erc20.at(SCRVUSD)
-    scrvusd_vault_before = scrvusd.balanceOf(vault.address)
     wbtc_user_before = wbtc.balanceOf(funded_account)
 
     with boa.env.prank(funded_account):
         vault.emergency_withdraw(pool_id, shares)
 
-    scrvusd_vault_after = scrvusd.balanceOf(vault.address)
     wbtc_user_after = wbtc.balanceOf(funded_account)
 
     # Default path redeems and re-deposits scrvUSD, so balance may change slightly
@@ -61,14 +58,12 @@ def test_emergency_withdraw_crvusd_from_wallet(
 
     scrvusd = erc20.at(SCRVUSD)
     scrvusd_vault_before = scrvusd.balanceOf(vault.address)
-    crvusd_user_before = crvusd.balanceOf(funded_account)
     wbtc_user_before = wbtc.balanceOf(funded_account)
 
     with boa.env.prank(funded_account):
         vault.emergency_withdraw(pool_id, shares, True)
 
     scrvusd_vault_after = scrvusd.balanceOf(vault.address)
-    crvusd_user_after = crvusd.balanceOf(funded_account)
     wbtc_user_after = wbtc.balanceOf(funded_account)
 
     # scrvUSD in vault must be unchanged - the backing vault was not touched

@@ -6,7 +6,6 @@ get_state() raw_call (get_x0 + several AMM storage reads) is pure waste. The fix
 call behind `not use_balances`. This pins that the use_balances=True path is materially
 cheaper -- a regression that re-introduces the call would shrink the gap.
 """
-import boa
 
 
 def test_use_balances_skips_get_state(factory, lending_oracle, lt_deployer):

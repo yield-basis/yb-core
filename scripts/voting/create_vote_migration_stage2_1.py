@@ -10,7 +10,6 @@ from collections import namedtuple
 from getpass import getpass
 from networks import NETWORK
 from networks import PINATA_TOKEN
-from time import sleep
 
 
 FORK = True

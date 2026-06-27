@@ -78,7 +78,6 @@ def test_getstate_does_not_revert_before_underflow(
     underflows, and (b) get_state() stays solvent throughout — it does not revert first.
     """
     probe = ratio_probe
-    oracle = lending_oracle
 
     whale = accounts[2]
     stablecoin._mint_for_testing(whale, 50 * 100_000 * 10**18)
