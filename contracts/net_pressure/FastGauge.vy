@@ -181,6 +181,10 @@ def set_pid(pid: address):
 @external
 @nonreentrant
 def deposit(assets: uint256, receiver: address) -> uint256:
+    """
+    @notice Stake `assets` LP tokens, minting gauge shares to `receiver`.
+    @dev Checkpoints rewards before the balance change. @return shares minted.
+    """
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
     self._checkpoint(receiver)
@@ -192,6 +196,10 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 @external
 @nonreentrant
 def mint(shares: uint256, receiver: address) -> uint256:
+    """
+    @notice Mint `shares` gauge tokens to `receiver` by staking the required LP.
+    @dev Checkpoints rewards before the balance change. @return assets pulled.
+    """
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
     self._checkpoint(receiver)
@@ -203,6 +211,10 @@ def mint(shares: uint256, receiver: address) -> uint256:
 @external
 @nonreentrant
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
+    """
+    @notice Unstake `assets` LP to `receiver`, burning `owner`'s gauge shares.
+    @dev Checkpoints rewards before the balance change. @return shares burned.
+    """
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint(owner)
@@ -214,6 +226,10 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 @external
 @nonreentrant
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
+    """
+    @notice Burn `owner`'s `shares` gauge tokens, returning LP to `receiver`.
+    @dev Checkpoints rewards before the balance change. @return assets returned.
+    """
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
     self._checkpoint(owner)
@@ -225,6 +241,9 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
 @external
 @nonreentrant
 def transfer(to: address, amount: uint256) -> bool:
+    """
+    @notice ERC20 transfer of gauge shares; checkpoints rewards for both parties.
+    """
     self._checkpoint(msg.sender)
     self._checkpoint(to)
     erc4626.erc20._transfer(msg.sender, to, amount)
@@ -234,6 +253,9 @@ def transfer(to: address, amount: uint256) -> bool:
 @external
 @nonreentrant
 def transferFrom(owner: address, to: address, amount: uint256) -> bool:
+    """
+    @notice ERC20 transferFrom of gauge shares; checkpoints rewards for both parties.
+    """
     self._checkpoint(owner)
     self._checkpoint(to)
     erc4626.erc20._spend_allowance(owner, msg.sender, amount)

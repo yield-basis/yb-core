@@ -243,6 +243,10 @@ def recover(token: IERC20, amount: uint256, to: address):
 
 @external
 def set_pressure_lts(lts: DynArray[address, MAX_POOLS]):
+    """
+    @notice Set the LT markets whose net pressure is summed by the controller.
+    @dev DAO only.
+    """
     ownable._check_owner()
     self.pressure_lts = lts
     log SetParams()
@@ -261,6 +265,11 @@ def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
 @external
 def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
                 fee_distributor: FeeDistributor):
+    """
+    @notice Set the data sources: net-pressure oracle, market-rate getter, and the
+            FeeDistributor whose token set defines the LT fees to convert.
+    @dev DAO only.
+    """
     ownable._check_owner()
     self.net_pressure = net_pressure
     self.market_rate_getter = market_rate_getter
@@ -271,6 +280,11 @@ def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateG
 @external
 def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               max_integral: int256, sink_cap: int256, dead_band: uint256, sink_per_offer: uint256):
+    """
+    @notice Set the controller gains and clamps (all 1e18-scaled). See the report's
+            §7/§9 for meanings; defaults are set in the constructor.
+    @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0.
+    """
     ownable._check_owner()
     assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0
     self.feedforward_gain = feedforward_gain
@@ -286,6 +300,12 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
 
 @external
 def set_execution_params(swap_fee_multiplier: uint256, min_interval: uint256, dust_floor: uint256):
+    """
+    @notice Set fee-conversion slippage multiplier (1e18; min_dy = oracle*(1 -
+            multiplier*pool_fee)), the minimum seconds between controller steps,
+            and the LT-balance dust floor below which conversion is skipped.
+    @dev DAO only.
+    """
     ownable._check_owner()
     self.swap_fee_multiplier = swap_fee_multiplier
     self.min_interval = min_interval
