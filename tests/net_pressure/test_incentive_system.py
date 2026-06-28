@@ -289,6 +289,22 @@ def test_feesplitter_recover(token, accts):
     assert t.balanceOf(admin) == 10**20
 
 
+def test_feesplitter_validates_distributor(token, accts):
+    admin = accts[0]
+    fd = boa.loads(FD_MOCK)
+    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, accts[2], PRECISION // 2, admin)
+    # A real FeeDistributor (responds to fill_epochs) is accepted.
+    fd2 = boa.loads(FD_MOCK)
+    with boa.env.prank(admin):
+        fs.set_destinations(accts[2], fd2.address)
+    assert fs.fee_distributor() == fd2.address
+    # A bogus address without fill_epochs() is rejected by the checker.
+    bogus = token.deploy("X", "X", 18)
+    with boa.env.prank(admin):
+        with boa.reverts():
+            fs.set_destinations(accts[2], bogus.address)
+
+
 # --- PID step vs reference ---------------------------------------------------
 
 def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g):

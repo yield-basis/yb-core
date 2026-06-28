@@ -89,8 +89,20 @@ def trigger():
     extcall fd.fill_epochs()
 
 
+@internal
+def _check_fee_distributor(fd: FeeDistributor):
+    # Sanity-check the address really is a FeeDistributor: fill_epochs() is
+    # permissionless and a no-op when no new tokens arrived, so calling it here
+    # just reverts if the target doesn't implement the interface.
+    extcall fd.fill_epochs()
+
+
 @external
 def set_split_fraction(fraction: uint256):
+    """
+    @notice Set the fraction (1e18) of incoming LT fees routed to the PID.
+    @dev DAO only. Must be <= 1e18.
+    """
     ownable._check_owner()
     assert fraction <= PRECISION, "fraction > 1"
     self.split_fraction = fraction
@@ -99,7 +111,12 @@ def set_split_fraction(fraction: uint256):
 
 @external
 def set_destinations(pid: address, fee_distributor: FeeDistributor):
+    """
+    @notice Set the PID reserve and FeeDistributor destinations.
+    @dev DAO only. Sanity-checks the FeeDistributor by exercising fill_epochs().
+    """
     ownable._check_owner()
+    self._check_fee_distributor(fee_distributor)
     self.pid = pid
     self.fee_distributor = fee_distributor
     log SetDestinations(pid=pid, fee_distributor=fee_distributor.address)
@@ -107,7 +124,10 @@ def set_destinations(pid: address, fee_distributor: FeeDistributor):
 
 @external
 def recover(token: IERC20, amount: uint256, to: address):
-    """@notice DAO sweep of any tokens held here."""
+    """
+    @notice Sweep any tokens held by this contract out to `to`.
+    @dev DAO only.
+    """
     ownable._check_owner()
     assert extcall token.transfer(to, amount, default_return_value=True)
     log Recover(token=token.address, amount=amount)
