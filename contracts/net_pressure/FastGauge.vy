@@ -43,7 +43,6 @@ exports: (
     erc4626.maxRedeem,
     erc4626.ownable.transfer_ownership,
     erc4626.ownable.owner,
-    erc4626.MIN_SHARES,
 )
 
 
@@ -59,7 +58,13 @@ event Claim:
 
 
 PRECISION: constant(uint256) = 10**18
-MIN_SHARES_DECIMALS: constant(uint8) = 12
+# Seed-the-market floor: total supply must be 0 or >= this (shares are 1:1 with the
+# staked LP). This blocks the ERC4626 first-depositor / donation inflation attack
+# with a meaningful ~$10 seed instead of relying on tiny dead-share dust: to grief a
+# victim depositing V the attacker must donate > V * MIN_TOTAL_SUPPLY, and can never
+# bootstrap a 1-share vault. The last withdrawal must also exit fully (to 0) or leave
+# >= MIN_TOTAL_SUPPLY.
+MIN_TOTAL_SUPPLY: public(constant(uint256)) = 10 * 10**18
 REWARD_TOKEN: public(immutable(IERC20))  # crvUSD
 LP_TOKEN: public(immutable(IERC20))      # Curve stableswap LP staked here
 
@@ -82,11 +87,23 @@ def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
     @param reward_token The streamed reward token (crvUSD).
     @param owner DAO address that can set the PID.
     """
-    erc4626.__init__("YB FastGauge", "fg", lp_token, MIN_SHARES_DECIMALS, "Just say no", "to EIP712")
+    # Pass 0 so the module's own MIN_SHARES check is a no-op (MIN_SHARES = 1); we
+    # enforce our own MIN_TOTAL_SUPPLY floor below instead.
+    erc4626.__init__("YB FastGauge", "fg", lp_token, 0, "Just say no", "to EIP712")
     erc4626.ownable.owner = owner
     LP_TOKEN = lp_token
     REWARD_TOKEN = reward_token
     self.last_update = block.timestamp
+
+
+@internal
+@view
+def _check_min_supply():
+    """
+    @notice Enforce the seed-the-market floor: total supply is 0 or >= MIN_TOTAL_SUPPLY.
+    """
+    supply: uint256 = erc4626.erc20.totalSupply
+    assert supply == 0 or supply >= MIN_TOTAL_SUPPLY, "Below min supply"
 
 
 # --- reward accounting -------------------------------------------------------
@@ -215,7 +232,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
     shares: uint256 = erc4626._preview_deposit(assets)
     self._checkpoint(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
-    erc4626._check_min_shares()
+    self._check_min_supply()
     return shares
 
 
@@ -233,7 +250,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
     assets: uint256 = erc4626._preview_mint(shares)
     self._checkpoint(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
-    erc4626._check_min_shares()
+    self._check_min_supply()
     return assets
 
 
@@ -252,7 +269,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     shares: uint256 = erc4626._preview_withdraw(assets)
     self._checkpoint(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
-    erc4626._check_min_shares()
+    self._check_min_supply()
     return shares
 
 
@@ -271,7 +288,7 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     assets: uint256 = erc4626._preview_redeem(shares)
     self._checkpoint(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
-    erc4626._check_min_shares()
+    self._check_min_supply()
     return assets
 
 

@@ -189,6 +189,30 @@ def test_fastgauge_access_control(fg_setup):
             g.set_pid(u1)  # not owner
 
 
+def test_fastgauge_min_total_supply(fg_setup):
+    s = fg_setup
+    g = s["gauge"]
+    floor = g.MIN_TOTAL_SUPPLY()
+    assert floor == 10 * 10**18
+    # A deposit below the floor is rejected (can't bootstrap a tiny vault).
+    with boa.env.prank(s["u1"]):
+        with boa.reverts("Below min supply"):
+            g.deposit(floor - 1, s["u1"])
+    # At the floor it's accepted, and shares are 1:1 with the LP.
+    with boa.env.prank(s["u1"]):
+        shares = g.deposit(floor, s["u1"])
+    assert shares == floor                     # 1e18 in -> 1e18 shares, no offset
+    assert g.totalSupply() == floor
+    # A partial withdrawal that would leave supply in (0, floor) is rejected.
+    with boa.env.prank(s["u1"]):
+        with boa.reverts("Below min supply"):
+            g.withdraw(10**18, s["u1"], s["u1"])
+    # Full exit to 0 is allowed.
+    with boa.env.prank(s["u1"]):
+        g.withdraw(floor, s["u1"], s["u1"])
+    assert g.totalSupply() == 0
+
+
 def test_fastgauge_single_staker_accrual(fg_setup):
     s = fg_setup
     g, crvusd = s["gauge"], s["crvusd"]

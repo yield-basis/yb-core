@@ -102,6 +102,13 @@ capped by the PID's balance/allowance. When the reserve empties, `pulled = 0` an
 effective rate drops to zero **with no reverts** — no `period_finish` needed. Only the
 PID can call `set_reward_rate`.
 
+Shares are **1:1** with the staked LP (no virtual offset). Inflation-attack
+protection is a *seed-the-market* floor: total supply must be `0` or
+`>= MIN_TOTAL_SUPPLY` (default `10 * 1e18`, ~$10) — you can't bootstrap a 1-share
+vault, and the last withdrawal must exit fully or leave the floor. To grief a victim
+depositing `V` an attacker must donate `> V * MIN_TOTAL_SUPPLY`, so the protection
+scales with the seed (~1e19), without locking any permanent dead shares.
+
 ## Market rate (sUSDS)
 
 `MarketRateGetter` reads the Sky Savings Rate: `ssr` is a per-second compounding
