@@ -184,6 +184,11 @@ class StatefulVE(RuleBasedStateMachine):
 
     @invariant()
     def escrow_current_votes(self):
+        # totalVotes() reads the global point from the last checkpoint; if that checkpoint is
+        # stale and a slope change (lock expiry) was crossed since, the future-supply walk in
+        # total_supply_at misses it (the live VE requires a checkpoint before every vote).
+        # Checkpoint first so the global point is current, matching the per-user getVotes sum.
+        self.ve_mock.checkpoint()
         total_votes = 0
         timestamp = boa.env.evm.patch.timestamp
         for acct in self.accounts:
