@@ -64,6 +64,7 @@ event Recover:
 
 
 PRECISION: constant(uint256) = 10**18
+FEE_DENOM: constant(uint256) = 10**10   # Curve pool fee() is scaled to 1e10
 SECONDS_PER_YEAR: constant(uint256) = 365 * 86400
 MAX_POOLS: constant(uint256) = 20
 MAX_TOKENS: constant(uint256) = 100   # must match FeeDistributor.MAX_TOKENS
@@ -142,7 +143,8 @@ def _convert_fees():
         if asset_out == 0:
             continue
         # crvUSD out target from the EMA price, discounted by 1.5x the pool fee.
-        discount: uint256 = self.swap_fee_multiplier * (staticcall pool.fee()) // PRECISION
+        # pool.fee() is scaled to FEE_DENOM (1e10); discount is rescaled to 1e18.
+        discount: uint256 = self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM
         min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
         assert extcall asset.approve(pool.address, asset_out, default_return_value=True)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
@@ -176,7 +178,9 @@ def trigger():
             Permissionless; FeeSplitter calls it after forwarding the PID's share.
     """
     self._convert_fees()
-    if block.timestamp < self.last_ts + self.min_interval:
+    # Need strictly positive elapsed time (dt) for the integral/derivative; the
+    # max(.,1) also makes min_interval=0 safe (avoids div-by-zero on same-block calls).
+    if block.timestamp < self.last_ts + max(self.min_interval, 1):
         return  # too soon to step the controller; fees still converted above
 
     pressure: uint256 = 0
