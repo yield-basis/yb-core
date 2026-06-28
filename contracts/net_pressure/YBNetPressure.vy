@@ -149,6 +149,20 @@ def crvusd_value_fraction(lt: LT) -> uint256:
 
 @external
 @view
+def pool_tvl_oracle(lt: LT) -> uint256:
+    """
+    @notice Manipulation-resistant cryptopool TVL (crvUSD), valued at price_oracle.
+    @dev = lp_price_oracle * totalSupply. Used as the normalization base (half via
+         /2) for the net-pressure controller; spot balances would be manipulable.
+    """
+    amm: LevAMM = staticcall lt.amm()
+    pool: Pool = staticcall lt.CRYPTOPOOL()
+    self._assert_not_reentrant(amm)
+    return self._pool_metrics(pool).lp_price_oracle * (staticcall pool.totalSupply()) // PRECISION
+
+
+@external
+@view
 def net_pressure_oracle(lt: LT) -> int256:
     """
     @notice Manipulation-resistant net pressure (debt - crvUSD in LP).

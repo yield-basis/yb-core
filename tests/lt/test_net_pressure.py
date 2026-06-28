@@ -1,5 +1,5 @@
 """
-Component tests for contracts/utils/YBNetPressure.vy.
+Component tests for contracts/net_pressure/YBNetPressure.vy.
 
 Net pressure of a YB market = AMM debt - crvUSD sitting inside the Curve LP tokens
 the AMM holds. Positive => crvUSD must be bought on unwind (buy pressure).
@@ -35,7 +35,7 @@ BALANCE_CASES = [
 @pytest.fixture(scope="session")
 def net_pressure():
     # Stateless (takes the LT as a call arg); safe to share read-only across tests.
-    return boa.load('contracts/utils/YBNetPressure.vy')
+    return boa.load('contracts/net_pressure/YBNetPressure.vy')
 
 
 def _settle(cryptopool):
