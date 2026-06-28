@@ -7,10 +7,20 @@
         aggregate crvUSD net pressure of a DAO-selected set of YB pools. The output
         is a crvUSD/second reward rate set on a FastGauge, which incentivizes
         deposits into a "sink" Curve stableswap pool that relieves the pressure.
-@dev Methodology from yb-research-scripts/rates/REPORT_dynamic_incentives.md.
-     All control math is in 1e18 fixed point; gains/params are DAO-settable
-     storage (not constants). The reserve is simply this contract's crvUSD balance;
-     the FastGauge pulls from it at checkpoint, so depletion just stops the stream.
+@dev Control loop, per step (dt in years), all 1e18 fixed point:
+       pressure     = max(0, sum of net pressure) / sum of half-TVL   (oracle-priced)
+       sink         = sink-pool TVL / sum of half-TVL
+       error        = pressure - sink                                 (coverage gap)
+       integral    += error * dt           clamped to [0, max_integral]
+       d_pressure   = max(0, d(pressure)/dt)                          (rising only)
+       target_sink  = clip(feedforward_gain*pressure + kp*error
+                           + ki*integral + kd*d_pressure, 0, sink_cap)
+       offer        = dead_band + target_sink / sink_per_offer        (APR multiple)
+       bonus_apr    = (offer - 1) * market_rate
+       rate         = bonus_apr * staked_value / seconds_per_year     (crvUSD/sec)
+     Gains/params are DAO-settable storage (not constants). The reserve is just this
+     contract's crvUSD balance; the FastGauge pulls from it at checkpoint, so
+     depletion simply stops the stream.
 """
 from ethereum.ercs import IERC20
 from snekmate.auth import ownable
@@ -108,7 +118,7 @@ def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter
     self.market_rate_getter = market_rate_getter
     self.fee_distributor = fee_distributor
 
-    # Defaults from the report (§7/§9); DAO can retune.
+    # Default gains, tuned offline against historical net pressure; DAO can retune.
     self.feedforward_gain = 1_160_000_000_000_000_000      # 1.16
     self.kp = 50 * 10**18
     self.ki = 1988 * 10**18
@@ -281,8 +291,13 @@ def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateG
 def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               max_integral: int256, sink_cap: int256, dead_band: uint256, sink_per_offer: uint256):
     """
-    @notice Set the controller gains and clamps (all 1e18-scaled). See the report's
-            §7/§9 for meanings; defaults are set in the constructor.
+    @notice Set the controller gains and clamps (all 1e18-scaled):
+            feedforward_gain - proportional gain on raw pressure;
+            kp/ki/kd - PID gains on the coverage error (pressure - sink);
+            max_integral - clamp on the integral accumulator (anti-windup);
+            sink_cap - clamp on the target sink;
+            dead_band - offered APR multiple at zero target sink;
+            sink_per_offer - target sink drawn per unit of offer above the dead band.
     @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0.
     """
     ownable._check_owner()
