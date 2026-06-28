@@ -2,7 +2,7 @@
 """
 @title FeeSplitter
 @author Yield Basis
-@license Copyright (c) 2025
+@license GNU Affero General Public License v3.0
 @notice Sits in front of the FeeDistributor as the Factory fee_receiver. Splits a
         DAO-set fraction of incoming LT fees to the PID (net-pressure reserve) and
         forwards the rest to the FeeDistributor, then pokes both.

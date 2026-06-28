@@ -2,7 +2,7 @@
 """
 @title FastGauge
 @author Yield Basis
-@license Copyright (c) 2025
+@license GNU Affero General Public License v3.0
 @notice ERC4626 staking gauge for a Curve stableswap LP token that streams a
         single reward (crvUSD) at a rate the PID controller can change quickly.
 @dev Like a Curve LiquidityGauge extra-reward (no boost), but instead of funding

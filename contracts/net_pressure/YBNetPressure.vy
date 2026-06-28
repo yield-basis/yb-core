@@ -1,6 +1,8 @@
 # @version 0.4.3
 """
 @title YBNetPressure
+@author Yield Basis
+@license GNU Affero General Public License v3.0
 @notice Computes the crvUSD "net pressure" of a YB market: the AMM's debt minus
         the amount of crvUSD sitting inside the Curve LP tokens the YB AMM holds.
 

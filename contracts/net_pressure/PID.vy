@@ -2,7 +2,7 @@
 """
 @title PID (net-pressure incentive controller)
 @author Yield Basis
-@license Copyright (c) 2025
+@license GNU Affero General Public License v3.0
 @notice Converts LT fees into a crvUSD reserve and runs a PID control loop on the
         aggregate crvUSD net pressure of a DAO-selected set of YB pools. The output
         is a crvUSD/second reward rate set on a FastGauge, which incentivizes

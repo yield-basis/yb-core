@@ -6,7 +6,8 @@
         stable, low-risk savings yield that approximates the crvUSD risk premium.
 @dev Swappable: the PID stores the getter address and the DAO can replace it with
      a different source. Only `rate()` is part of the interface other contracts use.
-@license Copyright (c) 2025
+@author Yield Basis
+@license GNU Affero General Public License v3.0
 """
 
 
