@@ -39,4 +39,6 @@ def rate() -> uint256:
          and the simple APR is that * SECONDS_PER_YEAR, rescaled RAY -> 1e18 (//1e9).
     """
     ssr: uint256 = staticcall SUSDS_TOKEN.ssr()
+    if ssr <= RAY:
+        return 0  # 0% (or a degenerate source) -> no rate, never underflow-revert
     return (ssr - RAY) * SECONDS_PER_YEAR // (RAY // PRECISION)

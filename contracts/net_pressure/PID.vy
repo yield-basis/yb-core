@@ -143,8 +143,9 @@ def _convert_fees():
         if asset_out == 0:
             continue
         # crvUSD out target from the EMA price, discounted by 1.5x the pool fee.
-        # pool.fee() is scaled to FEE_DENOM (1e10); discount is rescaled to 1e18.
-        discount: uint256 = self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM
+        # pool.fee() is scaled to FEE_DENOM (1e10); discount is rescaled to 1e18 and
+        # capped at PRECISION so a large multiplier/fee floors min_dy at 0, not underflow.
+        discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
         min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
         assert extcall asset.approve(pool.address, asset_out, default_return_value=True)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)

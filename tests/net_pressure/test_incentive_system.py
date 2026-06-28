@@ -146,6 +146,15 @@ def test_market_rate_getter():
     assert 0.03 * 1e18 < rate < 0.05 * 1e18
 
 
+def test_market_rate_getter_zero_rate_no_underflow():
+    # ssr == RAY (0% rate) and ssr < RAY (degenerate) must return 0, not revert.
+    susds = boa.loads(SUSDS_MOCK, 10**27)  # constructor requires ssr >= RAY
+    getter = boa.load("contracts/net_pressure/MarketRateGetter.vy", susds.address)
+    assert getter.rate() == 0                       # ssr == RAY
+    susds.eval("self.ssr = 10**27 - 1")             # below RAY
+    assert getter.rate() == 0                       # no underflow revert
+
+
 # --- FastGauge ---------------------------------------------------------------
 
 @pytest.fixture
