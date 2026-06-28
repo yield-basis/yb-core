@@ -48,6 +48,14 @@ fee_distributor: public(FeeDistributor)
 
 @deploy
 def __init__(fee_distributor: FeeDistributor, pid: address, split_fraction: uint256, owner: address):
+    """
+    @notice Deploy the splitter.
+    @param fee_distributor The veYB FeeDistributor that receives the non-PID share
+                           and whose token set defines the LT tokens to split.
+    @param pid The PID controller that receives the split-off reserve share.
+    @param split_fraction Fraction (1e18) of each LT balance routed to the PID.
+    @param owner DAO address that owns the configuration.
+    """
     ownable.__init__()
     ownable._transfer_ownership(owner)
     assert split_fraction <= PRECISION, "fraction > 1"
@@ -91,9 +99,12 @@ def trigger():
 
 @internal
 def _check_fee_distributor(fd: FeeDistributor):
-    # Sanity-check the address really is a FeeDistributor: fill_epochs() is
-    # permissionless and a no-op when no new tokens arrived, so calling it here
-    # just reverts if the target doesn't implement the interface.
+    """
+    @notice Sanity-check that `fd` really is a FeeDistributor.
+    @dev fill_epochs() is permissionless and a no-op when no new tokens arrived, so
+         calling it here just reverts if the target doesn't implement the interface.
+    @param fd Candidate FeeDistributor to validate.
+    """
     extcall fd.fill_epochs()
 
 
@@ -102,6 +113,7 @@ def set_split_fraction(fraction: uint256):
     """
     @notice Set the fraction (1e18) of incoming LT fees routed to the PID.
     @dev DAO only. Must be <= 1e18.
+    @param fraction New split fraction, 1e18 == 100%.
     """
     ownable._check_owner()
     assert fraction <= PRECISION, "fraction > 1"
@@ -114,6 +126,8 @@ def set_destinations(pid: address, fee_distributor: FeeDistributor):
     """
     @notice Set the PID reserve and FeeDistributor destinations.
     @dev DAO only. Sanity-checks the FeeDistributor by exercising fill_epochs().
+    @param pid New PID controller receiving the split-off share.
+    @param fee_distributor New FeeDistributor receiving the remainder.
     """
     ownable._check_owner()
     self._check_fee_distributor(fee_distributor)
@@ -127,6 +141,9 @@ def recover(token: IERC20, amount: uint256, to: address):
     """
     @notice Sweep any tokens held by this contract out to `to`.
     @dev DAO only.
+    @param token Token to sweep.
+    @param amount Amount to transfer.
+    @param to Recipient.
     """
     ownable._check_owner()
     assert extcall token.transfer(to, amount, default_return_value=True)

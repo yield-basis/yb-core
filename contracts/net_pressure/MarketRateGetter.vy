@@ -26,6 +26,10 @@ SUSDS_TOKEN: public(immutable(SUSDS))
 
 @deploy
 def __init__(susds: SUSDS):
+    """
+    @notice Deploy a getter reading the Sky Savings Rate from `susds`.
+    @param susds The sUSDS (Savings USDS) token exposing ssr().
+    """
     SUSDS_TOKEN = susds
     # Sanity-check the source on deploy (reverts if ssr() is missing/below RAY).
     assert staticcall susds.ssr() >= RAY, "Bad ssr"
@@ -38,6 +42,8 @@ def rate() -> uint256:
     @notice Annualized (simple) market rate as a 1e18 fraction, e.g. 0.0354e18.
     @dev ssr is a per-second factor in RAY; per-second fraction is (ssr - RAY)/RAY,
          and the simple APR is that * SECONDS_PER_YEAR, rescaled RAY -> 1e18 (//1e9).
+         Returns 0 for ssr <= RAY (0% / degenerate source).
+    @return Simple APR as a 1e18 fraction.
     """
     ssr: uint256 = staticcall SUSDS_TOKEN.ssr()
     if ssr <= RAY:

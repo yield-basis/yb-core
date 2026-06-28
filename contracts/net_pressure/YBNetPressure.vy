@@ -100,9 +100,12 @@ L: constant(uint256) = 2
 @internal
 @view
 def _assert_not_reentrant(amm: LevAMM):
-    # Read-only reentrancy guard, mirroring YBLendingOracle: probe the AMM's
-    # @nonreentrant @view lock (reverts if held). The pool side self-guards -
-    # price_oracle()/price_scale() are themselves @nonreentrant.
+    """
+    @notice Read-only reentrancy guard: revert if the AMM lock is held.
+    @dev Mirrors YBLendingOracle: probe the AMM's @nonreentrant @view lock. The pool
+         side self-guards - price_oracle()/price_scale() are themselves @nonreentrant.
+    @param amm The market's LevAMM whose lock is probed.
+    """
     ok: bool = raw_call(
         amm.address, method_id("check_nonreentrant()"),
         max_outsize=0, is_static_call=True, revert_on_failure=False)
@@ -113,7 +116,11 @@ def _assert_not_reentrant(amm: LevAMM):
 @view
 def _pool_metrics(pool: Pool) -> PoolMetrics:
     """
-    @return PoolMetrics (x_frac, lp_price_oracle, lp_price_ps), all 1e18-scaled.
+    @notice Oracle-priced metrics for the cryptopool, all 1e18-scaled.
+    @param pool The Curve twocrypto pool (crvUSD/asset).
+    @return PoolMetrics(x_frac, lp_price_oracle, lp_price_ps): crvUSD value fraction
+            of the LP at price_oracle, the LP price implied by price_oracle, and the
+            LP price from price_scale (== PRICE_ORACLE_CONTRACT / agg).
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
@@ -142,6 +149,8 @@ def crvusd_value_fraction(lt: LT) -> uint256:
     """
     @notice crvUSD value fraction (1e18) of the LP at the pool's price_oracle.
     @dev Component of net_pressure_oracle, exposed for monitoring/testing.
+    @param lt The YB LT (market) contract.
+    @return crvUSD value fraction of the LP, 1e18 == 100%.
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
@@ -156,6 +165,8 @@ def pool_tvl_oracle(lt: LT) -> uint256:
     @notice Manipulation-resistant cryptopool TVL (crvUSD), valued at price_oracle.
     @dev = lp_price_oracle * totalSupply. Used as the normalization base (half via
          /2) for the net-pressure controller; spot balances would be manipulable.
+    @param lt The YB LT (market) contract.
+    @return Cryptopool TVL in crvUSD (1e18).
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()

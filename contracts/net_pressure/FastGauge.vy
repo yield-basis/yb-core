@@ -76,6 +76,12 @@ claimable: public(HashMap[address, uint256])  # settled, unclaimed crvUSD per us
 
 @deploy
 def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
+    """
+    @notice Deploy a gauge staking `lp_token` and streaming `reward_token`.
+    @param lp_token The Curve stableswap LP token staked here (the vault asset).
+    @param reward_token The streamed reward token (crvUSD).
+    @param owner DAO address that can set the PID.
+    """
     erc4626.__init__("YB FastGauge", "fg", lp_token, MIN_SHARES_DECIMALS, "Just say no", "to EIP712")
     erc4626.ownable.owner = owner
     LP_TOKEN = lp_token
@@ -88,7 +94,10 @@ def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
 @internal
 @view
 def _available_from_pid() -> uint256:
-    # What the gauge can actually pull right now (cap the stream by the reserve).
+    """
+    @notice crvUSD the gauge can pull from the PID right now (caps the stream).
+    @return min(PID balance, PID->gauge allowance), or 0 if no PID is set.
+    """
     pid: address = self.pid
     if pid == empty(address):
         return 0
@@ -100,8 +109,13 @@ def _available_from_pid() -> uint256:
 
 @internal
 def _checkpoint(user: address):
-    """Settle the global integral (pulling crvUSD from the PID) and the user's
-    claimable balance. Must run BEFORE any change to balances/totalSupply."""
+    """
+    @notice Settle the global reward integral (pulling crvUSD from the PID) and the
+            user's claimable balance.
+    @dev Must run BEFORE any change to balances/totalSupply. Pass empty(address) to
+         settle only the global integral.
+    @param user User whose claimable balance to settle (empty to skip).
+    """
     integral: uint256 = self.reward_integral
     supply: uint256 = erc4626.erc20.totalSupply
 
@@ -125,8 +139,13 @@ def _checkpoint(user: address):
 @external
 @view
 def claimable_reward(user: address) -> uint256:
-    """crvUSD currently claimable by `user`, projected to now and clamped by what
-    the PID could actually supply (so it matches what claim() would pay)."""
+    """
+    @notice crvUSD currently claimable by `user`.
+    @dev Projected to now and clamped by what the PID could actually supply, so it
+         matches what claim() would pay.
+    @param user Account to query.
+    @return Claimable crvUSD amount.
+    """
     integral: uint256 = self.reward_integral
     supply: uint256 = erc4626.erc20.totalSupply
     if block.timestamp > self.last_update and supply > 0 and self.reward_rate > 0:
@@ -141,6 +160,8 @@ def claimable_reward(user: address) -> uint256:
 def claim(user: address = msg.sender) -> uint256:
     """
     @notice Claim crvUSD rewards earned by `user`, paid from the gauge's balance.
+    @param user Account to claim for (rewards are sent to this address).
+    @return Amount of crvUSD paid out.
     """
     self._checkpoint(user)
     amount: uint256 = self.claimable[user]
@@ -158,6 +179,7 @@ def set_reward_rate(rate: uint256):
     """
     @notice Set the crvUSD/second stream rate. Callable only by the PID.
     @dev Settles the global integral at the old rate first.
+    @param rate New stream rate in crvUSD per second.
     """
     assert msg.sender == self.pid, "Only PID"
     self._checkpoint(empty(address))
@@ -169,6 +191,7 @@ def set_reward_rate(rate: uint256):
 def set_pid(pid: address):
     """
     @notice Set the PID controller (reward source and rate setter). DAO only.
+    @param pid New PID controller address.
     """
     erc4626.ownable._check_owner()
     self._checkpoint(empty(address))
@@ -183,7 +206,10 @@ def set_pid(pid: address):
 def deposit(assets: uint256, receiver: address) -> uint256:
     """
     @notice Stake `assets` LP tokens, minting gauge shares to `receiver`.
-    @dev Checkpoints rewards before the balance change. @return shares minted.
+    @dev Checkpoints rewards before the balance change.
+    @param assets Amount of LP tokens to stake.
+    @param receiver Recipient of the minted gauge shares.
+    @return Gauge shares minted.
     """
     assert assets <= erc4626._max_deposit(receiver), "erc4626: deposit more than maximum"
     shares: uint256 = erc4626._preview_deposit(assets)
@@ -198,7 +224,10 @@ def deposit(assets: uint256, receiver: address) -> uint256:
 def mint(shares: uint256, receiver: address) -> uint256:
     """
     @notice Mint `shares` gauge tokens to `receiver` by staking the required LP.
-    @dev Checkpoints rewards before the balance change. @return assets pulled.
+    @dev Checkpoints rewards before the balance change.
+    @param shares Amount of gauge shares to mint.
+    @param receiver Recipient of the minted gauge shares.
+    @return LP tokens pulled from the caller.
     """
     assert shares <= erc4626._max_mint(receiver), "erc4626: mint more than maximum"
     assets: uint256 = erc4626._preview_mint(shares)
@@ -213,7 +242,11 @@ def mint(shares: uint256, receiver: address) -> uint256:
 def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     """
     @notice Unstake `assets` LP to `receiver`, burning `owner`'s gauge shares.
-    @dev Checkpoints rewards before the balance change. @return shares burned.
+    @dev Checkpoints rewards before the balance change.
+    @param assets Amount of LP tokens to withdraw.
+    @param receiver Recipient of the LP tokens.
+    @param owner Account whose gauge shares are burned (allowance applies if not caller).
+    @return Gauge shares burned.
     """
     assert assets <= erc4626._max_withdraw(owner), "erc4626: withdraw more than maximum"
     shares: uint256 = erc4626._preview_withdraw(assets)
@@ -228,7 +261,11 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
 def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     """
     @notice Burn `owner`'s `shares` gauge tokens, returning LP to `receiver`.
-    @dev Checkpoints rewards before the balance change. @return assets returned.
+    @dev Checkpoints rewards before the balance change.
+    @param shares Amount of gauge shares to burn.
+    @param receiver Recipient of the LP tokens.
+    @param owner Account whose gauge shares are burned (allowance applies if not caller).
+    @return LP tokens returned.
     """
     assert shares <= erc4626._max_redeem(owner), "erc4626: redeem more than maximum"
     assets: uint256 = erc4626._preview_redeem(shares)
@@ -243,6 +280,9 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
 def transfer(to: address, amount: uint256) -> bool:
     """
     @notice ERC20 transfer of gauge shares; checkpoints rewards for both parties.
+    @param to Recipient of the gauge shares.
+    @param amount Amount of gauge shares to transfer.
+    @return True on success.
     """
     self._checkpoint(msg.sender)
     self._checkpoint(to)
@@ -255,6 +295,10 @@ def transfer(to: address, amount: uint256) -> bool:
 def transferFrom(owner: address, to: address, amount: uint256) -> bool:
     """
     @notice ERC20 transferFrom of gauge shares; checkpoints rewards for both parties.
+    @param owner Account to move gauge shares from (allowance applies).
+    @param to Recipient of the gauge shares.
+    @param amount Amount of gauge shares to transfer.
+    @return True on success.
     """
     self._checkpoint(owner)
     self._checkpoint(to)

@@ -111,6 +111,14 @@ last_ts: public(uint256)
 @deploy
 def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
              fee_distributor: FeeDistributor, owner: address):
+    """
+    @notice Deploy the controller with default gains (DAO can retune).
+    @param crvusd The crvUSD token: the reserve and reward asset.
+    @param net_pressure The YBNetPressure oracle (net pressure + oracle TVL).
+    @param market_rate_getter Source of the market rate the offer is quoted against.
+    @param fee_distributor FeeDistributor whose token set lists the LT fees to convert.
+    @param owner DAO address that owns the configuration and reserve.
+    """
     ownable.__init__()
     ownable._transfer_ownership(owner)
     CRVUSD = crvusd
@@ -137,9 +145,12 @@ def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter
 
 @internal
 def _convert_fees():
-    """Convert any held LT fees into crvUSD: withdraw the asset from each LT then
-    swap it to crvUSD in that LT's cryptopool, with min_dy derived from the pool's
-    price_oracle (manipulation-resistant) minus swap_fee_multiplier * pool fee."""
+    """
+    @notice Convert any held LT fees into crvUSD.
+    @dev For each LT in the FeeDistributor token set, withdraw its asset then swap to
+         crvUSD in that LT's cryptopool, with min_dy from the pool's price_oracle
+         (manipulation-resistant) discounted by swap_fee_multiplier * pool fee.
+    """
     token_set: DynArray[address, MAX_TOKENS] = staticcall self.fee_distributor.token_sets(
         staticcall self.fee_distributor.current_token_set())
     for lt_addr: address in token_set:
@@ -166,7 +177,12 @@ def _convert_fees():
 @internal
 @view
 def _signals() -> (uint256, uint256, uint256):
-    """Return (pressure, sink, half_tvl_sum H), all manipulation-resistant."""
+    """
+    @notice Compute the controller's manipulation-resistant inputs.
+    @return pressure - max(0, summed net pressure) / H, 1e18.
+    @return sink - sink-pool TVL / H, 1e18.
+    @return H - sum of half-TVL over the pressure pools (crvUSD), the normalizer.
+    """
     H: uint256 = 0
     net: int256 = 0
     for lt: address in self.pressure_lts:
@@ -237,7 +253,12 @@ def trigger():
 @external
 @view
 def preview_signals() -> (uint256, uint256, uint256):
-    """(pressure, sink, half_tvl_sum) — for monitoring/tuning."""
+    """
+    @notice The controller's current inputs, for monitoring/tuning.
+    @return pressure - max(0, summed net pressure) / H, 1e18.
+    @return sink - sink-pool TVL / H, 1e18.
+    @return H - sum of half-TVL over the pressure pools (crvUSD).
+    """
     return self._signals()
 
 
@@ -245,7 +266,12 @@ def preview_signals() -> (uint256, uint256, uint256):
 
 @external
 def recover(token: IERC20, amount: uint256, to: address):
-    """@notice Sweep the crvUSD reserve (or any token) out, e.g. by DAO vote."""
+    """
+    @notice Sweep the crvUSD reserve (or any token) out, e.g. by DAO vote.
+    @param token Token to sweep.
+    @param amount Amount to transfer.
+    @param to Recipient.
+    """
     ownable._check_owner()
     assert extcall token.transfer(to, amount, default_return_value=True)
     log Recover(token=token.address, amount=amount)
@@ -256,6 +282,7 @@ def set_pressure_lts(lts: DynArray[address, MAX_POOLS]):
     """
     @notice Set the LT markets whose net pressure is summed by the controller.
     @dev DAO only.
+    @param lts The LT (market) addresses to aggregate net pressure over.
     """
     ownable._check_owner()
     self.pressure_lts = lts
@@ -264,7 +291,12 @@ def set_pressure_lts(lts: DynArray[address, MAX_POOLS]):
 
 @external
 def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
-    """@notice Set the FastGauge + its sink pool, and approve crvUSD pulls."""
+    """
+    @notice Set the FastGauge + its sink pool, and approve crvUSD pulls.
+    @dev DAO only. Grants the gauge an unlimited crvUSD allowance to pull rewards.
+    @param gauge The FastGauge whose stream rate this controller sets.
+    @param sink_pool The Curve stableswap pool whose TVL is the controller's sink.
+    """
     ownable._check_owner()
     self.gauge = gauge
     self.sink_pool = sink_pool
@@ -276,9 +308,11 @@ def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
 def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
                 fee_distributor: FeeDistributor):
     """
-    @notice Set the data sources: net-pressure oracle, market-rate getter, and the
-            FeeDistributor whose token set defines the LT fees to convert.
+    @notice Set the controller's data sources.
     @dev DAO only.
+    @param net_pressure The YBNetPressure oracle (net pressure + oracle TVL).
+    @param market_rate_getter Source of the market rate the offer is quoted against.
+    @param fee_distributor FeeDistributor whose token set lists the LT fees to convert.
     """
     ownable._check_owner()
     self.net_pressure = net_pressure
@@ -291,14 +325,16 @@ def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateG
 def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               max_integral: int256, sink_cap: int256, dead_band: uint256, sink_per_offer: uint256):
     """
-    @notice Set the controller gains and clamps (all 1e18-scaled):
-            feedforward_gain - proportional gain on raw pressure;
-            kp/ki/kd - PID gains on the coverage error (pressure - sink);
-            max_integral - clamp on the integral accumulator (anti-windup);
-            sink_cap - clamp on the target sink;
-            dead_band - offered APR multiple at zero target sink;
-            sink_per_offer - target sink drawn per unit of offer above the dead band.
+    @notice Set the controller gains and clamps (all 1e18-scaled).
     @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0.
+    @param feedforward_gain Proportional gain on the raw pressure.
+    @param kp Proportional gain on the coverage error (pressure - sink).
+    @param ki Integral gain on the coverage error.
+    @param kd Derivative gain on rising pressure.
+    @param max_integral Clamp on the integral accumulator (anti-windup).
+    @param sink_cap Clamp on the target sink.
+    @param dead_band Offered APR multiple at zero target sink.
+    @param sink_per_offer Target sink drawn per unit of offer above the dead band.
     """
     ownable._check_owner()
     assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0
@@ -316,10 +352,12 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
 @external
 def set_execution_params(swap_fee_multiplier: uint256, min_interval: uint256, dust_floor: uint256):
     """
-    @notice Set fee-conversion slippage multiplier (1e18; min_dy = oracle*(1 -
-            multiplier*pool_fee)), the minimum seconds between controller steps,
-            and the LT-balance dust floor below which conversion is skipped.
+    @notice Set fee-conversion and cadence parameters.
     @dev DAO only.
+    @param swap_fee_multiplier Slippage multiplier (1e18); min_dy = oracle*(1 -
+           multiplier*pool_fee).
+    @param min_interval Minimum seconds between controller steps.
+    @param dust_floor LT balance below which fee conversion is skipped.
     """
     ownable._check_owner()
     self.swap_fee_multiplier = swap_fee_multiplier
