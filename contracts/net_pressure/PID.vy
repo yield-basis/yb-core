@@ -30,6 +30,12 @@ initializes: ownable
 exports: (ownable.owner, ownable.transfer_ownership)
 
 
+# Mirrors YBNetPressure.PressureTvl (returned by net_pressure_and_tvl).
+struct PressureTvl:
+    net_pressure: int256
+    pool_tvl: uint256
+
+
 interface CryptoPool:
     def exchange(i: uint256, j: uint256, dx: uint256, min_dy: uint256, receiver: address) -> uint256: nonpayable
     def price_oracle() -> uint256: view
@@ -42,8 +48,7 @@ interface LT:
     def CRYPTOPOOL() -> CryptoPool: view
 
 interface NetPressureOracle:
-    def net_pressure_oracle(lt: address) -> int256: view
-    def pool_tvl_oracle(lt: address) -> uint256: view
+    def net_pressure_and_tvl(lt: address) -> PressureTvl: view
 
 interface MarketRateGetter:
     def rate() -> uint256: view
@@ -76,7 +81,6 @@ event Recover:
 struct Signals:
     pressure: uint256   # max(0, summed net pressure) / half_tvl, 1e18
     sink: uint256       # sink-pool TVL / half_tvl, 1e18
-    half_tvl: uint256   # sum of half-TVL over the pressure pools (crvUSD), the normalizer
 
 
 PRECISION: constant(uint256) = 10**18
@@ -204,18 +208,20 @@ def _convert_fees():
 def _signals() -> Signals:
     """
     @notice Compute the controller's manipulation-resistant inputs.
-    @return Signals(pressure, sink, half_tvl), all as documented on the struct.
+    @return Signals(pressure, sink), the relative (per half-TVL) controller inputs.
     """
     s: Signals = empty(Signals)
+    half_tvl: uint256 = 0   # normalizer (sum of half-TVL); not needed beyond this
     net: int256 = 0
     for lt: address in self.pressure_lts:
-        s.half_tvl += (staticcall self.net_pressure.pool_tvl_oracle(lt)) // 2
-        net += staticcall self.net_pressure.net_pressure_oracle(lt)
-    assert s.half_tvl > 0, "No pools"
+        pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt)  # one call, shared work
+        half_tvl += pt.pool_tvl // 2
+        net += pt.net_pressure
+    assert half_tvl > 0, "No pools"
     if net > 0:
-        s.pressure = convert(net, uint256) * PRECISION // s.half_tvl
+        s.pressure = convert(net, uint256) * PRECISION // half_tvl
     sink_abs: uint256 = (staticcall self.sink_pool.totalSupply()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
-    s.sink = sink_abs * PRECISION // s.half_tvl
+    s.sink = sink_abs * PRECISION // half_tvl
     return s
 
 
@@ -274,7 +280,7 @@ def trigger():
 def preview_signals() -> Signals:
     """
     @notice The controller's current inputs, for monitoring/tuning.
-    @return Signals(pressure, sink, half_tvl), all as documented on the struct.
+    @return Signals(pressure, sink), the relative (per half-TVL) controller inputs.
     """
     return self._signals()
 

@@ -56,6 +56,9 @@ def trigger():
 
 NP_MOCK = """
 # pragma version 0.4.3
+struct PressureTvl:
+    net_pressure: int256
+    pool_tvl: uint256
 net: public(int256)
 tvl: public(uint256)
 @deploy
@@ -68,12 +71,8 @@ def set(n: int256, t: uint256):
     self.tvl = t
 @external
 @view
-def net_pressure_oracle(lt: address) -> int256:
-    return self.net
-@external
-@view
-def pool_tvl_oracle(lt: address) -> uint256:
-    return self.tvl
+def net_pressure_and_tvl(lt: address) -> PressureTvl:
+    return PressureTvl(net_pressure=self.net, pool_tvl=self.tvl)
 """
 
 MR_MOCK = """

@@ -41,7 +41,7 @@ LTs ──admin-fee LT shares──▶ FeeSplitter ──(1−frac)──▶ Fee
 | [`PID.vy`](../../contracts/net_pressure/PID.vy) | Converts the LT fees it receives into a crvUSD reserve, runs the control loop on aggregate net pressure, and sets the FastGauge stream rate. Holds the reserve. |
 | [`FastGauge.vy`](../../contracts/net_pressure/FastGauge.vy) | ERC4626 staking gauge over a Curve **stableswap** LP (the sink). Streams a single reward (crvUSD) at a rate only the PID sets; pulls crvUSD from the PID at checkpoint. |
 | [`MarketRateGetter.vy`](../../contracts/net_pressure/MarketRateGetter.vy) | Reports the "market rate" the offer is quoted against. First implementation reads the Sky Savings Rate (sUSDS). Swappable by the DAO. |
-| [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and oracle-priced pool TVL (`pool_tvl_oracle`) used as the controller's normalizer. |
+| [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and oracle-priced pool TVL (`pool_tvl_oracle`); `net_pressure_and_tvl` returns both in one call (sharing the `lp_oracle_2` solve) for the controller's per-pool loop. |
 
 ## Manipulation resistance
 
@@ -64,8 +64,8 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
 the controller. All math is 1e18 fixed point; `dt` is in years.
 
 ```
-pressure     = max(0, Σ net_pressure_oracle(lt)) / H        # H = Σ pool_tvl_oracle(lt)/2
-sink         = sink_pool_TVL / H
+pressure     = max(0, Σ net_pressure(lt)) / H               # via net_pressure_and_tvl(lt) per pool
+sink         = sink_pool_TVL / H                            # H = Σ pool_tvl(lt) / 2
 error        = pressure − sink                              # coverage gap
 integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
 d_pressure   = max(0, d(pressure)/dt)                       # derivative on rising pressure only

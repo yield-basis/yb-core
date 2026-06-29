@@ -90,6 +90,10 @@ struct PoolMetrics:
     lp_price_oracle: uint256  # LP price implied by price_oracle (lp_oracle_2)
     lp_price_ps: uint256      # LP price from price_scale (== PRICE_ORACLE_CONTRACT / agg)
 
+struct PressureTvl:
+    net_pressure: int256      # debt - crvUSD in LP (crvUSD); positive => buy pressure
+    pool_tvl: uint256         # oracle-priced cryptopool TVL (crvUSD)
+
 
 PRECISION: constant(uint256) = 10**18
 # The whole system fixes LEVERAGE = 2 * 10**18 (AMM.__init__, Factory,
@@ -158,40 +162,32 @@ def crvusd_value_fraction(lt: LT) -> uint256:
     return self._pool_metrics(pool).x_frac
 
 
-@external
+@internal
 @view
-def pool_tvl_oracle(lt: LT) -> uint256:
+def _pool_tvl(pool: Pool, m: PoolMetrics) -> uint256:
     """
-    @notice Manipulation-resistant cryptopool TVL (crvUSD), valued at price_oracle.
-    @dev = lp_price_oracle * totalSupply. Used as the normalization base (half via
-         /2) for the net-pressure controller; spot balances would be manipulable.
-    @param lt The YB LT (market) contract.
+    @notice Oracle-priced cryptopool TVL (crvUSD) = lp_price_oracle * totalSupply.
+    @param pool The Curve twocrypto pool.
+    @param m Its already-computed metrics (avoids recomputing the lp_oracle_2 solve).
     @return Cryptopool TVL in crvUSD (1e18).
     """
-    amm: LevAMM = staticcall lt.amm()
-    pool: Pool = staticcall lt.CRYPTOPOOL()
-    self._assert_not_reentrant(amm)
-    return self._pool_metrics(pool).lp_price_oracle * (staticcall pool.totalSupply()) // PRECISION
+    return m.lp_price_oracle * (staticcall pool.totalSupply()) // PRECISION
 
 
-@external
+@internal
 @view
-def net_pressure_oracle(lt: LT) -> int256:
+def _net_pressure(amm: LevAMM, m: PoolMetrics) -> int256:
     """
-    @notice Manipulation-resistant net pressure (debt - crvUSD in LP).
+    @notice Manipulation-resistant net pressure (debt - crvUSD in LP) given metrics.
     @dev When get_state()/get_x0 revert (AMM too imbalanced to be tradable) the
          bonding-curve slide is unavailable, so fall back to the AMM's raw
          collateral/debt. The Curve pool never reverts, so the crvUSD split stays
          oracle-based (non-manipulable) in both branches.
-    @param lt The YB LT (market) contract.
+    @param amm The market's LevAMM.
+    @param m The pool's already-computed metrics.
     @return Net pressure; positive => crvUSD buy pressure on unwind.
     """
-    amm: LevAMM = staticcall lt.amm()
-    pool: Pool = staticcall lt.CRYPTOPOOL()
-    self._assert_not_reentrant(amm)
-
     p_o_amm: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
-    m: PoolMetrics = self._pool_metrics(pool)
 
     # x0 / get_x0 revert when the AMM is too imbalanced for the leverage math.
     gas_before: uint256 = msg.gas
@@ -226,6 +222,52 @@ def net_pressure_oracle(lt: LT) -> int256:
     # net = calc_debt - crvUSD_in_LP;  crvUSD_in_LP = calc_coll_value * x_frac
     crvusd_in_lp: uint256 = calc_coll_value * m.x_frac // PRECISION
     return convert(calc_debt, int256) - convert(crvusd_in_lp, int256)
+
+
+@external
+@view
+def pool_tvl_oracle(lt: LT) -> uint256:
+    """
+    @notice Manipulation-resistant cryptopool TVL (crvUSD), valued at price_oracle.
+    @dev = lp_price_oracle * totalSupply; spot balances would be manipulable.
+    @param lt The YB LT (market) contract.
+    @return Cryptopool TVL in crvUSD (1e18).
+    """
+    amm: LevAMM = staticcall lt.amm()
+    pool: Pool = staticcall lt.CRYPTOPOOL()
+    self._assert_not_reentrant(amm)
+    return self._pool_tvl(pool, self._pool_metrics(pool))
+
+
+@external
+@view
+def net_pressure_oracle(lt: LT) -> int256:
+    """
+    @notice Manipulation-resistant net pressure (debt - crvUSD in LP).
+    @param lt The YB LT (market) contract.
+    @return Net pressure; positive => crvUSD buy pressure on unwind.
+    """
+    amm: LevAMM = staticcall lt.amm()
+    pool: Pool = staticcall lt.CRYPTOPOOL()
+    self._assert_not_reentrant(amm)
+    return self._net_pressure(amm, self._pool_metrics(pool))
+
+
+@external
+@view
+def net_pressure_and_tvl(lt: LT) -> PressureTvl:
+    """
+    @notice Net pressure and oracle pool TVL in a single call.
+    @dev Computes the (expensive) lp_oracle_2 pool metrics once and reuses them for
+         both, so the controller's per-pool aggregation doesn't pay for it twice.
+    @param lt The YB LT (market) contract.
+    @return PressureTvl(net_pressure, pool_tvl); both manipulation-resistant, crvUSD.
+    """
+    amm: LevAMM = staticcall lt.amm()
+    pool: Pool = staticcall lt.CRYPTOPOOL()
+    self._assert_not_reentrant(amm)
+    m: PoolMetrics = self._pool_metrics(pool)
+    return PressureTvl(net_pressure=self._net_pressure(amm, m), pool_tvl=self._pool_tvl(pool, m))
 
 
 @external
