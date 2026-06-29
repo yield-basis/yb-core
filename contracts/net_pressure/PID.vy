@@ -73,6 +73,12 @@ event Recover:
     amount: uint256
 
 
+struct Signals:
+    pressure: uint256   # max(0, summed net pressure) / half_tvl, 1e18
+    sink: uint256       # sink-pool TVL / half_tvl, 1e18
+    half_tvl: uint256   # sum of half-TVL over the pressure pools (crvUSD), the normalizer
+
+
 PRECISION: constant(uint256) = 10**18
 FEE_DENOM: constant(uint256) = 10**10   # Curve pool fee() is scaled to 1e10
 SECONDS_PER_YEAR: constant(uint256) = 365 * 86400
@@ -195,25 +201,22 @@ def _convert_fees():
 
 @internal
 @view
-def _signals() -> (uint256, uint256, uint256):
+def _signals() -> Signals:
     """
     @notice Compute the controller's manipulation-resistant inputs.
-    @return pressure - max(0, summed net pressure) / H, 1e18.
-    @return sink - sink-pool TVL / H, 1e18.
-    @return H - sum of half-TVL over the pressure pools (crvUSD), the normalizer.
+    @return Signals(pressure, sink, half_tvl), all as documented on the struct.
     """
-    H: uint256 = 0
+    s: Signals = empty(Signals)
     net: int256 = 0
     for lt: address in self.pressure_lts:
-        H += (staticcall self.net_pressure.pool_tvl_oracle(lt)) // 2
+        s.half_tvl += (staticcall self.net_pressure.pool_tvl_oracle(lt)) // 2
         net += staticcall self.net_pressure.net_pressure_oracle(lt)
-    assert H > 0, "No pools"
-    pressure: uint256 = 0
+    assert s.half_tvl > 0, "No pools"
     if net > 0:
-        pressure = convert(net, uint256) * PRECISION // H
+        s.pressure = convert(net, uint256) * PRECISION // s.half_tvl
     sink_abs: uint256 = (staticcall self.sink_pool.totalSupply()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
-    sink: uint256 = sink_abs * PRECISION // H
-    return (pressure, sink, H)
+    s.sink = sink_abs * PRECISION // s.half_tvl
+    return s
 
 
 @external
@@ -229,25 +232,22 @@ def trigger():
     if block.timestamp < self.last_ts + max(self.min_interval, 1):
         return  # too soon to step the controller; fees still converted above
 
-    pressure: uint256 = 0
-    sink: uint256 = 0
-    H: uint256 = 0
-    pressure, sink, H = self._signals()
+    s: Signals = self._signals()
 
     dt_years: int256 = convert((block.timestamp - self.last_ts) * PRECISION // SECONDS_PER_YEAR, int256)
-    error: int256 = convert(pressure, int256) - convert(sink, int256)
+    error: int256 = convert(s.pressure, int256) - convert(s.sink, int256)
 
     integral: int256 = self.integral + error * dt_years // convert(PRECISION, int256)
     integral = max(0, min(integral, self.max_integral))
     self.integral = integral
 
     d_pressure: int256 = 0
-    if pressure > self.prev_pressure:
-        d_pressure = convert(pressure - self.prev_pressure, int256) * convert(PRECISION, int256) // dt_years
-    self.prev_pressure = pressure
+    if s.pressure > self.prev_pressure:
+        d_pressure = convert(s.pressure - self.prev_pressure, int256) * convert(PRECISION, int256) // dt_years
+    self.prev_pressure = s.pressure
 
     p18: int256 = convert(PRECISION, int256)
-    target: int256 = (self.feedforward_gain * convert(pressure, int256) // p18
+    target: int256 = (self.feedforward_gain * convert(s.pressure, int256) // p18
                       + self.kp * error // p18
                       + self.ki * integral // p18
                       + self.kd * d_pressure // p18)
@@ -266,17 +266,15 @@ def trigger():
 
     extcall self.gauge.set_reward_rate(rate)
     self.last_ts = block.timestamp
-    log Trigger(pressure=pressure, sink=sink, bonus_apr=bonus_apr, rate=rate)
+    log Trigger(pressure=s.pressure, sink=s.sink, bonus_apr=bonus_apr, rate=rate)
 
 
 @external
 @view
-def preview_signals() -> (uint256, uint256, uint256):
+def preview_signals() -> Signals:
     """
     @notice The controller's current inputs, for monitoring/tuning.
-    @return pressure - max(0, summed net pressure) / H, 1e18.
-    @return sink - sink-pool TVL / H, 1e18.
-    @return H - sum of half-TVL over the pressure pools (crvUSD).
+    @return Signals(pressure, sink, half_tvl), all as documented on the struct.
     """
     return self._signals()
 
