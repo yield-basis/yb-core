@@ -92,7 +92,7 @@ struct PoolMetrics:
 
 struct PressureTvl:
     net_pressure: int256      # debt - crvUSD in LP (crvUSD); positive => buy pressure
-    pool_tvl: uint256         # oracle-priced cryptopool TVL (crvUSD)
+    amm_tvl: uint256          # oracle-priced value of the LP the AMM holds (crvUSD)
 
 
 PRECISION: constant(uint256) = 10**18
@@ -164,14 +164,17 @@ def crvusd_value_fraction(lt: LT) -> uint256:
 
 @internal
 @view
-def _pool_tvl(pool: Pool, m: PoolMetrics) -> uint256:
+def _amm_tvl(amm: LevAMM, m: PoolMetrics) -> uint256:
     """
-    @notice Oracle-priced cryptopool TVL (crvUSD) = lp_price_oracle * totalSupply.
-    @param pool The Curve twocrypto pool.
-    @param m Its already-computed metrics (avoids recomputing the lp_oracle_2 solve).
-    @return Cryptopool TVL in crvUSD (1e18).
+    @notice Oracle-priced value of the LP the AMM holds (crvUSD).
+    @dev = lp_price_oracle * amm.collateral_amount(). Uses the AMM's *own* LP slice,
+         not the whole pool's totalSupply, so it matches net_pressure_oracle (which
+         is also the AMM's slice) and is the correct normalizer for the controller.
+    @param amm The market's LevAMM.
+    @param m The pool's already-computed metrics (avoids redoing the lp_oracle_2 solve).
+    @return Value of the AMM's collateral LP in crvUSD (1e18).
     """
-    return m.lp_price_oracle * (staticcall pool.totalSupply()) // PRECISION
+    return m.lp_price_oracle * (staticcall amm.collateral_amount()) // PRECISION
 
 
 @internal
@@ -226,17 +229,18 @@ def _net_pressure(amm: LevAMM, m: PoolMetrics) -> int256:
 
 @external
 @view
-def pool_tvl_oracle(lt: LT) -> uint256:
+def amm_tvl_oracle(lt: LT) -> uint256:
     """
-    @notice Manipulation-resistant cryptopool TVL (crvUSD), valued at price_oracle.
-    @dev = lp_price_oracle * totalSupply; spot balances would be manipulable.
+    @notice Oracle-priced value of the LP the AMM holds (crvUSD), at price_oracle.
+    @dev = lp_price_oracle * amm.collateral_amount() (the AMM's slice, not the whole
+         pool); the controller's normalizer. spot balances would be manipulable.
     @param lt The YB LT (market) contract.
-    @return Cryptopool TVL in crvUSD (1e18).
+    @return Value of the AMM's collateral LP in crvUSD (1e18).
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
-    return self._pool_tvl(pool, self._pool_metrics(pool))
+    return self._amm_tvl(amm, self._pool_metrics(pool))
 
 
 @external
@@ -257,17 +261,17 @@ def net_pressure_oracle(lt: LT) -> int256:
 @view
 def net_pressure_and_tvl(lt: LT) -> PressureTvl:
     """
-    @notice Net pressure and oracle pool TVL in a single call.
+    @notice Net pressure and the AMM's oracle-priced LP value in a single call.
     @dev Computes the (expensive) lp_oracle_2 pool metrics once and reuses them for
          both, so the controller's per-pool aggregation doesn't pay for it twice.
     @param lt The YB LT (market) contract.
-    @return PressureTvl(net_pressure, pool_tvl); both manipulation-resistant, crvUSD.
+    @return PressureTvl(net_pressure, amm_tvl); both manipulation-resistant, crvUSD.
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
     m: PoolMetrics = self._pool_metrics(pool)
-    return PressureTvl(net_pressure=self._net_pressure(amm, m), pool_tvl=self._pool_tvl(pool, m))
+    return PressureTvl(net_pressure=self._net_pressure(amm, m), amm_tvl=self._amm_tvl(amm, m))
 
 
 @external

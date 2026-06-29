@@ -41,14 +41,17 @@ LTs ──admin-fee LT shares──▶ FeeSplitter ──(1−frac)──▶ Fee
 | [`PID.vy`](../../contracts/net_pressure/PID.vy) | Converts the LT fees it receives into a crvUSD reserve, runs the control loop on aggregate net pressure, and sets the FastGauge stream rate. Holds the reserve. |
 | [`FastGauge.vy`](../../contracts/net_pressure/FastGauge.vy) | ERC4626 staking gauge over a Curve **stableswap** LP (the sink). Streams a single reward (crvUSD) at a rate only the PID sets; pulls crvUSD from the PID at checkpoint. |
 | [`MarketRateGetter.vy`](../../contracts/net_pressure/MarketRateGetter.vy) | Reports the "market rate" the offer is quoted against. First implementation reads the Sky Savings Rate (sUSDS). Swappable by the DAO. |
-| [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and oracle-priced pool TVL (`pool_tvl_oracle`); `net_pressure_and_tvl` returns both in one call (sharing the `lp_oracle_2` solve) for the controller's per-pool loop. |
+| [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and the oracle-priced value of the AMM's own LP holdings (`amm_tvl_oracle`, the normalizer); `net_pressure_and_tvl` returns both in one call (sharing the `lp_oracle_2` solve) for the controller's per-pool loop. |
 
 ## Manipulation resistance
 
 Every quantity the controller consumes is measured at the pool's `price_oracle`
 (EMA), never from spot balances:
 
-- **Net pressure & pool TVL** come from `YBNetPressure`, which prices the LP via the
+- **Net pressure & the AMM's LP value** (the normalizer) come from `YBNetPressure`,
+  scoped to the AMM's *own* LP holdings (`collateral_amount`), not the whole pool's
+  `totalSupply` — so numerator and denominator are the same YB-position slice. It
+  prices the LP via the
   twocrypto LP oracle at `price_oracle` and slides the AMM along its bonding curve
   using the conserved invariant `x0` (falling back to raw collateral/debt only when
   the AMM is untradable — the Curve pool never reverts, so the crvUSD split stays
@@ -65,7 +68,7 @@ the controller. All math is 1e18 fixed point; `dt` is in years.
 
 ```
 pressure     = max(0, Σ net_pressure(lt)) / H               # via net_pressure_and_tvl(lt) per pool
-sink         = sink_pool_TVL / H                            # H = Σ pool_tvl(lt) / 2
+sink         = sink_pool_TVL / H                            # H = Σ amm_tvl(lt) / 2  (AMM's LP slice)
 error        = pressure − sink                              # coverage gap
 integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
 d_pressure   = max(0, d(pressure)/dt)                       # derivative on rising pressure only

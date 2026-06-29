@@ -58,7 +58,7 @@ NP_MOCK = """
 # pragma version 0.4.3
 struct PressureTvl:
     net_pressure: int256
-    pool_tvl: uint256
+    amm_tvl: uint256
 net: public(int256)
 tvl: public(uint256)
 @deploy
@@ -72,7 +72,7 @@ def set(n: int256, t: uint256):
 @external
 @view
 def net_pressure_and_tvl(lt: address) -> PressureTvl:
-    return PressureTvl(net_pressure=self.net, pool_tvl=self.tvl)
+    return PressureTvl(net_pressure=self.net, amm_tvl=self.tvl)
 """
 
 MR_MOCK = """
