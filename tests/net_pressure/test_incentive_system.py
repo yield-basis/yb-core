@@ -212,6 +212,25 @@ def test_fastgauge_min_total_supply(fg_setup):
     assert g.totalSupply() == 0
 
 
+def test_fastgauge_available_from_pid_internal(fg_setup):
+    s = fg_setup
+    g, pid, crvusd, admin = s["gauge"], s["pid"], s["crvusd"], s["admin"]
+    # min(PID balance, allowance); fixture funds PID and approves max -> balance.
+    assert g.internal._available_from_pid() == crvusd.balanceOf(pid)
+    # capped by allowance
+    with boa.env.prank(pid):
+        crvusd.approve(g.address, 10**18)
+    assert g.internal._available_from_pid() == 10**18
+    # capped by balance
+    with boa.env.prank(pid):
+        crvusd.approve(g.address, 2**256 - 1)
+        crvusd.transfer(admin, crvusd.balanceOf(pid) - 5 * 10**17)
+    assert g.internal._available_from_pid() == 5 * 10**17
+    # no PID set -> 0
+    g2 = boa.load("contracts/net_pressure/FastGauge.vy", s["lp"].address, crvusd.address, admin)
+    assert g2.internal._available_from_pid() == 0
+
+
 def test_fastgauge_single_staker_accrual(fg_setup):
     s = fg_setup
     g, crvusd = s["gauge"], s["crvusd"]
