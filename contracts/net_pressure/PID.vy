@@ -107,6 +107,10 @@ integral: public(int256)
 prev_pressure: public(uint256)
 last_ts: public(uint256)
 
+# token -> spender -> already granted an infinite approval. Lets us approve once and
+# then skip the approve extcall (and its storage write) on every later conversion.
+is_approved: public(HashMap[address, HashMap[address, bool]])
+
 
 @deploy
 def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
@@ -144,6 +148,20 @@ def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter
 # --- fee conversion ----------------------------------------------------------
 
 @internal
+def _ensure_approval(token: IERC20, spender: address):
+    """
+    @notice Grant `spender` an infinite allowance for `token` once, then remember it.
+    @dev Skips the approve extcall (and its storage write) on subsequent calls, so
+         normal operation pays only an SLOAD instead of an approve every time.
+    @param token Token to approve.
+    @param spender Address allowed to pull `token` (the relevant Curve pool/gauge).
+    """
+    if not self.is_approved[token.address][spender]:
+        assert extcall token.approve(spender, max_value(uint256), default_return_value=True)
+        self.is_approved[token.address][spender] = True
+
+
+@internal
 def _convert_fees():
     """
     @notice Convert any held LT fees into crvUSD.
@@ -168,7 +186,7 @@ def _convert_fees():
         # capped at PRECISION so a large multiplier/fee floors min_dy at 0, not underflow.
         discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
         min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
-        assert extcall asset.approve(pool.address, asset_out, default_return_value=True)
+        self._ensure_approval(asset, pool.address)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
 
 
@@ -300,7 +318,7 @@ def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
     ownable._check_owner()
     self.gauge = gauge
     self.sink_pool = sink_pool
-    assert extcall CRVUSD.approve(gauge.address, max_value(uint256), default_return_value=True)
+    self._ensure_approval(CRVUSD, gauge.address)
     log SetParams()
 
 
