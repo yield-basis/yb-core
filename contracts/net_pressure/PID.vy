@@ -107,9 +107,10 @@ integral: public(int256)
 prev_pressure: public(uint256)
 last_ts: public(uint256)
 
-# token -> spender -> already granted an infinite approval. Lets us approve once and
-# then skip the approve extcall (and its storage write) on every later conversion.
-is_approved: public(HashMap[address, HashMap[address, bool]])
+# cryptopool -> its asset already given an infinite approval. Each pool has exactly
+# one asset (coin1), so a single flag per pool lets us approve once and then skip the
+# approve extcall (and its storage write) on every later conversion.
+pool_approved: public(HashMap[CryptoPool, bool])
 
 
 @deploy
@@ -148,17 +149,17 @@ def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter
 # --- fee conversion ----------------------------------------------------------
 
 @internal
-def _ensure_approval(token: IERC20, spender: address):
+def _ensure_pool_approval(pool: CryptoPool, asset: IERC20):
     """
-    @notice Grant `spender` an infinite allowance for `token` once, then remember it.
-    @dev Skips the approve extcall (and its storage write) on subsequent calls, so
-         normal operation pays only an SLOAD instead of an approve every time.
-    @param token Token to approve.
-    @param spender Address allowed to pull `token` (the relevant Curve pool/gauge).
+    @notice Grant `pool` an infinite allowance for its `asset` once, then remember it.
+    @dev Skips the approve extcall (and its storage write) on subsequent conversions
+         through the same pool, so normal operation pays only an SLOAD.
+    @param pool The Curve cryptopool the asset is swapped in.
+    @param asset The pool's asset (coin1) to approve.
     """
-    if not self.is_approved[token.address][spender]:
-        assert extcall token.approve(spender, max_value(uint256), default_return_value=True)
-        self.is_approved[token.address][spender] = True
+    if not self.pool_approved[pool]:
+        assert extcall asset.approve(pool.address, max_value(uint256), default_return_value=True)
+        self.pool_approved[pool] = True
 
 
 @internal
@@ -186,7 +187,7 @@ def _convert_fees():
         # capped at PRECISION so a large multiplier/fee floors min_dy at 0, not underflow.
         discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
         min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
-        self._ensure_approval(asset, pool.address)
+        self._ensure_pool_approval(pool, asset)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
 
 
@@ -318,7 +319,7 @@ def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
     ownable._check_owner()
     self.gauge = gauge
     self.sink_pool = sink_pool
-    self._ensure_approval(CRVUSD, gauge.address)
+    assert extcall CRVUSD.approve(gauge.address, max_value(uint256), default_return_value=True)
     log SetParams()
 
 
