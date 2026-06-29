@@ -58,21 +58,21 @@ NP_MOCK = """
 # pragma version 0.4.3
 struct PressureTvl:
     net_pressure: int256
-    amm_tvl: uint256
+    half_tvl: uint256
 net: public(int256)
-tvl: public(uint256)
+htvl: public(uint256)
 @deploy
 def __init__(n: int256, t: uint256):
     self.net = n
-    self.tvl = t
+    self.htvl = t
 @external
 def set(n: int256, t: uint256):
     self.net = n
-    self.tvl = t
+    self.htvl = t
 @external
 @view
 def net_pressure_and_tvl(lt: address) -> PressureTvl:
-    return PressureTvl(net_pressure=self.net, amm_tvl=self.tvl)
+    return PressureTvl(net_pressure=self.net, half_tvl=self.htvl)
 """
 
 MR_MOCK = """
@@ -371,12 +371,12 @@ def test_pid_step_matches_reference(token, accts):
     vp = 10**18
     staked_value = 5 * 10**23 * vp // PRECISION
 
-    # scripted pressure scenarios (absolute net crvUSD, pool tvl fixed)
-    tvl = 10**24                      # H = tvl//2 = 5e23
-    H = tvl // 2
+    # scripted pressure scenarios (absolute net crvUSD; half_tvl = AMM equity, fixed)
+    half_tvl = 5 * 10**23             # H = Σ half_tvl (no extra /2)
+    H = half_tvl
     dt = 7200                         # 2-hour steps
     for net in [2 * 10**22, 5 * 10**22, 5 * 10**22, 1 * 10**22, 0]:
-        np.set(net, tvl)
+        np.set(net, half_tvl)
         boa.env.time_travel(seconds=dt)
         pressure = (max(0, net) * PRECISION) // H
         sink_abs = sink.totalSupply() * sink.get_virtual_price() // PRECISION

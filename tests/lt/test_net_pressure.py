@@ -459,6 +459,8 @@ def test_oracle_resists_amm_trade(
 
     equity = yb_amm.get_state().x0 // 3
     oracle0 = net_pressure.net_pressure_oracle(yb_lt.address)
+    half0 = net_pressure.half_tvl_oracle(yb_lt.address)
+    coll0 = yb_amm.collateral_amount()  # spot LP holdings (manipulable)
 
     attacker = accounts[1]
     # Buy some LP collateral out of the AMM with stablecoin.
@@ -475,7 +477,13 @@ def test_oracle_resists_amm_trade(
             raise
 
     oracle1 = net_pressure.net_pressure_oracle(yb_lt.address)
+    half1 = net_pressure.half_tvl_oracle(yb_lt.address)
+    coll1 = yb_amm.collateral_amount()
     print(f"\n[depth={extra_depth} dep={deposit}] equity={equity/1e18:.0f} "
           f"oracle {oracle0/1e18:.4f} -> {oracle1/1e18:.4f}")
     # x0 only grows by fees on an AMM trade, so the oracle is essentially unchanged.
     assert abs(oracle1 - oracle0) < equity // 50
+    # The trade moved the spot collateral, but half-TVL (x0-based) is unmoved -
+    # i.e. half_tvl_oracle is NOT the manipulable lp_price * collateral_amount.
+    assert abs(coll1 - coll0) > coll0 // 100, "trade should have moved spot collateral"
+    assert abs(half1 - half0) < equity // 50

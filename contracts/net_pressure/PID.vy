@@ -33,7 +33,7 @@ exports: (ownable.owner, ownable.transfer_ownership)
 # Mirrors YBNetPressure.PressureTvl (returned by net_pressure_and_tvl).
 struct PressureTvl:
     net_pressure: int256
-    amm_tvl: uint256
+    half_tvl: uint256
 
 
 interface CryptoPool:
@@ -215,7 +215,7 @@ def _signals() -> Signals:
     net: int256 = 0
     for lt: address in self.pressure_lts:
         pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt)  # one call, shared work
-        half_tvl += pt.amm_tvl // 2
+        half_tvl += pt.half_tvl   # already the AMM equity (half-TVL); non-manipulable
         net += pt.net_pressure
     assert half_tvl > 0, "No pools"
     if net > 0:
