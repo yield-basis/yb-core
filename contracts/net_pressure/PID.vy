@@ -46,10 +46,13 @@ interface LT:
     def balanceOf(addr: address) -> uint256: view
     def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
     def CRYPTOPOOL() -> CryptoPool: view
+    def totalSupply() -> uint256: view
+
+interface Erc20D:
+    def decimals() -> uint8: view
 
 interface NetPressureOracle:
     def net_pressure_and_tvl(lt: address) -> PressureTvl: view
-    def withdraw_floor(lt: address, shares: uint256) -> uint256: view
 
 interface MarketRateGetter:
     def rate() -> uint256: view
@@ -123,6 +126,14 @@ last_ts: public(uint256)
 # approve extcall (and its storage write) on every later conversion.
 pool_approved: public(HashMap[CryptoPool, bool])
 
+# Per-trigger() cache of the heavy net_pressure_and_tvl call. The same pool can need it
+# for both fee conversion (half_tvl -> withdraw floor) and the controller (net_pressure),
+# so _convert_fees writes it here and _signals reads it -> one lp_oracle_2 solve per
+# pool. transient: cleared at the end of every tx, so each trigger() starts fresh.
+_npt_net: transient(HashMap[address, int256])
+_npt_half: transient(HashMap[address, uint256])
+_npt_cached: transient(HashMap[address, bool])
+
 
 @deploy
 def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
@@ -178,8 +189,11 @@ def _convert_fees():
     """
     @notice Convert any held LT fees into crvUSD.
     @dev For each LT in the FeeDistributor token set, withdraw its asset then swap to
-         crvUSD in that LT's cryptopool, with min_dy from the pool's price_oracle
-         (manipulation-resistant) discounted by swap_fee_multiplier * pool fee.
+         crvUSD in that LT's cryptopool. Both legs are bounded by the same
+         manipulation-resistant discount (swap_fee_multiplier * pool fee): the withdraw
+         by the price_oracle-fair value of the shares (half_tvl-based), the swap by the
+         price_oracle. Caches net_pressure_and_tvl in transient storage so the
+         controller can reuse it without re-running the lp_oracle_2 solve.
     """
     token_set: DynArray[address, MAX_TOKENS] = staticcall self.fee_distributor.token_sets(
         staticcall self.fee_distributor.current_token_set())
@@ -190,19 +204,27 @@ def _convert_fees():
             continue
         pool: CryptoPool = staticcall lt.CRYPTOPOOL()
         asset: IERC20 = IERC20(staticcall pool.coins(1))
-        # Both legs are discounted by swap_fee_multiplier * pool fee. pool.fee() is
-        # scaled to FEE_DENOM (1e10); discount is rescaled to 1e18 and capped at
-        # PRECISION so a large multiplier/fee floors the min at 0, not underflow.
+        p_o: uint256 = staticcall pool.price_oracle()
+        # pool.fee() is scaled to FEE_DENOM (1e10); discount is rescaled to 1e18 and
+        # capped at PRECISION so a large multiplier/fee floors the min at 0, not underflow.
         discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
-        # 1) Withdraw, bounded by the manipulation-resistant price_oracle-fair value of
-        #    the shares (else the LT.withdraw itself could be sandwiched).
-        fair_assets: uint256 = staticcall self.net_pressure.withdraw_floor(lt_addr, shares)
+
+        # Heavy oracle call (the lp_oracle_2 solve), cached for the controller pass.
+        pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt_addr)
+        self._npt_net[lt_addr] = pt.net_pressure
+        self._npt_half[lt_addr] = pt.half_tvl
+        self._npt_cached[lt_addr] = True
+
+        # 1) Withdraw, bounded by the price_oracle-fair value of the shares (mirrors
+        #    YBNetPressure.withdraw_floor; reuses pt.half_tvl so no second solve).
+        precision1: uint256 = 10 ** (18 - convert((staticcall Erc20D(asset.address).decimals()), uint256))
+        fair_assets: uint256 = pt.half_tvl * shares // (staticcall lt.totalSupply()) * PRECISION // p_o // precision1
         min_assets: uint256 = fair_assets * (PRECISION - discount) // PRECISION
         asset_out: uint256 = extcall lt.withdraw(shares, min_assets, self)
         if asset_out == 0:
             continue
         # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount.
-        min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
+        min_dy: uint256 = asset_out * p_o // PRECISION * (PRECISION - discount) // PRECISION
         self._ensure_pool_approval(pool, asset)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
 
@@ -214,13 +236,20 @@ def _convert_fees():
 def _signals() -> Signals:
     """
     @notice Compute the controller's manipulation-resistant inputs.
+    @dev Reads each pool's net_pressure_and_tvl from the per-trigger transient cache
+         (populated by _convert_fees) when present, else fetches it. So a pool in both
+         the fee set and pressure_lts pays the lp_oracle_2 solve once per trigger().
     @return Signals(pressure, sink), the relative (per half-TVL) controller inputs.
     """
     s: Signals = empty(Signals)
     half_tvl: uint256 = 0   # normalizer (sum of each AMM's half-TVL); not needed beyond this
     net: int256 = 0
     for lt: address in self.pressure_lts:
-        pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt)  # one call, shared work
+        pt: PressureTvl = empty(PressureTvl)
+        if self._npt_cached[lt]:
+            pt = PressureTvl(net_pressure=self._npt_net[lt], half_tvl=self._npt_half[lt])
+        else:
+            pt = staticcall self.net_pressure.net_pressure_and_tvl(lt)
         half_tvl += pt.half_tvl   # already the AMM equity (half-TVL); non-manipulable
         net += pt.net_pressure
     assert half_tvl > 0, "No pools"

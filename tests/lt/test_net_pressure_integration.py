@@ -161,3 +161,19 @@ def test_full_stack(
     assert stablecoin.balanceOf(staker) > 0
     # The reward came out of the PID reserve.
     assert stablecoin.balanceOf(pid.address) < pid_crvusd_before + pid_reserve
+
+    # --- a second trigger (a new tx) -------------------------------------------
+    # yb_lt is in BOTH the fee set and pressure_lts, so trigger() caches its
+    # net_pressure_and_tvl in transient storage during conversion and reuses it for the
+    # controller (one lp_oracle_2 solve). The contract clears transient per tx; boa does
+    # not between calls, so emulate a fresh tx here.
+    boa.env.evm.vm.state.clear_transient_storage()
+    lt_fee2 = yb_lt.balanceOf(admin) // 1000
+    with boa.env.prank(admin):
+        yb_lt.transfer(fs.address, lt_fee2)
+    reserve_before2 = stablecoin.balanceOf(pid.address)
+    boa.env.time_travel(seconds=7200)
+    fs.trigger()
+    assert fd.filled() == 2
+    assert stablecoin.balanceOf(pid.address) > reserve_before2  # converted again
+    assert gauge.reward_rate() > 0                              # rate refreshed
