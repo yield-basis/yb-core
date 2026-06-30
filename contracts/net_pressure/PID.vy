@@ -49,6 +49,7 @@ interface LT:
 
 interface NetPressureOracle:
     def net_pressure_and_tvl(lt: address) -> PressureTvl: view
+    def withdraw_floor(lt: address, shares: uint256) -> uint256: view
 
 interface MarketRateGetter:
     def rate() -> uint256: view
@@ -189,13 +190,18 @@ def _convert_fees():
             continue
         pool: CryptoPool = staticcall lt.CRYPTOPOOL()
         asset: IERC20 = IERC20(staticcall pool.coins(1))
-        asset_out: uint256 = extcall lt.withdraw(shares, 0, self)
+        # Both legs are discounted by swap_fee_multiplier * pool fee. pool.fee() is
+        # scaled to FEE_DENOM (1e10); discount is rescaled to 1e18 and capped at
+        # PRECISION so a large multiplier/fee floors the min at 0, not underflow.
+        discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
+        # 1) Withdraw, bounded by the manipulation-resistant price_oracle-fair value of
+        #    the shares (else the LT.withdraw itself could be sandwiched).
+        fair_assets: uint256 = staticcall self.net_pressure.withdraw_floor(lt_addr, shares)
+        min_assets: uint256 = fair_assets * (PRECISION - discount) // PRECISION
+        asset_out: uint256 = extcall lt.withdraw(shares, min_assets, self)
         if asset_out == 0:
             continue
-        # crvUSD out target from the EMA price, discounted by 1.5x the pool fee.
-        # pool.fee() is scaled to FEE_DENOM (1e10); discount is rescaled to 1e18 and
-        # capped at PRECISION so a large multiplier/fee floors min_dy at 0, not underflow.
-        discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
+        # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount.
         min_dy: uint256 = asset_out * (staticcall pool.price_oracle()) // PRECISION * (PRECISION - discount) // PRECISION
         self._ensure_pool_approval(pool, asset)
         extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
