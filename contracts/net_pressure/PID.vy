@@ -86,6 +86,13 @@ struct Signals:
     pressure: uint256   # max(0, summed net pressure) / half_tvl, 1e18
     sink: uint256       # sink-pool TVL / half_tvl, 1e18
 
+# A cached PressureTvl plus a `cached` flag (half_tvl/net_pressure can legitimately be 0,
+# so 0 doesn't mean "absent"). Used for the per-trigger transient cache below.
+struct CachedPt:
+    cached: bool
+    net_pressure: int256
+    half_tvl: uint256
+
 
 PRECISION: constant(uint256) = 10**18
 FEE_DENOM: constant(uint256) = 10**10   # Curve pool fee() is scaled to 1e10
@@ -130,9 +137,7 @@ pool_approved: public(HashMap[CryptoPool, bool])
 # for both fee conversion (half_tvl -> withdraw floor) and the controller (net_pressure),
 # so _convert_fees writes it here and _signals reads it -> one lp_oracle_2 solve per
 # pool. transient: cleared at the end of every tx, so each trigger() starts fresh.
-_npt_net: transient(HashMap[address, int256])
-_npt_half: transient(HashMap[address, uint256])
-_npt_cached: transient(HashMap[address, bool])
+_npt: transient(HashMap[address, CachedPt])
 
 
 @deploy
@@ -211,9 +216,7 @@ def _convert_fees():
 
         # Heavy oracle call (the lp_oracle_2 solve), cached for the controller pass.
         pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt_addr)
-        self._npt_net[lt_addr] = pt.net_pressure
-        self._npt_half[lt_addr] = pt.half_tvl
-        self._npt_cached[lt_addr] = True
+        self._npt[lt_addr] = CachedPt(cached=True, net_pressure=pt.net_pressure, half_tvl=pt.half_tvl)
 
         # 1) Withdraw, bounded by the price_oracle-fair value of the shares (mirrors
         #    YBNetPressure.withdraw_floor; reuses pt.half_tvl so no second solve).
@@ -245,9 +248,10 @@ def _signals() -> Signals:
     half_tvl: uint256 = 0   # normalizer (sum of each AMM's half-TVL); not needed beyond this
     net: int256 = 0
     for lt: address in self.pressure_lts:
+        c: CachedPt = self._npt[lt]
         pt: PressureTvl = empty(PressureTvl)
-        if self._npt_cached[lt]:
-            pt = PressureTvl(net_pressure=self._npt_net[lt], half_tvl=self._npt_half[lt])
+        if c.cached:
+            pt = PressureTvl(net_pressure=c.net_pressure, half_tvl=c.half_tvl)
         else:
             pt = staticcall self.net_pressure.net_pressure_and_tvl(lt)
         half_tvl += pt.half_tvl   # already the AMM equity (half-TVL); non-manipulable
