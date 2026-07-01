@@ -75,14 +75,9 @@ interface LevAMM:
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
 
-interface ERC20D:
-    def decimals() -> uint8: view
-
 interface LT:
     def CRYPTOPOOL() -> Pool: view
     def amm() -> LevAMM: view
-    def totalSupply() -> uint256: view
-    def ASSET_TOKEN() -> ERC20D: view
 
 
 struct AMMState:
@@ -275,31 +270,6 @@ def net_pressure_and_tvl(lt: LT) -> PressureTvl:
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
     return self._pressure_signals(amm, self._pool_metrics(pool))
-
-
-@external
-@view
-def withdraw_floor(lt: LT, shares: uint256) -> uint256:
-    """
-    @notice Manipulation-resistant lower bound (before any fee discount) on the asset
-            received when withdrawing `shares` from `lt`.
-    @dev = half_tvl * shares/totalSupply / price_oracle, in the asset's token decimals.
-         Equals the price_oracle-fair value of those shares (the empirically correct
-         benchmark; price_scale-based value_oracle over-values during imbalance). Use
-         as the basis for LT.withdraw's min_assets after a pool-fee discount.
-    @param lt The YB LT (market) contract.
-    @param shares LT shares to be withdrawn.
-    @return Fair asset amount, in the asset token's own decimals.
-    """
-    amm: LevAMM = staticcall lt.amm()
-    pool: Pool = staticcall lt.CRYPTOPOOL()
-    self._assert_not_reentrant(amm)
-    ts: uint256 = staticcall lt.totalSupply()
-    if ts == 0:
-        return 0
-    half_tvl: uint256 = self._pressure_signals(amm, self._pool_metrics(pool)).half_tvl
-    precision1: uint256 = 10 ** (18 - convert((staticcall (staticcall lt.ASSET_TOKEN()).decimals()), uint256))
-    return half_tvl * shares // ts * PRECISION // (staticcall pool.price_oracle()) // precision1
 
 
 @external

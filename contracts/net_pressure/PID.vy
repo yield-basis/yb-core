@@ -190,6 +190,29 @@ def _ensure_pool_approval(pool: CryptoPool, asset: IERC20):
 
 
 @internal
+@pure
+def _withdraw_floor(half_tvl: uint256, shares: uint256, total_supply: uint256,
+                    price_oracle: uint256, asset_decimals: uint256) -> uint256:
+    """
+    @notice Manipulation-resistant lower bound (before any fee discount) on the asset
+            received when withdrawing `shares` of an LT.
+    @dev = half_tvl * shares/total_supply / price_oracle, in the asset's own decimals.
+         Equals the price_oracle-fair value of those shares (the empirically correct
+         benchmark; the price_scale-based value_oracle over-values during imbalance).
+         `half_tvl` is the AMM's price_oracle equity from net_pressure_and_tvl, so no
+         extra oracle solve is needed. Pure so it can be unit-tested in isolation.
+    @param half_tvl The LT's AMM half-TVL (equity at price_oracle), 1e18.
+    @param shares LT shares to be withdrawn.
+    @param total_supply The LT's total share supply.
+    @param price_oracle The cryptopool EMA price (asset per crvUSD), 1e18.
+    @param asset_decimals The asset token's decimals.
+    @return Fair asset amount, in the asset token's own decimals.
+    """
+    precision1: uint256 = 10 ** (18 - asset_decimals)
+    return half_tvl * shares // total_supply * PRECISION // price_oracle // precision1
+
+
+@internal
 def _convert_fees():
     """
     @notice Convert any held LT fees into crvUSD.
@@ -218,10 +241,11 @@ def _convert_fees():
         pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt_addr)
         self._npt[lt_addr] = CachedPt(cached=True, net_pressure=pt.net_pressure, half_tvl=pt.half_tvl)
 
-        # 1) Withdraw, bounded by the price_oracle-fair value of the shares (mirrors
-        #    YBNetPressure.withdraw_floor; reuses pt.half_tvl so no second solve).
-        precision1: uint256 = 10 ** (18 - convert((staticcall Erc20D(asset.address).decimals()), uint256))
-        fair_assets: uint256 = pt.half_tvl * shares // (staticcall lt.totalSupply()) * PRECISION // p_o // precision1
+        # 1) Withdraw, bounded by the price_oracle-fair value of the shares (reuses
+        #    pt.half_tvl from the cached solve above, so no second oracle call).
+        fair_assets: uint256 = self._withdraw_floor(
+            pt.half_tvl, shares, staticcall lt.totalSupply(), p_o,
+            convert(staticcall Erc20D(asset.address).decimals(), uint256))
         min_assets: uint256 = fair_assets * (PRECISION - discount) // PRECISION
         asset_out: uint256 = extcall lt.withdraw(shares, min_assets, self)
         if asset_out == 0:

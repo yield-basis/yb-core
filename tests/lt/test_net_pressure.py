@@ -548,17 +548,29 @@ def test_withdraw_floor_matches_preview(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
     yb_allocated, seed_cryptopool, net_pressure, extra_depth, deposit,
 ):
-    """withdraw_floor (price_oracle-fair asset out) ~= the realizable preview_withdraw
-    at equilibrium, and scales linearly with shares. It is the min_assets basis for
-    LT.withdraw in the fee conversion."""
+    """PID._withdraw_floor (the price_oracle-fair asset out that bounds LT.withdraw's
+    min_assets in the fee conversion) ~= the realizable preview_withdraw at equilibrium,
+    and scales linearly with shares. Fed with the oracle's half_tvl so it needs no extra
+    solve; tested in isolation via the internal (pure) method."""
     _setup(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
            extra_depth, deposit)
     ts = yb_lt.totalSupply()
     shares = ts // 4
 
-    fair = net_pressure.withdraw_floor(yb_lt.address, shares)
+    # A bare PID instance just to reach the pure internal (the addresses are unused here).
+    dummy = boa.env.generate_address()
+    pid = boa.load("contracts/net_pressure/PID.vy", dummy, net_pressure.address,
+                   dummy, dummy, admin)
+    half_tvl = net_pressure.half_tvl_oracle(yb_lt.address)
+    p_o = cryptopool.price_oracle()
+    dec = collateral_token.decimals()   # pool coin1 (the withdrawn asset)
+
+    def floor(sh):
+        return pid.internal._withdraw_floor(half_tvl, sh, ts, p_o, dec)
+
+    fair = floor(shares)
     preview = yb_lt.preview_withdraw(shares)
     assert fair > 0
     assert abs(preview - fair) < fair // 20                  # within ~5% at equilibrium
     # linear in shares
-    assert abs(net_pressure.withdraw_floor(yb_lt.address, shares // 2) - fair // 2) < fair // 100
+    assert abs(floor(shares // 2) - fair // 2) < fair // 100

@@ -60,10 +60,10 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
 - **Sink size** is `sink_pool.totalSupply() * get_virtual_price()` (stableswap vprice
   is not spot-manipulable).
 - **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`
-  (default 1.5× the live dynamic fee): the `LT.withdraw` `min_assets` comes from
-  `YBNetPressure.withdraw_floor` (the `price_oracle`-fair asset value of the shares —
-  *not* the `price_scale`-based `value_oracle`, which over-values during imbalance),
-  and the asset→crvUSD swap's `min_dy` from `price_oracle`. An on-chain study over ~5
+  (default 1.5× the live dynamic fee): the `LT.withdraw` `min_assets` comes from the
+  PID's `_withdraw_floor` (the `price_oracle`-fair asset value of the shares, computed
+  from the oracle's `half_tvl` — *not* the `price_scale`-based `value_oracle`, which
+  over-values during imbalance), and the asset→crvUSD swap's `min_dy` from `price_oracle`. An on-chain study over ~5
   months (incl. `price_oracle/price_scale` down to 0.62) showed the realizable
   withdrawal stays within ~2.7% of the `price_oracle` fair value, tracking the
   cryptopool's dynamic fee, so `1.5× pool.fee()` covers it with margin (and reverts —
