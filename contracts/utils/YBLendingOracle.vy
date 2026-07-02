@@ -34,18 +34,12 @@ interface LT:
 
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
-    def get_state() -> AMMState: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
 
 interface ILiquidityGauge:
     def totalSupply() -> uint256: view
 
-
-struct AMMState:
-    collateral: uint256
-    debt: uint256
-    x0: uint256
 
 struct LiquidityValues:
     admin: int256  # Can be negative
@@ -56,6 +50,10 @@ struct LiquidityValues:
 
 PRECISION: constant(uint256) = 10**18
 L: constant(uint256) = 2
+# AMM.get_x0 leverage constant, identical to AMM.__init__ for leverage == L*PRECISION:
+#   denominator = 2*leverage - PRECISION ; LEV_RATIO = leverage**2 * PRECISION // denominator**2
+# (== 4/9 * 1e18 at L=2). Lets us reproduce get_x0 here without calling AMM.get_state().
+LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
 
@@ -182,55 +180,40 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     )
     lp_price_oracle: uint256 = portfolio_value * D // pool_supply
 
-    # Try to get AMM state (may revert if AMM is too imbalanced for x0 calculation).
-    # Skipped entirely when use_balances is set: the caller has explicitly requested the
-    # balance fallback, and the x0 branch below needs `success and not use_balances`, so the
-    # call (which runs get_x0 + several AMM storage reads) would be pure waste.
-    yb_oracle: uint256 = 0
-    success: bool = False
-    response: Bytes[96] = empty(Bytes[96])
-    if not use_balances:
-        gas_before: uint256 = msg.gas
-        success, response = raw_call(
-            amm.address,
-            method_id("get_state()"),
-            max_outsize=96,
-            revert_on_failure=False,
-            is_static_call=True
-        )
-        if not success:
-            # Distinguish a genuine "AMM too imbalanced" revert from a 63/64-rule gas-starvation
-            # OOG: an OOG consumes its whole ~63/64 gas allotment and leaves only ~1/64 behind,
-            # while a real revert is far cheaper and leaves most of the gas. If too little gas
-            # survived, the caller starved get_state() to force the balance fallback (which
-            # prices differently) -> refuse rather than silently flip. Ratio-based on purpose:
-            # invariant to any global gas-schedule repricing (e.g. Glamsterdam).
-            assert msg.gas > gas_before // 16, "GAS"
+    # Reproduce AMM.get_x0 here rather than calling AMM.get_state(): equivalent x0,
+    # but cheaper (no external call) and without the OOG-vs-revert ambiguity of
+    # get_state() re-entering the crvUSD aggregator. p_o == PRICE_ORACLE_CONTRACT.price()
+    # == lp_price_ps * agg_price / 1e18; the LP collateral is 18-dec so COLLATERAL_PRECISION == 1.
+    collateral: uint256 = staticcall amm.collateral_amount()
+    debt: uint256 = staticcall amm.get_debt()
+    coll_value_x0: uint256 = lp_price_ps * agg_price // PRECISION * collateral // PRECISION
+    # get_x0 (safe_limits=False) reverts exactly when this discriminant underflows.
+    d_sub: uint256 = 4 * coll_value_x0 * LEV_RATIO // PRECISION * debt
+    solvable: bool = (not use_balances) and coll_value_x0 * coll_value_x0 >= d_sub
 
+    yb_oracle: uint256 = 0
     lv_total: uint256 = 0
     lv_admin: int256 = 0
     lt_supply: uint256 = 0
 
-    if success and not use_balances:
+    if solvable:
         # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
         # yb_oracle_value *= f_lp / lt_supply / price_oracle
-        amm_state: AMMState = abi_decode(response, AMMState)
+        x0: uint256 = (coll_value_x0 + isqrt(coll_value_x0 * coll_value_x0 - d_sub)) * PRECISION // (2 * LEV_RATIO)
         # The factor goes <= 10**18 once the leveraged equity has been wiped out (ratio < 9/16);
         # return 0 instead of underflowing so a lending integrator can still liquidate the
         # (insolvent) position rather than being bricked by a reverting price.
         factor: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1)
         if factor > 10**18:
-            yb_oracle = amm_state.x0 * (factor - 10**18) // 10**18
+            yb_oracle = x0 * (factor - 10**18) // 10**18
 
         # Compute fresh liquidity values (replicates LT._calculate_values)
         p_o: uint256 = price_scale * agg_price // PRECISION
-        amm_value: uint256 = amm_state.x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        amm_value: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
         lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o, amm_value)
     else:
-        # AMM is too imbalanced for x0 to be calculated.
-        # Balances can't change in this state, so compute value from balances directly.
-        collateral: uint256 = staticcall amm.collateral_amount()
-        debt: uint256 = staticcall amm.get_debt()
+        # AMM too imbalanced for x0 (or use_balances requested). Balances can't change
+        # in the non-tradable state, so compute value from balances directly.
         # Return 0 for an insolvent position (collateral value below debt) instead of
         # underflowing, for the same liquidation-availability reason as above.
         coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18

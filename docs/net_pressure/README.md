@@ -56,7 +56,12 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
   numerator and denominator match. It prices the LP via the twocrypto LP oracle at
   `price_oracle` and slides the AMM along its bonding curve (falling back to raw
   collateral/debt only when the AMM is untradable — and there nothing can manipulate
-  it; the Curve pool never reverts, so the crvUSD split stays oracle-based).
+  it; the Curve pool never reverts, so the crvUSD split stays oracle-based). The AMM's
+  `x0` and the "untradable" test are reproduced **in-contract** from `AMM.get_x0`
+  (using `price_oracle`-derived reads), not read via `AMM.get_state()` — that call
+  re-enters the heavy crvUSD aggregator, and a gas-metered `raw_call` around it can't
+  robustly tell a genuine revert from a forced out-of-gas, so the branch is pure
+  arithmetic and immune to gas-schedule repricing (e.g. Glamsterdam).
 - **Sink size** is `sink_pool.totalSupply() * get_virtual_price()` (stableswap vprice
   is not spot-manipulable).
 - **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`

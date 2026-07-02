@@ -33,15 +33,8 @@ interface LT:
 
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
-    def get_state() -> AMMState: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
-
-
-struct AMMState:
-    collateral: uint256
-    debt: uint256
-    x0: uint256
 
 struct LiquidityValues:
     admin: int256  # Can be negative
@@ -52,6 +45,10 @@ struct LiquidityValues:
 
 PRECISION: constant(uint256) = 10**18
 L: constant(uint256) = 2
+# AMM.get_x0 leverage constant, identical to AMM.__init__ for leverage == L*PRECISION:
+#   denominator = 2*leverage - PRECISION ; LEV_RATIO = leverage**2 * PRECISION // denominator**2
+# (== 4/9 * 1e18 at L=2). Lets us reproduce get_x0 here without calling AMM.get_state().
+LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
 # EMA smoothing time constant for price_in_asset (ybBTC/BTC). Half-life = EMA_TIME * ln(2)
@@ -187,38 +184,31 @@ def _raw_price_in_asset(agg_price: uint256) -> uint256:
     )
     lp_price_oracle: uint256 = portfolio_value * D // pool_supply
 
-    yb_oracle: uint256 = 0
-    success: bool = False
-    response: Bytes[96] = empty(Bytes[96])
-    gas_before: uint256 = msg.gas
-    success, response = raw_call(
-        amm.address,
-        method_id("get_state()"),
-        max_outsize=96,
-        revert_on_failure=False,
-        is_static_call=True
-    )
-    if not success:
-        # Refuse a 63/64-rule gas-starvation OOG (leaves only ~1/64 of gas) so an attacker
-        # can't force the balance fallback; a genuine imbalance revert leaves most of the gas.
-        assert msg.gas > gas_before // 16, "GAS"
+    # Reproduce AMM.get_x0 here rather than calling AMM.get_state(): equivalent x0,
+    # but cheaper (no external call) and without the OOG-vs-revert ambiguity of
+    # get_state() re-entering the crvUSD aggregator. p_o == PRICE_ORACLE_CONTRACT.price()
+    # == lp_price_ps * agg_price / 1e18; the LP collateral is 18-dec so COLLATERAL_PRECISION == 1.
+    collateral: uint256 = staticcall amm.collateral_amount()
+    debt: uint256 = staticcall amm.get_debt()
+    coll_value_x0: uint256 = lp_price_ps * agg_price // PRECISION * collateral // PRECISION
+    d_sub: uint256 = 4 * coll_value_x0 * LEV_RATIO // PRECISION * debt
 
+    yb_oracle: uint256 = 0
     lv_total: uint256 = 0
     lv_admin: int256 = 0
     lt_supply: uint256 = 0
 
-    if success:
-        amm_state: AMMState = abi_decode(response, AMMState)
+    if coll_value_x0 * coll_value_x0 >= d_sub:
+        # get_x0 (safe_limits=False) succeeds exactly when the discriminant does not underflow.
+        x0: uint256 = (coll_value_x0 + isqrt(coll_value_x0 * coll_value_x0 - d_sub)) * PRECISION // (2 * LEV_RATIO)
         # Return 0 once the leveraged equity is wiped (ratio < 9/16) instead of underflowing.
         factor: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1)
         if factor > 10**18:
-            yb_oracle = amm_state.x0 * (factor - 10**18) // 10**18
+            yb_oracle = x0 * (factor - 10**18) // 10**18
         p_o: uint256 = price_scale * agg_price // PRECISION
-        amm_value: uint256 = amm_state.x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        amm_value: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
         lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o, amm_value)
     else:
-        collateral: uint256 = staticcall amm.collateral_amount()
-        debt: uint256 = staticcall amm.get_debt()
         # Return 0 for an insolvent position (collateral value below debt) instead of underflowing.
         coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
         if coll_value > debt:

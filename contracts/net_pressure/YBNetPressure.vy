@@ -71,7 +71,6 @@ interface Pool:
 
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
-    def get_state() -> AMMState: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
 
@@ -79,11 +78,6 @@ interface LT:
     def CRYPTOPOOL() -> Pool: view
     def amm() -> LevAMM: view
 
-
-struct AMMState:
-    collateral: uint256
-    debt: uint256
-    x0: uint256
 
 struct PoolMetrics:
     x_frac: uint256           # crvUSD value fraction of the LP at price_oracle (1e18)
@@ -99,6 +93,10 @@ PRECISION: constant(uint256) = 10**18
 # The whole system fixes LEVERAGE = 2 * 10**18 (AMM.__init__, Factory,
 # YBLendingOracle). The closed forms below assume L = 2.
 L: constant(uint256) = 2
+# AMM.get_x0 leverage constant, identical to AMM.__init__ for leverage == L*PRECISION:
+#   denominator = 2*leverage - PRECISION ; LEV_RATIO = leverage**2 * PRECISION // denominator**2
+# (== 4/9 * 1e18 at L=2). Lets us reproduce get_x0 here without calling AMM.get_state().
+LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 
 
 @internal
@@ -182,36 +180,33 @@ def _pressure_signals(amm: LevAMM, m: PoolMetrics) -> PressureTvl:
     @return PressureTvl(net_pressure, half_tvl), crvUSD numeraire.
     """
     p_o_amm: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
+    collateral: uint256 = staticcall amm.collateral_amount()
+    debt: uint256 = staticcall amm.get_debt()
 
-    # x0 / get_x0 revert when the AMM is too imbalanced for the leverage math.
-    gas_before: uint256 = msg.gas
-    success: bool = False
-    response: Bytes[96] = empty(Bytes[96])
-    success, response = raw_call(
-        amm.address, method_id("get_state()"),
-        max_outsize=96, revert_on_failure=False, is_static_call=True)
+    # Reproduce AMM.get_x0 here rather than calling AMM.get_state(): equivalent x0,
+    # but cheaper (no external call) and without the OOG-vs-revert ambiguity of
+    # get_state() re-entering the crvUSD aggregator. coll_value_ps == p_o_amm *
+    # collateral // PRECISION is exactly get_x0's coll_value (COLLATERAL_PRECISION == 1:
+    # cryptopool LP is 18-dec).
+    coll_value_ps: uint256 = p_o_amm * collateral // PRECISION
+    d_sub: uint256 = 4 * coll_value_ps * LEV_RATIO // PRECISION * debt
 
     calc_coll_value: uint256 = 0  # AMM collateral marked at the price_oracle price
     calc_debt: uint256 = 0
-    if success:
-        state: AMMState = abi_decode(response, AMMState)
-        # coll_value_ps == p_o_amm * collateral is exactly the coll_value get_x0
-        # used for x0; coll_value_true marks it at lp_price_oracle. Then slide
-        # debt/collateral along the bonding curve to that price:
-        # sqrt(k * m*) = sqrt(x_initial * coll_value_true), with k = x_initial *
-        # collateral conserved, so this rides on the oracle price not the spot split.
-        coll_value_ps: uint256 = state.collateral * p_o_amm // PRECISION
+    if coll_value_ps * coll_value_ps >= d_sub:
+        # Solvable: x0 == get_x0(...). coll_value_true marks the collateral at
+        # lp_price_oracle, then slide debt/collateral along the bonding curve to that
+        # price: sqrt(k * m*) = sqrt(x_initial * coll_value_true), with k = x_initial
+        # * collateral conserved, so this rides on the oracle price not the spot split.
+        x0: uint256 = (coll_value_ps + isqrt(coll_value_ps * coll_value_ps - d_sub)) * PRECISION // (2 * LEV_RATIO)
         coll_value_true: uint256 = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
-        calc_coll_value = isqrt((state.x0 - state.debt) * coll_value_true)
-        calc_debt = state.x0 - calc_coll_value
+        calc_coll_value = isqrt((x0 - debt) * coll_value_true)
+        calc_debt = x0 - calc_coll_value
     else:
-        # AMM non-tradable: distinguish a genuine revert from a 63/64-rule gas
-        # starvation (mirrors YBLendingOracle), then use the AMM's raw amounts -
-        # they can't change in this state. The split stays oracle-based.
-        assert msg.gas > gas_before // 16, "GAS"
-        coll_value_ps: uint256 = (staticcall amm.collateral_amount()) * p_o_amm // PRECISION
+        # AMM non-tradable (get_x0 would revert): use the AMM's raw amounts - they
+        # can't change in this state. The split stays oracle-based.
         calc_coll_value = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
-        calc_debt = staticcall amm.get_debt()
+        calc_debt = debt
 
     # net = calc_debt - crvUSD_in_LP;  crvUSD_in_LP = calc_coll_value * x_frac
     crvusd_in_lp: uint256 = calc_coll_value * m.x_frac // PRECISION
