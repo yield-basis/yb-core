@@ -98,3 +98,52 @@ def test_x0_replication_matches_get_state(
         with boa.env.prank(admin):
             mock_agg.set_price(ap)
         _check(yb_amm, cryptopool_oracle)
+
+
+def _amm_get_x0(yb_amm, p_o, collateral, debt):
+    """AMM.get_x0(p_o, collateral, debt, safe_limits=False) -> (x0, solvable)."""
+    try:
+        return yb_amm.internal.get_x0(p_o, collateral, debt, False), True
+    except Exception:
+        return 0, False
+
+
+def test_get_x0_internal_matches_amm(
+        yb_amm, lending_oracle, ll_deployer, yb_lt):
+    """
+    Each oracle exposes the same reproduced get_x0 as an internal `_get_x0(p_oracle,
+    collateral, debt) -> (solvable, x0)`. Pin all three, bit-for-bit, to the AMM's own
+    `get_x0(..., safe_limits=False)` across a grid that straddles the solvency boundary
+    (debt == 9/16 * coll_value at L=2): same x0 where the AMM succeeds, and `solvable`
+    False exactly where the AMM reverts.
+    """
+    # The reproduction relies on COLLATERAL_PRECISION == 1 (the cryptopool LP collateral is
+    # 18-dec, so the AMM's coll_value scaling is a no-op). That identity isn't asserted
+    # directly - COLLATERAL_PRECISION is a non-public immutable - but the equivalence below
+    # proves it: if it were != 1 the AMM's get_x0 would diverge from the oracle copy.
+    oracles = [
+        ("YBLendingOracle", lending_oracle),
+        ("YBLendingOracleLL", ll_deployer.deploy(yb_lt.address)),
+        ("YBNetPressure", boa.load('contracts/net_pressure/YBNetPressure.vy')),
+    ]
+
+    checked = solvable_seen = revert_seen = 0
+    for p_o in [5 * 10**17, 10**18, 2 * 10**18, 3 * 10**18, 12345 * 10**14]:
+        for collateral in [0, 7 * 10**17, 10**18, 3 * 10**18, 55 * 10**17]:
+            cv = p_o * collateral // 10**18
+            # Straddle debt == 9/16 * coll_value (the get_x0 revert boundary at L=2).
+            edge = cv * 9 // 16
+            for debt in sorted(set([0, cv // 4, cv // 2, max(edge - 3, 0), edge,
+                                    edge + 3, cv * 3 // 4, cv, cv + 10**18])):
+                amm_x0, amm_ok = _amm_get_x0(yb_amm, p_o, collateral, debt)
+                for name, oracle in oracles:
+                    ok, x0 = oracle.internal._get_x0(p_o, collateral, debt)
+                    assert ok == amm_ok, (name, p_o, collateral, debt, ok, amm_ok)
+                    if amm_ok:
+                        assert x0 == amm_x0, (name, p_o, collateral, debt, x0, amm_x0)
+                checked += 1
+                solvable_seen += amm_ok
+                revert_seen += not amm_ok
+
+    # The grid must actually exercise both sides of the boundary, or it proves nothing.
+    assert solvable_seen > 0 and revert_seen > 0, (solvable_seen, revert_seen, checked)

@@ -100,6 +100,25 @@ LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECIS
 
 
 @internal
+@pure
+def _get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> (bool, uint256):
+    """
+    @notice AMM.get_x0(p_oracle, collateral, debt, safe_limits=False) reproduced in-contract:
+            bit-for-bit identical, but returns (solvable, x0) rather than reverting on the
+            discriminant underflow. Done here for gas and to avoid the OOG-vs-revert
+            ambiguity of AMM.get_state() re-entering the crvUSD aggregator.
+    @dev COLLATERAL_PRECISION == 1 (the cryptopool LP is 18-dec). solvable is False exactly
+         when AMM.get_x0 would revert (position too imbalanced: ratio < 9/16 at L=2).
+    @return (solvable, x0)
+    """
+    coll_value: uint256 = p_oracle * collateral // PRECISION
+    d_sub: uint256 = 4 * coll_value * LEV_RATIO // PRECISION * debt
+    if coll_value * coll_value < d_sub:
+        return (False, 0)
+    return (True, (coll_value + isqrt(coll_value * coll_value - d_sub)) * PRECISION // (2 * LEV_RATIO))
+
+
+@internal
 @view
 def _assert_not_reentrant(amm: LevAMM):
     """
@@ -183,22 +202,21 @@ def _pressure_signals(amm: LevAMM, m: PoolMetrics) -> PressureTvl:
     collateral: uint256 = staticcall amm.collateral_amount()
     debt: uint256 = staticcall amm.get_debt()
 
-    # Reproduce AMM.get_x0 here rather than calling AMM.get_state(): equivalent x0,
-    # but cheaper (no external call) and without the OOG-vs-revert ambiguity of
-    # get_state() re-entering the crvUSD aggregator. coll_value_ps == p_o_amm *
-    # collateral // PRECISION is exactly get_x0's coll_value (COLLATERAL_PRECISION == 1:
-    # cryptopool LP is 18-dec).
+    # x0 == AMM.get_x0(): reproduced in-contract (see _get_x0) for gas and to avoid the
+    # OOG-vs-revert ambiguity of get_state() re-entering the crvUSD aggregator.
+    x0_ok: bool = False
+    x0: uint256 = 0
+    x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
+    # get_x0's coll_value: the collateral marked at the price_scale price (p_o_amm).
     coll_value_ps: uint256 = p_o_amm * collateral // PRECISION
-    d_sub: uint256 = 4 * coll_value_ps * LEV_RATIO // PRECISION * debt
 
     calc_coll_value: uint256 = 0  # AMM collateral marked at the price_oracle price
     calc_debt: uint256 = 0
-    if coll_value_ps * coll_value_ps >= d_sub:
+    if x0_ok:
         # Solvable: x0 == get_x0(...). coll_value_true marks the collateral at
         # lp_price_oracle, then slide debt/collateral along the bonding curve to that
         # price: sqrt(k * m*) = sqrt(x_initial * coll_value_true), with k = x_initial
         # * collateral conserved, so this rides on the oracle price not the spot split.
-        x0: uint256 = (coll_value_ps + isqrt(coll_value_ps * coll_value_ps - d_sub)) * PRECISION // (2 * LEV_RATIO)
         coll_value_true: uint256 = coll_value_ps * m.lp_price_oracle // m.lp_price_ps
         calc_coll_value = isqrt((x0 - debt) * coll_value_true)
         calc_debt = x0 - calc_coll_value
