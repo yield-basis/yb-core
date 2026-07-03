@@ -528,7 +528,7 @@ def test_pool_metrics_ratio_is_portfolio_value(
 @pytest.mark.parametrize("extra_depth,deposit", BALANCE_CASES)
 def test_pressure_signals_half_tvl_is_value_oracle(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
-    yb_allocated, seed_cryptopool, net_pressure, extra_depth, deposit,
+    yb_allocated, seed_cryptopool, net_pressure, mock_agg, extra_depth, deposit,
 ):
     """_pressure_signals: at equilibrium half_tvl == the AMM's value_oracle (equity),
     and net pressure ~= 0."""
@@ -537,7 +537,7 @@ def test_pressure_signals_half_tvl_is_value_oracle(
     assert abs(_ratio(cryptopool) - 1.0) < 0.02
 
     m = net_pressure.internal._pool_metrics(cryptopool.address)
-    ps = net_pressure.internal._pressure_signals(yb_amm.address, m)
+    ps = net_pressure.internal._pressure_signals(yb_amm.address, m, mock_agg.price())
     equity = yb_amm.value_oracle().value  # x0 / (2L-1)
     assert abs(ps.half_tvl - equity) < equity // 50          # half-TVL == value_oracle
     assert abs(ps.net_pressure) < equity // 50               # ~0 at equilibrium

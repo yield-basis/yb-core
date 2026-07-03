@@ -62,6 +62,12 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
   re-enters the heavy crvUSD aggregator, and a gas-metered `raw_call` around it can't
   robustly tell a genuine revert from a forced out-of-gas, so the branch is pure
   arithmetic and immune to gas-schedule repricing (e.g. Glamsterdam).
+- **The crvUSD aggregator is read once per `trigger()`**, not once per market:
+  `PID` reads `FACTORY.agg().price_w()` (the Factory owns the aggregator config) and
+  passes it into every `YBNetPressure` call; the oracle reconstructs the AMM's
+  `PRICE_ORACLE_CONTRACT.price()` as `lp_price_ps * agg_price / 1e18`. The `agg_price`
+  argument is optional — single-market callers can omit it (0) and the oracle reads
+  `lt.agg().price()` itself.
 - **Sink size** is `sink_pool.totalSupply() * get_virtual_price()` (stableswap vprice
   is not spot-manipulable).
 - **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`

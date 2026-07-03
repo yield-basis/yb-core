@@ -49,11 +49,17 @@
      equity x0*(2L/(2L-1)*sqrt(r) - 1), r = lp_price_oracle/lp_price_ps. At r == 1
      calculated_debt == debt and net == 0 (a 2x 50/50 LP has debt == crvUSD-in-LP).
 
-     Numeraire: x0 and PRICE_ORACLE_CONTRACT carry the agg (USD) factor and the
-     AMM treats 1 crvUSD as 1 USD-unit in its leverage math, so net pressure is
-     reported in that numeraire (== crvUSD when crvUSD is at peg). The lp_price_ps
-     factor cancels between coll_value (via PRICE_ORACLE_CONTRACT) and the ratio,
-     so the result rides on lp_price_oracle and the conserved k/x0.
+     Numeraire: x0 carries the agg (USD) factor (p_o_amm = lp_price_ps * agg
+     reconstructs the AMM's PRICE_ORACLE_CONTRACT.price()) and the AMM treats
+     1 crvUSD as 1 USD-unit in its leverage math, so net pressure is reported in
+     that numeraire (== crvUSD when crvUSD is at peg). The lp_price_ps factor
+     cancels between coll_value and the ratio, so the result rides on
+     lp_price_oracle and the conserved k/x0.
+
+     The (heavy) crvUSD aggregator is read at most once per external call: every
+     entry point takes an optional agg_price so a caller looping over many markets
+     can read the aggregator once and share it (all YB markets use the same one);
+     when omitted (0) the oracle reads lt.agg().price() itself.
 """
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 
@@ -70,13 +76,13 @@ interface Pool:
     def totalSupply() -> uint256: view
 
 interface LevAMM:
-    def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
 
 interface LT:
     def CRYPTOPOOL() -> Pool: view
     def amm() -> LevAMM: view
+    def agg() -> PriceOracle: view
 
 
 struct PoolMetrics:
@@ -181,7 +187,7 @@ def crvusd_value_fraction(lt: LT) -> uint256:
 
 @internal
 @view
-def _pressure_signals(amm: LevAMM, m: PoolMetrics) -> PressureTvl:
+def _pressure_signals(amm: LevAMM, m: PoolMetrics, agg_price: uint256) -> PressureTvl:
     """
     @notice Net pressure AND half-TVL for the AMM, both manipulation-resistant.
     @dev Both are derived from the AMM's conserved invariants (x0 and the constant
@@ -196,9 +202,12 @@ def _pressure_signals(amm: LevAMM, m: PoolMetrics) -> PressureTvl:
          collateral/debt - safe there because nothing can trade against it.
     @param amm The market's LevAMM.
     @param m The pool's already-computed metrics.
+    @param agg_price crvUSD aggregator price (1e18), read once by the caller.
     @return PressureTvl(net_pressure, half_tvl), crvUSD numeraire.
     """
-    p_o_amm: uint256 = staticcall (staticcall amm.PRICE_ORACLE_CONTRACT()).price()
+    # p_o_amm == the AMM's PRICE_ORACLE_CONTRACT.price() == lp_price_ps * agg / 1e18,
+    # reconstructed so the (heavy) crvUSD aggregator is not re-read per market.
+    p_o_amm: uint256 = m.lp_price_ps * agg_price // PRECISION
     collateral: uint256 = staticcall amm.collateral_amount()
     debt: uint256 = staticcall amm.get_debt()
 
@@ -240,49 +249,67 @@ def _pressure_signals(amm: LevAMM, m: PoolMetrics) -> PressureTvl:
 
 @external
 @view
-def half_tvl_oracle(lt: LT) -> uint256:
+def half_tvl_oracle(lt: LT, agg_price: uint256 = 0) -> uint256:
     """
     @notice The AMM's half-TVL: its equity valued at price_oracle (crvUSD).
     @dev Derived from the conserved x0/constant product (== value_oracle at
          equilibrium), not the spot collateral_amount, so it is non-manipulable.
          The controller's normalizer.
     @param lt The YB LT (market) contract.
+    @param agg_price crvUSD aggregator price (1e18); a caller looping over markets
+           reads the (heavy) aggregator once and passes it here. 0 (default) =
+           read lt.agg().price().
     @return AMM equity at price_oracle in crvUSD (1e18).
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
-    return self._pressure_signals(amm, self._pool_metrics(pool)).half_tvl
+    p: uint256 = agg_price
+    if p == 0:
+        p = staticcall (staticcall lt.agg()).price()
+    return self._pressure_signals(amm, self._pool_metrics(pool), p).half_tvl
 
 
 @external
 @view
-def net_pressure_oracle(lt: LT) -> int256:
+def net_pressure_oracle(lt: LT, agg_price: uint256 = 0) -> int256:
     """
     @notice Manipulation-resistant net pressure (debt - crvUSD in LP).
     @param lt The YB LT (market) contract.
+    @param agg_price crvUSD aggregator price (1e18); a caller looping over markets
+           reads the (heavy) aggregator once and passes it here. 0 (default) =
+           read lt.agg().price().
     @return Net pressure; positive => crvUSD buy pressure on unwind.
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
-    return self._pressure_signals(amm, self._pool_metrics(pool)).net_pressure
+    p: uint256 = agg_price
+    if p == 0:
+        p = staticcall (staticcall lt.agg()).price()
+    return self._pressure_signals(amm, self._pool_metrics(pool), p).net_pressure
 
 
 @external
 @view
-def net_pressure_and_tvl(lt: LT) -> PressureTvl:
+def net_pressure_and_tvl(lt: LT, agg_price: uint256 = 0) -> PressureTvl:
     """
     @notice Net pressure and the AMM's half-TVL in a single call.
     @dev Computes the (expensive) lp_oracle_2 pool metrics once and reuses them for
          both, so the controller's per-pool aggregation doesn't pay for it twice.
     @param lt The YB LT (market) contract.
+    @param agg_price crvUSD aggregator price (1e18); a caller looping over markets
+           reads the (heavy) aggregator once and passes it here. 0 (default) =
+           read lt.agg().price().
     @return PressureTvl(net_pressure, half_tvl); both manipulation-resistant, crvUSD.
     """
     amm: LevAMM = staticcall lt.amm()
     pool: Pool = staticcall lt.CRYPTOPOOL()
     self._assert_not_reentrant(amm)
-    return self._pressure_signals(amm, self._pool_metrics(pool))
+    p: uint256 = agg_price
+    if p == 0:
+        p = staticcall (staticcall lt.agg()).price()
+    return self._pressure_signals(amm, self._pool_metrics(pool), p)
 
 
 @external

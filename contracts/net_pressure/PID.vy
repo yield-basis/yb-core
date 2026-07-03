@@ -42,6 +42,13 @@ interface CryptoPool:
     def fee() -> uint256: view
     def coins(i: uint256) -> address: view
 
+interface PriceOracle:
+    def price() -> uint256: view
+    def price_w() -> uint256: nonpayable
+
+interface Factory:
+    def agg() -> PriceOracle: view
+
 interface LT:
     def balanceOf(addr: address) -> uint256: view
     def withdraw(shares: uint256, min_assets: uint256, receiver: address) -> uint256: nonpayable
@@ -52,7 +59,7 @@ interface Erc20D:
     def decimals() -> uint8: view
 
 interface NetPressureOracle:
-    def net_pressure_and_tvl(lt: address) -> PressureTvl: view
+    def net_pressure_and_tvl(lt: address, agg_price: uint256) -> PressureTvl: view
 
 interface MarketRateGetter:
     def rate() -> uint256: view
@@ -101,6 +108,7 @@ MAX_POOLS: constant(uint256) = 20
 MAX_TOKENS: constant(uint256) = 100   # must match FeeDistributor.MAX_TOKENS
 
 CRVUSD: public(immutable(IERC20))
+FACTORY: public(immutable(Factory))   # owns the crvUSD aggregator config (Factory.agg)
 
 # Wiring (DAO-settable)
 net_pressure: public(NetPressureOracle)
@@ -141,11 +149,12 @@ _npt: transient(HashMap[address, CachedPt])
 
 
 @deploy
-def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter: MarketRateGetter,
-             fee_distributor: FeeDistributor, owner: address):
+def __init__(crvusd: IERC20, factory: Factory, net_pressure: NetPressureOracle,
+             market_rate_getter: MarketRateGetter, fee_distributor: FeeDistributor, owner: address):
     """
     @notice Deploy the controller with default gains (DAO can retune).
     @param crvusd The crvUSD token: the reserve and reward asset.
+    @param factory The YB Factory: the owner of the crvUSD aggregator config.
     @param net_pressure The YBNetPressure oracle (net pressure + oracle TVL).
     @param market_rate_getter Source of the market rate the offer is quoted against.
     @param fee_distributor FeeDistributor whose token set lists the LT fees to convert.
@@ -154,6 +163,7 @@ def __init__(crvusd: IERC20, net_pressure: NetPressureOracle, market_rate_getter
     ownable.__init__()
     ownable._transfer_ownership(owner)
     CRVUSD = crvusd
+    FACTORY = factory
     self.net_pressure = net_pressure
     self.market_rate_getter = market_rate_getter
     self.fee_distributor = fee_distributor
@@ -190,7 +200,7 @@ def _ensure_pool_approval(pool: CryptoPool, asset: IERC20):
 
 
 @internal
-def _convert_fees():
+def _convert_fees(agg_price: uint256):
     """
     @notice Convert any held LT fees into crvUSD.
     @dev For each LT in the FeeDistributor token set, withdraw its asset then swap to
@@ -199,6 +209,7 @@ def _convert_fees():
          by the price_oracle-fair value of the shares (half_tvl-based), the swap by the
          price_oracle. Caches net_pressure_and_tvl in transient storage so the
          controller can reuse it without re-running the lp_oracle_2 solve.
+    @param agg_price The crvUSD aggregator price (1e18), read once per trigger.
     """
     token_set: DynArray[address, MAX_TOKENS] = staticcall self.fee_distributor.token_sets(
         staticcall self.fee_distributor.current_token_set())
@@ -215,7 +226,7 @@ def _convert_fees():
         discount: uint256 = min(self.swap_fee_multiplier * (staticcall pool.fee()) // FEE_DENOM, PRECISION)
 
         # Heavy oracle call (the lp_oracle_2 solve), cached for the controller pass.
-        pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt_addr)
+        pt: PressureTvl = staticcall self.net_pressure.net_pressure_and_tvl(lt_addr, agg_price)
         self._npt[lt_addr] = CachedPt(cached=True, net_pressure=pt.net_pressure, half_tvl=pt.half_tvl)
 
         # 1) Withdraw, bounded by the price_oracle-fair value of the shares:
@@ -237,12 +248,13 @@ def _convert_fees():
 
 @internal
 @view
-def _signals() -> Signals:
+def _signals(agg_price: uint256) -> Signals:
     """
     @notice Compute the controller's manipulation-resistant inputs.
     @dev Reads each pool's net_pressure_and_tvl from the per-trigger transient cache
          (populated by _convert_fees) when present, else fetches it. So a pool in both
          the fee set and pressure_lts pays the lp_oracle_2 solve once per trigger().
+    @param agg_price The crvUSD aggregator price (1e18), read once per trigger.
     @return Signals(pressure, sink), the relative (per half-TVL) controller inputs.
     """
     s: Signals = empty(Signals)
@@ -254,7 +266,7 @@ def _signals() -> Signals:
         if c.cached:
             pt = PressureTvl(net_pressure=c.net_pressure, half_tvl=c.half_tvl)
         else:
-            pt = staticcall self.net_pressure.net_pressure_and_tvl(lt)
+            pt = staticcall self.net_pressure.net_pressure_and_tvl(lt, agg_price)
         half_tvl += pt.half_tvl   # already the AMM equity (half-TVL); non-manipulable
         net += pt.net_pressure
     assert half_tvl > 0, "No pools"
@@ -272,13 +284,17 @@ def trigger():
     @notice Convert fees and (at most every min_interval) update the gauge rate.
             Permissionless; FeeSplitter calls it after forwarding the PID's share.
     """
-    self._convert_fees()
+    # One crvUSD aggregator read (it is heavy) shared by the whole trigger: every
+    # market's PressureTvl uses the same agg_price. Factory owns the agg config.
+    # price_w: state-changing path, so also checkpoint the aggregator's EMA.
+    agg_price: uint256 = extcall (staticcall FACTORY.agg()).price_w()
+    self._convert_fees(agg_price)
     # Need strictly positive elapsed time (dt) for the integral/derivative; the
     # max(.,1) also makes min_interval=0 safe (avoids div-by-zero on same-block calls).
     if block.timestamp < self.last_ts + max(self.min_interval, 1):
         return  # too soon to step the controller; fees still converted above
 
-    s: Signals = self._signals()
+    s: Signals = self._signals(agg_price)
 
     dt_years: int256 = convert((block.timestamp - self.last_ts) * PRECISION // SECONDS_PER_YEAR, int256)
     error: int256 = convert(s.pressure, int256) - convert(s.sink, int256)
@@ -322,7 +338,7 @@ def preview_signals() -> Signals:
     @notice The controller's current inputs, for monitoring/tuning.
     @return Signals(pressure, sink), the relative (per half-TVL) controller inputs.
     """
-    return self._signals()
+    return self._signals(staticcall (staticcall FACTORY.agg()).price())
 
 
 # --- DAO control -------------------------------------------------------------

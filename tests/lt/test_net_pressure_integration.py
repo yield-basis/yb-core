@@ -68,7 +68,7 @@ def get_virtual_price() -> uint256:
 
 def test_full_stack(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
-    yb_allocated, seed_cryptopool, token_mock,
+    yb_allocated, seed_cryptopool, token_mock, factory,
 ):
     staker = accounts[4]
 
@@ -107,8 +107,8 @@ def test_full_stack(
     sink_pool = boa.loads(SINK_MOCK, 10**21, 10**18)  # modest sink so error>0
 
     gauge = boa.load("contracts/net_pressure/FastGauge.vy", sink_lp.address, stablecoin.address, admin)
-    pid = boa.load("contracts/net_pressure/PID.vy", stablecoin.address, oracle.address,
-                   mrate.address, fd.address, admin)
+    pid = boa.load("contracts/net_pressure/PID.vy", stablecoin.address, factory.address,
+                   oracle.address, mrate.address, fd.address, admin)
     fraction = 10**18 // 2  # 50% to PID
     fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, pid.address, fraction, admin)
 

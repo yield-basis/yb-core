@@ -71,8 +71,31 @@ def set(n: int256, t: uint256):
     self.htvl = t
 @external
 @view
-def net_pressure_and_tvl(lt: address) -> PressureTvl:
+def net_pressure_and_tvl(lt: address, agg_price: uint256) -> PressureTvl:
     return PressureTvl(net_pressure=self.net, half_tvl=self.htvl)
+"""
+
+AGG_MOCK = """
+# pragma version 0.4.3
+p: public(uint256)
+@deploy
+def __init__():
+    self.p = 10**18
+@external
+@view
+def price() -> uint256:
+    return self.p
+@external
+def price_w() -> uint256:
+    return self.p
+"""
+
+FACTORY_MOCK = """
+# pragma version 0.4.3
+agg: public(address)
+@deploy
+def __init__(a: address):
+    self.agg = a
 """
 
 MR_MOCK = """
@@ -376,8 +399,10 @@ def test_pid_step_matches_reference(token, accts):
     fd = boa.loads(FD_MOCK)                       # empty token set -> no conversion
     sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # 1e24 LP, vprice 1.0
     gauge = boa.loads(GAUGE_MOCK, 5 * 10**23)    # totalAssets
+    factory = boa.loads(FACTORY_MOCK, boa.loads(AGG_MOCK).address)
 
-    pid = boa.load("contracts/net_pressure/PID.vy", crvusd.address, np.address, mr.address, fd.address, admin)
+    pid = boa.load("contracts/net_pressure/PID.vy", crvusd.address, factory.address,
+                   np.address, mr.address, fd.address, admin)
     with boa.env.prank(admin):
         pid.set_pressure_lts([boa.env.generate_address()])
         pid.set_gauge(gauge.address, sink.address)
