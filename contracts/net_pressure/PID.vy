@@ -175,7 +175,11 @@ def __init__(crvusd: IERC20, factory: Factory, net_pressure: NetPressureOracle,
     self.feedforward_gain = 1_160_000_000_000_000_000      # 1.16
     self.kp = 50 * 10**18
     self.ki = 1988 * 10**18
-    self.kd = 15_800_000_000_000_000                       # 0.0158
+    # kd is matched to the 6h derivative filter below: the filter attenuates the raw
+    # dpressure/dt peak, so kd is ~3x the raw-derivative optimum (0.0158) to keep ~99%
+    # crash coverage. kd and d_filter_time are coupled - retune together (see the net
+    # pressure report, "Stepwise net pressure and the derivative filter").
+    self.kd = 49_000_000_000_000_000                       # 0.049
     self.max_integral = 2_930_000_000_000_000_000          # 2.93
     self.sink_cap = 22 * 10**18
     self.dead_band = 1_600_000_000_000_000_000             # 1.6

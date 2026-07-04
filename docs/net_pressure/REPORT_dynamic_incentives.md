@@ -19,7 +19,8 @@ The net pressure can be made nonpositive 99% of the times via dynamically changi
 * The depositor response is a **dead-band relaxation**: crvUSD only moves once a venue pays ~**1.6× the market rate**, then fills with a ~**week**-scale time constant and drains a bit faster (~6 d), according to our measurements (§3–5).
 * When fresh large incentives are given - the inflow rate is *very high*. We call it **rush inflow** and model it as well.
 * Incentivising a crvUSD pool **cannibalises ~44%** of its new TVL from *other* crvUSD pools, so its net new-liquidity efficiency is **~56%** — but that leakage is **slow**. Fortunately, this does not affect the rush inflow (§6). So combining these two effects leads to having to spend ×1.15 more incentives than without cannibalasing incentives of peer pools.
-* A **PID-with-feed-forward** controller covers **~99% of all positive net pressure** — including the worst crash in a 2.4-year backtest — for **~0.1%/yr of Yield Basis TVL** (≤0.13% worst-case, §8), fully closed with the existing 10-20% YB-token reserve (§7–8).
+* A **PID-with-feed-forward** controller covers **~99% of all positive net pressure** — including the worst crash in a 2.4-year backtest — for **~0.1–0.15%/yr of Yield Basis TVL** (§8; ~0.15% with the deployed 6h derivative filter, §9), fully closed with the existing 10-20% YB-token reserve (§7–9).
+* The controller's derivative is **low-passed with a 6 h filter** because real on-chain net pressure moves in **discrete steps**; 6 h is the noise-vs-lag knee, and the derivative gain is matched to it (**`kd = 0.049`**, not the raw-derivative `0.0158`) — §9.
 
 ---
 
@@ -185,21 +186,23 @@ pre-built reserve absorbs that.
 
 A minimal, readable version of the whole loop — read the pool, form the net-pressure
 signal, run the PID, and output the bonus APR to set plus the residual still uncovered.
-The YB-pool and depositor evolution is assumed (`...`); the constants are the §9 design
-point.
+The YB-pool and depositor evolution is assumed (`...`); the constants are the §10 design
+point (with the §9 6h-filtered derivative and its matched `Kd = 0.049`).
 
 ```python
-# Measured / fitted constants (see §4, §6, §9)
+# Measured / fitted constants (see §4, §6, §10; derivative filter §9)
 DEAD_BAND  = 1.6        # x_hi: LPs only start arriving above ~1.6x the market rate
 BETA       = 0.5        # sink (frac of half-TVL) drawn per unit of offer above the band
 S_CAP      = 22.0       # clamp on the target sink (sets the worst-case offered APR in units of market rate)
 ALPHA      = 1.16       # feed-forward gain on the pressure
-KP, KI, KD = 50.0, 1988.0, 0.0158   # PID gains (P, S in frac of half-TVL; time in YEARS)
+KP, KI, KD = 50.0, 1988.0, 0.049    # PID gains (P, S in frac of half-TVL; time in YEARS)
 I_MAX      = 2.93       # integral clamp
+TF         = 6 / 24 / 365   # derivative low-pass time constant (6 h, in YEARS) — §9
 RESERVE    = 0.10       # standing YB-funded buffer absorbing the first 10% (frac half-TVL)
 # half-TVL means 50% of Curve pool's TVL, or 100% of YB TVL
+# NB: KD is matched to the 6h filter (§9); the raw-dP/dt optimum is KD=0.0158.
 
-I, prev_P, S = 0.0, 0.0, 0.0          # integral accumulator, last pressure, current sink
+I, prev_P, d_p, S = 0.0, 0.0, 0.0, 0.0   # integral, last pressure, filtered derivative, sink
 
 while True:
     dt = ...                          # control timestep, in YEARS
@@ -219,9 +222,11 @@ while True:
     # 3. PID on the coverage error  e = P - S   (integral + derivative + proportional)
     e      = P - S
     I      = clip(I + e * dt, 0.0, I_MAX)           # integral term (clamped)
-    dPdt   = max(0.0, (P - prev_P) / dt)            # derivative on RISING pressure only
+    # derivative on RISING pressure, LOW-PASSED (Astrom, Tf = d_filter_time = 6 h): a raw
+    # (P - prev_P)/dt is a spike train on stepwise on-chain net pressure (§9).
+    d_p    = (TF * d_p + (P - prev_P)) / (TF + dt)   # filtered derivative (state; Tf,dt in yr)
     prev_P = P
-    S_target = clip(ALPHA*P + KP*e + KI*I + KD*dPdt,  0.0, S_CAP)
+    S_target = clip(ALPHA*P + KP*e + KI*I + KD*max(0.0, d_p),  0.0, S_CAP)
 
     # 4. map the target sink to an offered APR and set it
     x         = DEAD_BAND + S_target / BETA         # offered scrvUSD APR as a multiple of m
@@ -307,13 +312,87 @@ spike approaching the instantaneous flash magnitude.
 
 ---
 
-## 9. The overall model, with measured coefficients
+## 9. Stepwise net pressure and the derivative filter (practical controller)
+
+§7–§8 differentiate the pressure with a raw `dP/dt`. But net pressure is read **on-chain,
+and it only moves on discrete events** — every deposit, withdrawal and swap is a step, so
+the raw derivative is a **spike train**, not the smooth curve the idealised loop assumes.
+The deployed controller (`PID.vy`) therefore low-passes the derivative with a first-order
+**Åström filter** (`dt`, `Tf` in years):
+
+```
+d[k] = (Tf·d[k-1] + (P[k] − P[k-1])) / (Tf + dt) ,   target += Kd·max(0, d[k])
+```
+
+`Tf = d_filter_time` (default **6 h**). `Tf = 0` recovers the raw derivative. This section
+sizes `Tf` against the **real** stepwise signal and shows the reserve result survives.
+
+**The real signal is stepwise and near-random-walk.** We reconstruct the per-block net
+pressure of the crvUSD sink we already track — the PYUSD/crvUSD pool
+`0x625E…6200`, `net_pressure = 2·(b0−b1)/(b0+b1)` — from every swap/liquidity event over
+2025-10 … 2026-07 (23,708 events; `fetch_pool_netpressure.py`, event cumsum re-anchored to
+on-chain `balances()`/`totalSupply` every ~3 h, `totalSupply` drift 0). A single event moves
+it up to 1.0; the worst single **hour** by 1.95. The raw derivative RMS is 448/yr and falls
+*smoothly* with the averaging horizon (193/yr at 6 h, 90 at 24 h) — **no natural knee**, so
+`Tf` is a genuine **noise-vs-lag trade-off**, not a cutoff to recover
+(`sim_pid_dfilter.py`, `REPORT_pid_dfilter.md`). (This sink pool is ~**5.4×** noisier than
+the actual YB BTC net pressure — std 0.49 vs 0.09 — so it is a conservative stress test.)
+
+**`Kd` is coupled to `Tf` — and the §10 default was tuned for a *raw* derivative.**
+Re-optimising the reserve PID (§8 plant, worst candidate) at the real **1 h** controller
+cadence (`min_interval`) recovers, for the raw derivative, α=1.19 Kp=50 Ki=1980 **Kd=0.0153**
+— i.e. essentially the deployed defaults (α1.16, Kp50, Ki1988, **kd0.0158**). The 6h filter
+attenuates the derivative peak, so feeding the *same* `Kd` through it under-preempts the
+crash: **coverage 99.1%→93.8%, worst reserve tip 1.6%→5.1%** of half-TVL. The fix is to
+raise `Kd` to match the filter (`sim_reserve_dfilter.py`).
+
+**Choosing `Tf`.** Holding crash coverage fixed at 99.1%, sweep `Tf` (each with its matched
+`Kd`) and read off the reserve spend, the tip, and the offered-APR **jitter** the same `Kd`
+produces on the stepwise sink signal (`sim_pool_dynamics_practical.py`):
+
+| `Tf` | `Kd`* | spend %/yr | worst tip | offered-APR jitter (YB) | jitter (noisy-sink stress) |
+|---|---|---|---|---|---|
+| 0 (raw) | 0.0158 | 0.122 | 1.62% | 9.7% | 52% |
+| 1 h | 0.0235 | 0.125 | 1.31% | 6.3% | 34% |
+| 3 h | 0.0345 | 0.138 | 1.62% | 4.2% | 23% |
+| **6 h** | **0.049** | **0.150** | **1.75%** | **3.3%** | **18%** |
+| 12 h | 0.0775 | 0.165 | 1.94% | 2.8% | 15% |
+| 24 h | 0.1334 | 0.182 | 2.26% | 2.4% | 13% |
+
+Reserve spend **rises** with `Tf` (bigger `Kd` to preempt through more lag); offered-APR
+jitter **falls** with `Tf`. The jitter drop is steep up to 6 h (9.7→3.3%) then flattens
+(6→24 h only 3.3→2.4%), while spend keeps climbing — so **6 h is the knee**: it kills the
+stepwise spike energy, still reacts to the hours-scale crash shoulder, and its ~4 h
+step-response half-life is negligible against the 6–11 day liquidity response (§3). Below
+~3 h the offer flickers; above ~12 h you pay reserve for little further calm.
+
+The figure below is the closed-loop analogue of the §4 `pool_dynamics_simple_fit` (same
+mosaic): the controlled **sink `S`** (red, the "plant output") tracking net pressure `P`
+(black, the driver); the offered APR multiple with the dead band; the Aug-2024 crash zoom
+(6h + re-tuned `Kd` fills the shoulder like raw); and a closed-form check that the 6h filter
+turns a stepwise `ΔP` into a **bounded pulse `~Δ/Tf`** (numerical ≡ analytic), instead of the
+raw `Δ/dt` spike.
+
+![practical controlled pool dynamics](pics/pool_dynamics_practical.png)
+
+**Result — the reserve sizing survives.** The **expected spend is unchanged** at
+~0.12–0.15%/yr of half-TVL, and the worst-crash tip stays well inside the 10–20% reserve.
+The one change vs §7–8: to *deliver* the ~99% coverage with the deployed 6h filter,
+**`Kd` must be ~0.049** (≈3× the raw-tuned 0.0158). Bonus: with the filter the spend is
+**grid/cadence-invariant** (raw `dP/dt` drifts with the sampling step), so the filtered
+number is the trustworthy one to budget against. Recommended deployed constants:
+**`d_filter_time = 6 h`, `kd = 0.049`** (all other gains unchanged).
+
+---
+
+## 10. The overall model, with measured coefficients
 
 A deployment runs, each step (`dt` in years): read the pool, form
 `P = max(0, net_pressure)` with `net_pressure = 2·(debt − b0)/(b0 + b1·p)`; read the
 market norm `m` (Aave USDC, 7-day EMA — provided as a time series in
 `aave_rate_smoothed.csv.xz`, column `aave_apr_ema7d`); run the PID on `e = P − S` for a target sink
-`S* = clip(α·P + Kp·e + Ki·I + Kd·max(0,dP/dt), 0, S_cap)`; map to an advertised APR
+`S* = clip(α·P + Kp·e + Ki·I + Kd·max(0, d_p), 0, S_cap)`, with `d_p` the **6h-filtered**
+derivative of §9 (`d_p ← (Tf·d_p + ΔP)/(Tf+dt)`, `Tf = d_filter_time = 6 h`); map to an advertised APR
 multiple `x = dead_band + S*/β` (with `S*` clamped at `S_cap`); set **bonus APR = (x − 1)·m** paid only
 on the program's deposits `S`. The depositor plant is `dS/dt = (S*−S)/τ` with the rush
 acceleration on inflow.
@@ -346,10 +425,14 @@ The cross-candidate sims (§8) use the **simplified analytical plant** — the `
 | β | 0.5 | deposit elasticity (sink per excess APR-multiple); coverage robust, only spend scales |
 | S_cap | 22 (target-sink clamp) | caps worst-case fill speed ⇒ offer ≲46×; realized peak ~34× |
 | efficiency | slow channel **56%**, rush **100%** (rush-clean) | peer cannibalisation, §6 |
-| **PID gains** | **α = 1.16, Kp = 50, Ki = 1988 /yr, Kd = 0.0158 yr, Imax = 2.93** | optimised on `mf120_of163` (P,S in frac half-TVL, t in yr) |
+| **PID gains** | **α = 1.16, Kp = 50, Ki = 1988 /yr, Kd = 0.049 yr, Imax = 2.93** | optimised on `mf120_of163` (P,S in frac half-TVL, t in yr) |
+| **derivative filter** | **`d_filter_time = Tf = 6 h`** | low-pass on `dP/dt` (§9); `Kd` is matched to it (the raw-derivative optimum is `Kd = 0.0158`) |
 | reserve | 10–20% (YB-funded) | standing buffer stacked on top — covers even the sharp tip (§8) |
 
 Gains are optimiser outputs (re-tune per deployment); the plant constants are the §4 fit.
+**`Kd` and `Tf` are coupled** (§9): the earlier `Kd = 0.0158` was the *raw*-`dP/dt` optimum;
+with the deployed 6h filter it under-preempts, so `Kd` is raised to **0.049** to hold ~99%
+coverage (spend then ~0.15%/yr; still 0% uncovered at a ≥10% reserve).
 
 ### Headline economics
 
@@ -368,4 +451,7 @@ Gains are optimiser outputs (re-tune per deployment); the plant constants are th
 `REPORT_pool_apr_response.md` · `REPORT_pool_dynamics.md` (incl. the simplified fee=0/p_in=1
 fit) · `REPORT_crvusd_aggregate.md` · `REPORT_others_dynamics.md` ·
 `REPORT_incentive_efficiency.md` · `REPORT_rush_migration.md` · `REPORT_incentive_sim.md`
-(control structure). Sims: `incentive_sim_candidates.py`, `incentive_reserve_fine.py`.
+(control structure) · `REPORT_pid_dfilter.md` (§9 derivative filter / stepwise net pressure).
+Sims: `incentive_sim_candidates.py`, `incentive_reserve_fine.py`, `fetch_pool_netpressure.py`
+(per-block sink net pressure), `sim_pid_dfilter.py`, `sim_reserve_dfilter.py`,
+`sim_pool_dynamics_practical.py`.

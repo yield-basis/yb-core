@@ -124,7 +124,7 @@ Tuned offline against historical net pressure (see the report); all DAO-settable
 | Param | Default | Meaning |
 |---|---|---|
 | `feedforward_gain` | 1.16 | proportional gain on raw pressure |
-| `kp`, `ki`, `kd` | 50, 1988, 0.0158 | PID gains on the coverage error (time in years) |
+| `kp`, `ki`, `kd` | 50, 1988, 0.049 | PID gains on the coverage error (time in years) |
 | `max_integral` | 2.93 | integral clamp (anti-windup) |
 | `sink_cap` | 22 | clamp on the target sink |
 | `dead_band` | 1.6 | offered APR multiple at zero target sink |
@@ -132,6 +132,11 @@ Tuned offline against historical net pressure (see the report); all DAO-settable
 | `d_filter_time` | 6 h | derivative low-pass filter time constant Tf (0 = raw derivative) |
 | `swap_fee_multiplier` | 1.5 | fee-conversion slippage buffer (× pool fee) |
 | `min_interval` | 3600 s | minimum spacing between controller steps |
+
+`kd` and `d_filter_time` are **coupled**: the 6 h filter attenuates the raw `Δpressure/dt`
+peak, so `kd` is set to ~3× the raw-derivative optimum (`0.0158`) to keep ~99% crash
+coverage. If you change `d_filter_time`, retune `kd` with it (report §9, table of spend /
+reserve tip / offered-APR jitter vs Tf — 6 h is the noise-vs-lag knee).
 
 ## FastGauge reward streaming
 
