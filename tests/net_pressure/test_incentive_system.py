@@ -4,6 +4,8 @@ MarketRateGetter), using small inline mocks so each contract is tested in isolat
 """
 import boa
 import pytest
+from hypothesis import HealthCheck, given, settings
+import hypothesis.strategies as st
 
 
 PRECISION = 10**18
@@ -285,6 +287,106 @@ def test_fastgauge_two_stakers_split(fg_setup):
     c2 = g.claimable_reward(s["u2"])
     assert abs(c1 - c2) <= rate  # ~equal
     assert abs((c1 + c2) - rate * 1000) <= 5 * rate
+
+
+# Matches FastGauge.MIN_TOTAL_SUPPLY: every stake >= the floor keeps every prefix sum
+# above it, so deposits never trip the seed-the-market guard regardless of order.
+MIN_STAKE = 10 * 10**18
+
+
+@pytest.fixture
+def gauge_env(token, accts):
+    """A FastGauge with a deep, uncapped PID reserve and a pool of fresh stakers, so a
+    property test can drive arbitrary stake splits without the pull ever being capped."""
+    admin, pid = accts[0], accts[1]
+    crvusd = token.deploy("crvUSD", "crvUSD", 18)
+    lp = token.deploy("LP", "LP", 18)
+    gauge = boa.load("contracts/net_pressure/FastGauge.vy", lp.address, crvusd.address, admin)
+    with boa.env.prank(admin):
+        gauge.set_pid(pid)
+    crvusd._mint_for_testing(pid, 10**30)  # deep reserve: the stream is never pull-capped
+    with boa.env.prank(pid):
+        crvusd.approve(gauge.address, 2**256 - 1)
+    stakers = [boa.env.generate_address() for _ in range(6)]
+    return dict(crvusd=crvusd, lp=lp, gauge=gauge, admin=admin, pid=pid, stakers=stakers)
+
+
+@given(
+    stakes=st.lists(st.integers(min_value=MIN_STAKE, max_value=10**26), min_size=1, max_size=6),
+    rate=st.integers(min_value=1, max_value=10**18),
+    dt=st.integers(min_value=1, max_value=30 * 86400),
+)
+@settings(max_examples=100, deadline=None,
+          suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_fastgauge_reward_split_proportional(gauge_env, stakes, rate, dt):
+    """Property: for ANY split of stakes across ANY number of accounts, once all stakes
+    are in and the stream runs for dt, each staker's claimable is exactly its share
+    (stake_i / totalSupply) of what the gauge streamed. The rewards partition the stream
+    with only integer-division dust, never over-paying.
+
+    Deposits happen while rate == 0 (so no reward accrues during the staggered deposits
+    regardless of per-tx timestamps); the rate is set once afterwards, giving a single
+    clean accrual window of length dt over a fixed total supply.
+    """
+    g, lp = gauge_env["gauge"], gauge_env["lp"]
+    pid = gauge_env["pid"]
+    stakers = gauge_env["stakers"][:len(stakes)]
+
+    for user, stake in zip(stakers, stakes):
+        lp._mint_for_testing(user, stake)
+        with boa.env.prank(user):
+            lp.approve(g.address, 2**256 - 1)
+            g.deposit(stake, user)          # rate still 0 -> integral stays 0
+
+    supply = g.totalSupply()
+    assert supply == sum(stakes)
+
+    with boa.env.prank(pid):
+        g.set_reward_rate(rate)             # opens the accrual window at "now"
+    boa.env.time_travel(seconds=dt)
+
+    # Deep reserve => the gauge pulls the full owed amount; reproduce the contract's exact
+    # (double-floored) accounting: one global per-share integral, one per-user multiply.
+    pulled = rate * dt
+    integral = pulled * PRECISION // supply
+    total = 0
+    for user, stake in zip(stakers, stakes):
+        expected = stake * integral // PRECISION
+        assert g.claimable_reward(user) == expected, (stake, supply, rate, dt)
+        total += expected
+
+    # Conservation: the split never pays out more than was streamed, and the shortfall is
+    # only integer-division dust (one per-user floor each, plus the single integral floor).
+    assert total <= pulled
+    assert pulled - total <= len(stakes) + supply // PRECISION + 1
+
+
+def test_fastgauge_reward_split_claim_pays_out(gauge_env):
+    """Each staker can actually claim exactly their proportional share (not just view it),
+    and the gauge is left with only rounding dust."""
+    g, lp, crvusd, pid = gauge_env["gauge"], gauge_env["lp"], gauge_env["crvusd"], gauge_env["pid"]
+    stakes = [10 * 10**18, 30 * 10**18, 60 * 10**18]   # 1 : 3 : 6
+    stakers = gauge_env["stakers"][:3]
+    for user, stake in zip(stakers, stakes):
+        lp._mint_for_testing(user, stake)
+        with boa.env.prank(user):
+            lp.approve(g.address, 2**256 - 1)
+            g.deposit(stake, user)
+
+    rate, dt = 10**15, 1000
+    with boa.env.prank(pid):
+        g.set_reward_rate(rate)
+    boa.env.time_travel(seconds=dt)
+
+    supply = sum(stakes)
+    integral = rate * dt * PRECISION // supply
+    for user, stake in zip(stakers, stakes):
+        expected = stake * integral // PRECISION
+        with boa.env.prank(user):
+            g.claim(user)
+        assert crvusd.balanceOf(user) == expected
+    # Paid straight through: the gauge holds only the dust it couldn't divide evenly.
+    assert crvusd.balanceOf(g.address) <= len(stakes) + supply // PRECISION + 1
 
 
 def test_fastgauge_depletion_no_revert(fg_setup):
