@@ -6,6 +6,8 @@ import boa
 import pytest
 from hypothesis import HealthCheck, given, settings
 import hypothesis.strategies as st
+from hypothesis.stateful import (
+    RuleBasedStateMachine, rule, invariant, run_state_machine_as_test)
 
 
 PRECISION = 10**18
@@ -530,3 +532,181 @@ def test_pid_step_matches_reference(token, accts):
         expected = _pid_reference(state, pressure, sink_norm, mr.rate(), staked_value, dt, g)
         pid.trigger()
         assert gauge.last_rate() == expected, f"net={net}: {gauge.last_rate()} != {expected}"
+
+
+# --- FastGauge stateful invariants -------------------------------------------
+
+class StatefulFastGauge(RuleBasedStateMachine):
+    """Drives a FastGauge through arbitrary interleavings of deposits, withdrawals,
+    transfers, claims, rate changes, PID refills/allowance changes and time travel,
+    checking the whole time that:
+
+      * LP is fully backed (gauge LP balance == totalSupply == Σ share balances);
+      * crvUSD is conserved exactly (everything pulled from the PID is either sitting
+        in the gauge or was claimed - nothing created or lost);
+      * the gauge is always solvent for settled claims (its crvUSD balance covers every
+        user's settled claimable), so a claim/withdraw can never hit "not enough";
+      * nothing reverts along any valid path (min-supply-respecting withdrawals, claims,
+        transfers, claims with an empty reserve, ...).
+
+    Teardown opens the reserve fully, drains all claims, and asserts that of everything
+    the gauge ever streamed, only bounded integer-division dust stays behind - i.e. with
+    stakers present, (nearly) all rewards get distributed.
+    """
+    uid = st.integers(min_value=0, max_value=3)
+    amount = st.integers(min_value=MIN_STAKE, max_value=10**24)
+    frac = st.integers(min_value=0, max_value=100)
+    a_rate = st.integers(min_value=0, max_value=10**18)
+    a_dt = st.integers(min_value=1, max_value=30 * 86400)
+    a_reserve = st.integers(min_value=0, max_value=10**24)
+    a_allowance = st.integers(min_value=0, max_value=2**256 - 1)
+
+    def __init__(self):
+        super().__init__()
+        self.crvusd = self.token.deploy("crvUSD", "crvUSD", 18)
+        self.lp = self.token.deploy("LP", "LP", 18)
+        self.admin = self.accts[0]
+        self.pid = self.accts[1]
+        self.users = [boa.env.generate_address() for _ in range(4)]
+        self.gauge = boa.load("contracts/net_pressure/FastGauge.vy",
+                              self.lp.address, self.crvusd.address, self.admin)
+        with boa.env.prank(self.admin):
+            self.gauge.set_pid(self.pid)
+        self.pid_funded = 10**21                       # modest reserve: depletes/caps sometimes
+        self.crvusd._mint_for_testing(self.pid, self.pid_funded)
+        with boa.env.prank(self.pid):
+            self.crvusd.approve(self.gauge.address, 2**256 - 1)
+        for u in self.users:
+            with boa.env.prank(u):
+                self.lp.approve(self.gauge.address, 2**256 - 1)
+        self.total_claimed = 0
+        self.dust_budget = 0
+
+    def _supply(self):
+        return self.gauge.totalSupply()
+
+    def _bump_dust(self):
+        # Upper bound on the integer-division dust a single checkpoint can strand: the
+        # global integral floor (< supply/1e18 + 1) plus a per-settled-user floor (<1 each,
+        # at most 2 users touched per action).
+        self.dust_budget += self._supply() // 10**18 + 4
+
+    # --- rules ---------------------------------------------------------------
+
+    @rule(uid=uid, amount=amount)
+    def deposit(self, uid, amount):
+        u = self.users[uid]
+        self._bump_dust()
+        self.lp._mint_for_testing(u, amount)
+        with boa.env.prank(u):
+            self.gauge.deposit(amount, u)
+
+    @rule(uid=uid, frac=frac)
+    def withdraw(self, uid, frac):
+        u = self.users[uid]
+        bal = self.gauge.balanceOf(u)
+        if bal == 0:
+            return
+        supply = self._supply()
+        full_ok = (supply - bal == 0) or (supply - bal >= MIN_STAKE)
+        partial_max = min(bal - 1, supply - MIN_STAKE)   # w < bal and supply - w >= MIN
+        if frac == 100 and full_ok:
+            w = bal
+        elif partial_max >= 1:
+            w = 1 + (partial_max - 1) * frac // 100
+        elif full_ok:
+            w = bal
+        else:
+            return   # can't withdraw anything without dropping supply into (0, MIN)
+        self._bump_dust()
+        with boa.env.prank(u):
+            self.gauge.withdraw(w, u, u)
+
+    @rule(a=uid, b=uid, frac=frac)
+    def transfer(self, a, b, frac):
+        ua = self.users[a]
+        bal = self.gauge.balanceOf(ua)
+        if bal == 0:
+            return
+        self._bump_dust()
+        with boa.env.prank(ua):
+            self.gauge.transfer(self.users[b], bal * frac // 100)
+
+    @rule(uid=uid)
+    def claim(self, uid):
+        u = self.users[uid]
+        self._bump_dust()
+        with boa.env.prank(u):
+            self.total_claimed += self.gauge.claim(u)
+
+    @rule(rate=a_rate)
+    def set_rate(self, rate):
+        self._bump_dust()
+        with boa.env.prank(self.pid):
+            self.gauge.set_reward_rate(rate)
+
+    @rule(dt=a_dt)
+    def time_travel(self, dt):
+        boa.env.time_travel(seconds=dt)
+
+    @rule(reserve=a_reserve)
+    def refill_pid(self, reserve):
+        # Only ever ADD to the PID (mint); pulls are the sole outflow, so crvUSD
+        # conservation stays checkable purely from balances.
+        self.crvusd._mint_for_testing(self.pid, reserve)
+        self.pid_funded += reserve
+
+    @rule(allowance=a_allowance)
+    def set_allowance(self, allowance):
+        # Capping the PID->gauge allowance throttles the pull (the "not enough" path)
+        # without moving any crvUSD.
+        with boa.env.prank(self.pid):
+            self.crvusd.approve(self.gauge.address, allowance)
+
+    # --- invariants ----------------------------------------------------------
+
+    @invariant()
+    def lp_fully_backed(self):
+        supply = self.gauge.totalSupply()
+        assert self.lp.balanceOf(self.gauge.address) == supply
+        assert sum(self.gauge.balanceOf(u) for u in self.users) == supply
+
+    @invariant()
+    def crvusd_conserved(self):
+        pulled = self.pid_funded - self.crvusd.balanceOf(self.pid)
+        assert pulled == self.crvusd.balanceOf(self.gauge.address) + self.total_claimed
+
+    @invariant()
+    def solvent_for_settled(self):
+        settled = sum(self.gauge.claimable(u) for u in self.users)
+        assert self.crvusd.balanceOf(self.gauge.address) >= settled
+
+    # --- teardown ------------------------------------------------------------
+
+    def teardown(self):
+        # Open the taps fully and flush every settled claim.
+        self.crvusd._mint_for_testing(self.pid, 10**27)
+        self.pid_funded += 10**27
+        with boa.env.prank(self.pid):
+            self.crvusd.approve(self.gauge.address, 2**256 - 1)
+        for _ in range(2):
+            for u in self.users:
+                self._bump_dust()
+                with boa.env.prank(u):
+                    self.total_claimed += self.gauge.claim(u)
+
+        # Conservation still exact after the flush.
+        pulled = self.pid_funded - self.crvusd.balanceOf(self.pid)
+        assert pulled == self.crvusd.balanceOf(self.gauge.address) + self.total_claimed
+        # Nearly all streamed rewards reached users: only bounded integer dust remains.
+        assert self.crvusd.balanceOf(self.gauge.address) <= self.dust_budget
+        super().teardown()
+
+
+def test_stateful_fastgauge(token, accts):
+    StatefulFastGauge.TestCase.settings = settings(
+        max_examples=50, stateful_step_count=30, deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture])
+    for k, v in locals().items():
+        setattr(StatefulFastGauge, k, v)
+    run_state_machine_as_test(StatefulFastGauge)
