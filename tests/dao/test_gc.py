@@ -460,9 +460,14 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
 
     sum_votes = sum(vote_tracker.values())
     vote_tracker = {g: v / sum_votes for g, v in vote_tracker.items()}
+    # Slopes are stored as integers: floor(user_slope * power // 10000). Each of the
+    # (up to N_POOLS * n_users) truncations loses < 1 unit, so the relative weight can
+    # only be resolved to ~ (n truncated slopes) / total_slope. Bound tolerance by that.
+    total_slope = sum(gc.point_weight(g.address).slope for g in fake_gauges)
+    tol = N_POOLS * len(accounts) / total_slope
     for g, v in vote_tracker.items():
         rw = gc.gauge_relative_weight(g) / 1e18
-        assert abs(rw - v) < 1e-12
+        assert abs(rw - v) < tol
 
     dt = MAX_TIME // 40
 
@@ -481,7 +486,7 @@ def test_vote_split(fake_gauges, gc, accounts, lock_for_accounts, prepare_gauges
             aw = gc.adjusted_gauge_weight(g.address)
             expected_weight = initial_aw[g] * max(1 - t_passed / MAX_TIME, 0)
             if rw != 0:
-                assert abs(rw - vote_tracker[g]) < 1e-12
+                assert abs(rw - vote_tracker[g]) < tol
                 assert abs(aw - expected_weight) < initial_aw[g] * (7 * 86400) / MAX_TIME
 
 
