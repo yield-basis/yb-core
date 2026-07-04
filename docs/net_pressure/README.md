@@ -100,13 +100,20 @@ pressure     = max(0, Σ net_pressure(lt)) / H               # via net_pressure_
 sink         = gauge_staked_TVL / H     # FastGauge.tvl_ema()·vprice; H = Σ half_tvl(lt) (AMM equity)
 error        = pressure − sink                              # coverage gap
 integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
-d_pressure   = max(0, d(pressure)/dt)                       # derivative on rising pressure only
+d_pressure   = (d_filter_time·d_pressure + Δpressure) / (d_filter_time + dt)   # filtered derivative
 target_sink  = clip(feedforward_gain·pressure + kp·error
-                    + ki·integral + kd·d_pressure, 0, sink_cap)
+                    + ki·integral + kd·max(0, d_pressure), 0, sink_cap)
 offer        = dead_band + target_sink / sink_per_offer     # offered APR as a multiple of market rate
 bonus_apr    = (offer − 1) · market_rate
 rate         = bonus_apr · staked_value / seconds_per_year  # crvUSD/sec; staked_value = gauge_staked_TVL
 ```
+
+The derivative uses a first-order (low-pass) filter rather than a raw `Δpressure/dt`:
+because deposits are stepwise, the raw finite difference is mostly zeros with occasional
+spikes, diverges as `dt → 0`, and is huge over a single block. The filtered form
+(Åström discrete derivative, `d[k] = (Tf·d[k-1] + Δpressure)/(Tf + dt)`) converges to the
+true slope on a steady ramp, turns a step into a bounded pulse (`~Δ/Tf`) that decays over
+`Tf`, and stays finite as `dt → 0`. Only its rising part feeds the target.
 
 ![control block diagram](./pics/incentive_block_diagram.png)
 
@@ -122,6 +129,7 @@ Tuned offline against historical net pressure (see the report); all DAO-settable
 | `sink_cap` | 22 | clamp on the target sink |
 | `dead_band` | 1.6 | offered APR multiple at zero target sink |
 | `sink_per_offer` | 0.5 | target sink drawn per unit offer above the dead band |
+| `d_filter_time` | 6 h | derivative low-pass filter time constant Tf (0 = raw derivative) |
 | `swap_fee_multiplier` | 1.5 | fee-conversion slippage buffer (× pool fee) |
 | `min_interval` | 3600 s | minimum spacing between controller steps |
 

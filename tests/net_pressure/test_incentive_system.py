@@ -539,18 +539,27 @@ def test_feesplitter_validates_distributor(token, accts):
 
 # --- PID step vs reference ---------------------------------------------------
 
+def _tdiv(a, b):
+    # Truncate toward zero, matching Vyper int256 // (Python // floors); the filtered
+    # derivative feeds back signed, so floor-vs-truncate would drift the reference.
+    q = abs(a) // abs(b)
+    return q if (a < 0) == (b < 0) else -q
+
+
 def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g):
     dt_years = dt_secs * PRECISION // SECONDS_PER_YEAR
     error = pressure - sink
-    integral = state["I"] + error * dt_years // PRECISION
+    integral = state["I"] + _tdiv(error * dt_years, PRECISION)
     integral = max(0, min(integral, g["max_integral"]))
     state["I"] = integral
-    d_pressure = 0
-    if pressure > state["prevP"]:
-        d_pressure = (pressure - state["prevP"]) * PRECISION // dt_years
+    # Filtered derivative: d[k] = (Tf*d[k-1] + Δpressure) / (Tf + dt).
+    tf_years = g["d_filter_time"] * PRECISION // SECONDS_PER_YEAR
+    dp = pressure - state["prevP"]
+    d_pressure = _tdiv((_tdiv(tf_years * state["D"], PRECISION) + dp) * PRECISION, tf_years + dt_years)
+    state["D"] = d_pressure
     state["prevP"] = pressure
-    target = (g["ff"] * pressure // PRECISION + g["kp"] * error // PRECISION
-              + g["ki"] * integral // PRECISION + g["kd"] * d_pressure // PRECISION)
+    target = (_tdiv(g["ff"] * pressure, PRECISION) + _tdiv(g["kp"] * error, PRECISION)
+              + _tdiv(g["ki"] * integral, PRECISION) + _tdiv(g["kd"] * max(0, d_pressure), PRECISION))
     target = max(0, min(target, g["sink_cap"]))
     offer = g["dead_band"] + target * PRECISION // g["sink_per_offer"]
     bonus = (offer - PRECISION) * market_rate // PRECISION if offer > PRECISION else 0
@@ -558,44 +567,82 @@ def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g)
     return rate
 
 
-def test_pid_step_matches_reference(token, accts):
+@pytest.fixture
+def pid_env(token, accts):
     admin = accts[0]
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     np = boa.loads(NP_MOCK, 0, 0)
-    mr = boa.loads(MR_MOCK, 35 * 10**15)        # 3.5% market rate
+    mr = boa.loads(MR_MOCK, 35 * 10**15)         # 3.5% market rate
     fd = boa.loads(FD_MOCK)                       # empty token set -> no conversion
-    sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # vprice 1.0 (totalSupply unused now)
+    sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # vprice 1.0
     gauge = boa.loads(GAUGE_MOCK, 10**24)        # tvl_ema: staked LP in our gauge
     factory = boa.loads(FACTORY_MOCK, boa.loads(AGG_MOCK).address)
-
     pid = boa.load("contracts/net_pressure/PID.vy", crvusd.address, factory.address,
                    np.address, mr.address, fd.address, admin)
     with boa.env.prank(admin):
         pid.set_pressure_lts([boa.env.generate_address()])
         pid.set_gauge(gauge.address, sink.address)
         pid.set_execution_params(3 * 10**18 // 2, 0, 10**12)  # min_interval=0
+    return dict(pid=pid, np=np, mr=mr, sink=sink, gauge=gauge, admin=admin)
 
-    g = dict(ff=pid.feedforward_gain(), kp=pid.kp(), ki=pid.ki(), kd=pid.kd(),
-             max_integral=pid.max_integral(), sink_cap=pid.sink_cap(),
-             dead_band=pid.dead_band(), sink_per_offer=pid.sink_per_offer())
-    state = dict(I=0, prevP=0)
+
+def _gains(pid):
+    return dict(ff=pid.feedforward_gain(), kp=pid.kp(), ki=pid.ki(), kd=pid.kd(),
+                max_integral=pid.max_integral(), sink_cap=pid.sink_cap(),
+                dead_band=pid.dead_band(), sink_per_offer=pid.sink_per_offer(),
+                d_filter_time=pid.d_filter_time())
+
+
+def test_pid_step_matches_reference(pid_env):
+    pid, np, mr, sink, gauge = (pid_env[k] for k in ("pid", "np", "mr", "sink", "gauge"))
+    g = _gains(pid)
+    state = dict(I=0, prevP=0, D=0)
     # Sink and stream-scaling value both come from the gauge's manipulation-resistant
     # staked-LP EMA valued at the sink vprice (the same quantity now).
     sink_abs = gauge.tvl_ema() * sink.get_virtual_price() // PRECISION
     staked_value = sink_abs
 
-    # scripted pressure scenarios (absolute net crvUSD; half_tvl = AMM equity, fixed)
-    half_tvl = 5 * 10**23             # H = Σ half_tvl (no extra /2)
+    half_tvl = 5 * 10**23             # H = Σ half_tvl
     H = half_tvl
-    dt = 7200                         # 2-hour steps
-    for net in [2 * 10**22, 5 * 10**22, 5 * 10**22, 1 * 10**22, 0]:
+    # (net, dt): a rising ramp, a big jump over a SINGLE second, then a fall - so the
+    # filtered derivative is exercised on a 1-block step (the spike case) and on falling
+    # pressure (goes negative). Both the rate and the derivative state are pinned.
+    prev_p = 0
+    for net, dt in [(2 * 10**22, 7200), (5 * 10**22, 7200), (9 * 10**22, 1),
+                    (1 * 10**22, 3600), (0, 7200)]:
         np.set(net, half_tvl)
         boa.env.time_travel(seconds=dt)
         pressure = (max(0, net) * PRECISION) // H
         sink_norm = sink_abs * PRECISION // H
         expected = _pid_reference(state, pressure, sink_norm, mr.rate(), staked_value, dt, g)
         pid.trigger()
-        assert gauge.last_rate() == expected, f"net={net}: {gauge.last_rate()} != {expected}"
+        assert pid.d_pressure() == state["D"], f"net={net} dt={dt}: derivative"
+        assert gauge.last_rate() == expected, f"net={net} dt={dt}: {gauge.last_rate()} != {expected}"
+        if dt == 1 and pressure != prev_p:
+            # The one-second jump: the raw Δpressure/dt would be enormous; the filter keeps
+            # the stored derivative orders of magnitude below it (no spike, no divergence).
+            dt_years = dt * PRECISION // SECONDS_PER_YEAR
+            raw = abs(pressure - prev_p) * PRECISION // dt_years
+            assert abs(pid.d_pressure()) * 100 < raw
+        prev_p = pressure
+
+
+def test_pid_derivative_converges_to_ramp_slope(pid_env):
+    """On a steady ramp (constant Δpressure each equal dt), the filtered derivative
+    converges to the true slope Δpressure/dt - no bias from the smoothing."""
+    pid, np = pid_env["pid"], pid_env["np"]
+    H = 5 * 10**23
+    dt = 3600
+    step_net = 10**22                      # constant net increment per step
+    for i in range(1, 60):                 # >> Tf/dt (=6), so the filter fully converges
+        np.set(i * step_net, H)
+        boa.env.time_travel(seconds=dt)
+        pid.trigger()
+
+    dp_step = step_net * PRECISION // H     # pressure increment per step (1e18)
+    dt_years = dt * PRECISION // SECONDS_PER_YEAR
+    true_slope = dp_step * PRECISION // dt_years
+    assert abs(pid.d_pressure() - true_slope) < true_slope // 100   # within 1%
 
 
 # --- FastGauge stateful invariants -------------------------------------------

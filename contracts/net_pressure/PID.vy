@@ -128,6 +128,7 @@ max_integral: public(int256)       # integral clamp (>=0)
 sink_cap: public(int256)           # target-sink clamp (>=0)
 dead_band: public(uint256)
 sink_per_offer: public(uint256)    # beta
+d_filter_time: public(uint256)     # derivative low-pass filter time constant Tf (s)
 swap_fee_multiplier: public(uint256)  # min_dy = oracle * (1 - mult*pool_fee)
 min_interval: public(uint256)
 dust_floor: public(uint256)        # skip converting LT balances below this
@@ -135,6 +136,7 @@ dust_floor: public(uint256)        # skip converting LT balances below this
 # State
 integral: public(int256)
 prev_pressure: public(uint256)
+d_pressure: public(int256)         # filtered derivative of pressure (per year, 1e18)
 last_ts: public(uint256)
 
 # cryptopool -> its asset already given an infinite approval. Each pool has exactly
@@ -178,6 +180,7 @@ def __init__(crvusd: IERC20, factory: Factory, net_pressure: NetPressureOracle,
     self.sink_cap = 22 * 10**18
     self.dead_band = 1_600_000_000_000_000_000             # 1.6
     self.sink_per_offer = 500_000_000_000_000_000          # 0.5
+    self.d_filter_time = 6 * 3600                          # 6h derivative filter (Tf)
     self.swap_fee_multiplier = 3 * 10**18 // 2             # 1.5
     self.min_interval = 3600
     self.dust_floor = 10**12
@@ -307,15 +310,24 @@ def trigger():
     integral = max(0, min(integral, self.max_integral))
     self.integral = integral
 
-    d_pressure: int256 = 0
-    if s.pressure > self.prev_pressure:
-        d_pressure = convert(s.pressure - self.prev_pressure, int256) * PRECISION_SIGNED // dt_years
+    # Filtered ("dirty") derivative. The raw Δpressure/dt spikes on a one-block step,
+    # diverges as dt->0, and - because deposits are stepwise - is mostly zeros with the
+    # occasional spike. Smooth it with a first-order filter instead (Åström discrete form,
+    # dt & Tf in years):  d[k] = (Tf*d[k-1] + Δpressure) / (Tf + dt). This converges to the
+    # true slope on a steady ramp, turns a step into a bounded pulse (~Δ/Tf) that decays
+    # over Tf, and stays finite as dt->0 (denominator never vanishes). Tf == 0 recovers the
+    # raw derivative. Stored signed so it decays correctly; only its rising part feeds the
+    # target (the D term adds urgency on rising pressure, it does not subtract on falling).
+    tf_years: int256 = convert(self.d_filter_time * PRECISION // SECONDS_PER_YEAR, int256)
+    dp: int256 = convert(s.pressure, int256) - convert(self.prev_pressure, int256)
+    d_pressure: int256 = (tf_years * self.d_pressure // PRECISION_SIGNED + dp) * PRECISION_SIGNED // (tf_years + dt_years)
+    self.d_pressure = d_pressure
     self.prev_pressure = s.pressure
 
     target: int256 = (self.feedforward_gain * convert(s.pressure, int256) // PRECISION_SIGNED
                       + self.kp * error // PRECISION_SIGNED
                       + self.ki * integral // PRECISION_SIGNED
-                      + self.kd * d_pressure // PRECISION_SIGNED)
+                      + self.kd * max(0, d_pressure) // PRECISION_SIGNED)
     target = max(0, min(target, self.sink_cap))
     target_sink: uint256 = convert(target, uint256)
 
@@ -407,9 +419,10 @@ def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateG
 
 @external
 def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
-              max_integral: int256, sink_cap: int256, dead_band: uint256, sink_per_offer: uint256):
+              max_integral: int256, sink_cap: int256, dead_band: uint256, sink_per_offer: uint256,
+              d_filter_time: uint256):
     """
-    @notice Set the controller gains and clamps (all 1e18-scaled).
+    @notice Set the controller gains and clamps (all 1e18-scaled except d_filter_time).
     @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0.
     @param feedforward_gain Proportional gain on the raw pressure.
     @param kp Proportional gain on the coverage error (pressure - sink).
@@ -419,6 +432,8 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
     @param sink_cap Clamp on the target sink.
     @param dead_band Offered APR multiple at zero target sink.
     @param sink_per_offer Target sink drawn per unit of offer above the dead band.
+    @param d_filter_time Derivative low-pass filter time constant Tf (seconds); 0 == raw
+           unfiltered derivative.
     """
     ownable._check_owner()
     assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0
@@ -430,6 +445,7 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
     self.sink_cap = sink_cap
     self.dead_band = dead_band
     self.sink_per_offer = sink_per_offer
+    self.d_filter_time = d_filter_time
     log SetParams()
 
 
