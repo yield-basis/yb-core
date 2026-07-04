@@ -25,11 +25,16 @@ class StatefulVE(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
         self.voting_balances = {}
+        # Wallet-side gov-token accounting, tracked separately from the lock `value`.
+        # A merge moves the *lock* between users but leaves the deposited tokens in the
+        # escrow, so wallet balances and lock amounts diverge and must be tracked apart.
+        self.wallet = {}
         for user in self.accounts:
             with boa.env.prank(user):
                 self.mock_gov_token.approve(self.ve_mock.address, 2**256 - 1)
             self.mock_gov_token._mint_for_testing(user, self.USER_TOTAL)
             self.voting_balances[user] = {'value': 0, 'unlock_time': 0}
+            self.wallet[user] = self.USER_TOTAL
 
         self.initial_timestamp = boa.env.evm.patch.timestamp
 
@@ -57,7 +62,9 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.create_lock(amount, unlock_time)
             else:
                 self.ve_mock.create_lock(amount, unlock_time)
-                self.voting_balances[user] = {'value': amount // MAX_TIME * MAX_TIME, 'unlock_time': unlock_time_round}
+                rounded = amount // MAX_TIME * MAX_TIME
+                self.voting_balances[user] = {'value': rounded, 'unlock_time': unlock_time_round}
+                self.wallet[user] -= rounded
                 st_amount, st_time = self.ve_mock.locked(user)
                 assert st_amount == amount // MAX_TIME * MAX_TIME
                 assert st_time == unlock_time_round
@@ -81,7 +88,9 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.increase_amount(amount)
             else:
                 self.ve_mock.increase_amount(amount)
-                self.voting_balances[user]['value'] += amount // MAX_TIME * MAX_TIME
+                rounded = amount // MAX_TIME * MAX_TIME
+                self.voting_balances[user]['value'] += rounded
+                self.wallet[user] -= rounded
 
     @rule(uid=user_id, lock_duration=lock_duration)
     def increase_unlock_time(self, uid, lock_duration):
@@ -138,6 +147,9 @@ class StatefulVE(RuleBasedStateMachine):
                     self.ve_mock.withdraw()
             else:
                 self.ve_mock.withdraw()
+                # Refund is the full locked amount, which after a merge may exceed this
+                # user's own deposits (they inherited another user's locked tokens).
+                self.wallet[user] += self.voting_balances[user]['value']
                 self.voting_balances[user]['value'] = 0
 
     @rule(uid1=user_id, uid2=user_id)
@@ -180,7 +192,7 @@ class StatefulVE(RuleBasedStateMachine):
     @invariant()
     def token_balances(self):
         for user in self.accounts:
-            assert self.mock_gov_token.balanceOf(user) == 10**40 - self.voting_balances[user]['value']
+            assert self.mock_gov_token.balanceOf(user) == self.wallet[user]
 
     @invariant()
     def escrow_current_votes(self):
