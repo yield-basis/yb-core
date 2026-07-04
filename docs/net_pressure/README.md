@@ -73,7 +73,10 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
   — a Curve-cryptopool-style EMA of the gauge's own `totalSupply` that folds in the
   *previously recorded* supply and stores the current one for next time, so a stake
   flash-deposited and withdrawn within one block never moves it (a same-block read returns
-  the pre-deposit value). The whole-pool `totalSupply` would be flash-inflatable; `vprice`
+  the pre-deposit value) — regardless of the smoothing length, which is structural, not
+  time-based. `ema_time` (DAO-settable, default 866 s ≈ 10 min half-life, matching the
+  lending-oracle EMA) only sets the multi-block manipulation cost and responsiveness. The
+  whole-pool `totalSupply` would be flash-inflatable; `vprice`
   is not spot-manipulable. The same `tvl_ema`-based staked value scales the output stream
   rate, so a flash deposit can't pump the rate either.
 - **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`

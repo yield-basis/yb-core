@@ -110,7 +110,10 @@ def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
     REWARD_TOKEN = reward_token
     self.last_update = block.timestamp
     self.staked_ema_ts = block.timestamp
-    self.ema_time = 4 * 3600   # 4h default; DAO-tunable via set_ema_time
+    # ~10 min half-life (866 == 600/ln2 for the 1/e constant), matching YBLendingOracleLL's
+    # EMA_TIME. Only sets the multi-block manipulation cost / responsiveness - the flash
+    # (single-block) resistance is structural. DAO-tunable via set_ema_time.
+    self.ema_time = 866
 
 
 @internal
