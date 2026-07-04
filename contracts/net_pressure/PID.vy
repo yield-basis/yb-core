@@ -70,7 +70,7 @@ interface StableswapPool:
 
 interface FastGauge:
     def set_reward_rate(rate: uint256): nonpayable
-    def totalAssets() -> uint256: view
+    def tvl_ema() -> uint256: view      # manipulation-resistant staked-LP EMA
 
 interface FeeDistributor:
     def current_token_set() -> uint256: view
@@ -272,7 +272,10 @@ def _signals(agg_price: uint256) -> Signals:
     assert half_tvl > 0, "No pools"
     if net > 0:
         s.pressure = convert(net, uint256) * PRECISION // half_tvl
-    sink_abs: uint256 = (staticcall self.sink_pool.totalSupply()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
+    # Sink = the LP staked in OUR gauge (EMA-smoothed, flash-proof), valued at the
+    # stableswap virtual_price. NOT the whole pool's totalSupply, which a flash deposit
+    # could inflate to distort the control signal.
+    sink_abs: uint256 = (staticcall self.gauge.tvl_ema()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
     s.sink = sink_abs * PRECISION // half_tvl
     return s
 
@@ -322,8 +325,10 @@ def trigger():
     if offer_multiple > PRECISION:
         bonus_apr = (offer_multiple - PRECISION) * market_rate // PRECISION
 
-    # crvUSD/sec so stakers earn ~bonus_apr on the value they have staked.
-    staked_value: uint256 = (staticcall self.gauge.totalAssets()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
+    # crvUSD/sec so stakers earn ~bonus_apr on the value they have staked. Uses the same
+    # manipulation-resistant staked value the sink is measured from - the raw stake here
+    # would let a flash deposit pump the rate, draining the reserve to later stakers.
+    staked_value: uint256 = (staticcall self.gauge.tvl_ema()) * (staticcall self.sink_pool.get_virtual_price()) // PRECISION
     rate: uint256 = bonus_apr * staked_value // PRECISION // SECONDS_PER_YEAR
 
     extcall self.gauge.set_reward_rate(rate)

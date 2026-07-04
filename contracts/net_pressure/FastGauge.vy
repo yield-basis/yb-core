@@ -52,6 +52,9 @@ event SetPID:
 event SetRewardRate:
     rate: uint256
 
+event SetEmaTime:
+    ema_time: uint256
+
 event Claim:
     user: indexed(address)
     amount: uint256
@@ -78,6 +81,18 @@ last_update: public(uint256)
 reward_integral_for: public(HashMap[address, uint256])
 claimable: public(HashMap[address, uint256])  # settled, unclaimed crvUSD per user
 
+# Manipulation-resistant EMA of the staked LP (== totalSupply, shares are 1:1 with the
+# LP). The controller reads tvl_ema() as the "sink" it has attracted, so the raw stake -
+# which a flash deposit could inflate for a single block - must not be readable directly.
+# Curve-cryptopool structure: each checkpoint folds the PREVIOUSLY recorded supply into
+# the average and records the current one for next time, so a value only counts once it
+# has survived into a later block. A flash deposit -> read -> withdraw therefore reads a
+# pre-manipulation value (see _checkpoint_tvl / tvl_ema).
+staked_ema: public(uint256)              # smoothed staked LP
+staked_ema_ts: public(uint256)           # last EMA checkpoint timestamp
+staked_last: public(uint256)             # supply recorded last checkpoint (fed into next)
+ema_time: public(uint256)                # EMA smoothing time constant (s), DAO-settable
+
 
 @deploy
 def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
@@ -94,6 +109,8 @@ def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
     LP_TOKEN = lp_token
     REWARD_TOKEN = reward_token
     self.last_update = block.timestamp
+    self.staked_ema_ts = block.timestamp
+    self.ema_time = 4 * 3600   # 4h default; DAO-tunable via set_ema_time
 
 
 @internal
@@ -104,6 +121,58 @@ def _check_min_supply():
     """
     supply: uint256 = erc4626.erc20.totalSupply
     assert supply == 0 or supply >= MIN_TOTAL_SUPPLY, "Below min supply"
+
+
+# --- staked-LP EMA (manipulation-resistant sink measure) ---------------------
+
+@internal
+@view
+def _staked_ema() -> (uint256, bool):
+    """
+    @notice The staked-LP EMA projected to now.
+    @dev Blends the previously recorded supply (self.staked_last) over the elapsed time
+         into the stored average. Since staked_last is only ever the supply that stood at
+         a PAST checkpoint, a stake deposited and withdrawn within one block never enters
+         this value: within the same block dt == 0 (alpha == 1) so the stored average is
+         returned unchanged. Returns (ema, advanced) where advanced is True iff time has
+         passed since the last checkpoint (so the caller knows to persist it).
+    @return (staked-LP EMA, advanced)
+    """
+    ts_last: uint256 = self.staked_ema_ts
+    if block.timestamp <= ts_last:
+        return (self.staked_ema, False)
+    dt: uint256 = block.timestamp - ts_last
+    alpha: uint256 = convert(math._wad_exp(-convert(dt * PRECISION // self.ema_time, int256)), uint256)
+    return ((self.staked_last * (PRECISION - alpha) + self.staked_ema * alpha) // PRECISION, True)
+
+
+@internal
+def _checkpoint_tvl():
+    """
+    @notice Advance the staked-LP EMA, then record the current supply for the next update.
+    @dev Must run AFTER a supply change so staked_last captures the post-change supply.
+         The EMA is advanced using the OLD staked_last (Curve-cryptopool style), so the
+         just-changed supply only starts counting from the next checkpoint onward.
+    """
+    ema: uint256 = 0
+    advanced: bool = False
+    ema, advanced = self._staked_ema()
+    if advanced:
+        self.staked_ema = ema
+        self.staked_ema_ts = block.timestamp
+    self.staked_last = erc4626.erc20.totalSupply
+
+
+@external
+@view
+def tvl_ema() -> uint256:
+    """
+    @notice Manipulation-resistant EMA of the LP staked here (LP-token units).
+    @dev The controller's "sink" measure. Flash-proof: a stake inflated and removed within
+         a single block does not move this value (see _staked_ema).
+    @return Smoothed staked LP amount.
+    """
+    return self._staked_ema()[0]
 
 
 # --- reward accounting -------------------------------------------------------
@@ -216,6 +285,21 @@ def set_pid(pid: address):
     log SetPID(pid=pid)
 
 
+@external
+def set_ema_time(ema_time: uint256):
+    """
+    @notice Set the staked-LP EMA smoothing time constant (seconds). DAO only.
+    @dev Settles the EMA at the old constant first. Larger == smoother / harder to move
+         across blocks but slower to track genuine sink changes.
+    @param ema_time New smoothing time constant in seconds (> 0).
+    """
+    erc4626.ownable._check_owner()
+    assert ema_time > 0, "ema_time"
+    self._checkpoint_tvl()
+    self.ema_time = ema_time
+    log SetEmaTime(ema_time=ema_time)
+
+
 # --- ERC4626 entrypoints (checkpoint before every balance change) ------------
 
 @external
@@ -233,6 +317,7 @@ def deposit(assets: uint256, receiver: address) -> uint256:
     self._checkpoint(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
     self._check_min_supply()
+    self._checkpoint_tvl()
     return shares
 
 
@@ -251,6 +336,7 @@ def mint(shares: uint256, receiver: address) -> uint256:
     self._checkpoint(receiver)
     erc4626._deposit(msg.sender, receiver, assets, shares)
     self._check_min_supply()
+    self._checkpoint_tvl()
     return assets
 
 
@@ -270,6 +356,7 @@ def withdraw(assets: uint256, receiver: address, owner: address) -> uint256:
     self._checkpoint(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     self._check_min_supply()
+    self._checkpoint_tvl()
     return shares
 
 
@@ -289,6 +376,7 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     self._checkpoint(owner)
     erc4626._withdraw(msg.sender, receiver, owner, assets, shares)
     self._check_min_supply()
+    self._checkpoint_tvl()
     return assets
 
 

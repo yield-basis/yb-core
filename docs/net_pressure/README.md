@@ -68,8 +68,14 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
   `PRICE_ORACLE_CONTRACT.price()` as `lp_price_ps * agg_price / 1e18`. The `agg_price`
   argument is optional — single-market callers can omit it (0) and the oracle reads
   `lt.agg().price()` itself.
-- **Sink size** is `sink_pool.totalSupply() * get_virtual_price()` (stableswap vprice
-  is not spot-manipulable).
+- **Sink size** is the LP staked in *our* `FastGauge` (not the whole pool), valued at
+  the stableswap `get_virtual_price()`. The staked amount is read as `FastGauge.tvl_ema()`
+  — a Curve-cryptopool-style EMA of the gauge's own `totalSupply` that folds in the
+  *previously recorded* supply and stores the current one for next time, so a stake
+  flash-deposited and withdrawn within one block never moves it (a same-block read returns
+  the pre-deposit value). The whole-pool `totalSupply` would be flash-inflatable; `vprice`
+  is not spot-manipulable. The same `tvl_ema`-based staked value scales the output stream
+  rate, so a flash deposit can't pump the rate either.
 - **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`
   (default 1.5× the live dynamic fee): the `LT.withdraw` `min_assets` is the
   `price_oracle`-fair asset value of the shares (`half_tvl · shares/totalSupply /
@@ -88,7 +94,7 @@ the controller. All math is 1e18 fixed point; `dt` is in years.
 
 ```
 pressure     = max(0, Σ net_pressure(lt)) / H               # via net_pressure_and_tvl(lt) per pool
-sink         = sink_pool_TVL / H                            # H = Σ half_tvl(lt)  (AMM equity, x0-based)
+sink         = gauge_staked_TVL / H     # FastGauge.tvl_ema()·vprice; H = Σ half_tvl(lt) (AMM equity)
 error        = pressure − sink                              # coverage gap
 integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
 d_pressure   = max(0, d(pressure)/dt)                       # derivative on rising pressure only
@@ -96,7 +102,7 @@ target_sink  = clip(feedforward_gain·pressure + kp·error
                     + ki·integral + kd·d_pressure, 0, sink_cap)
 offer        = dead_band + target_sink / sink_per_offer     # offered APR as a multiple of market rate
 bonus_apr    = (offer − 1) · market_rate
-rate         = bonus_apr · staked_value / seconds_per_year  # crvUSD/sec set on the FastGauge
+rate         = bonus_apr · staked_value / seconds_per_year  # crvUSD/sec; staked_value = gauge_staked_TVL
 ```
 
 ![control block diagram](./pics/incentive_block_diagram.png)

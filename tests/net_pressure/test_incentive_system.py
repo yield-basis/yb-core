@@ -135,17 +135,17 @@ def get_virtual_price() -> uint256:
 GAUGE_MOCK = """
 # pragma version 0.4.3
 last_rate: public(uint256)
-ta: public(uint256)
+tvl: public(uint256)
 @deploy
-def __init__(a: uint256):
-    self.ta = a
+def __init__(t: uint256):
+    self.tvl = t
 @external
 def set_reward_rate(rate: uint256):
     self.last_rate = rate
 @external
 @view
-def totalAssets() -> uint256:
-    return self.ta
+def tvl_ema() -> uint256:
+    return self.tvl
 """
 
 
@@ -417,6 +417,69 @@ def test_fastgauge_depletion_no_revert(fg_setup):
         assert crvusd.balanceOf(s["u1"]) - before == 0
 
 
+# --- FastGauge staked-LP EMA (manipulation resistance) -----------------------
+
+def test_fastgauge_tvl_ema_flash_deposit_not_reflected(gauge_env):
+    """A stake inflated and withdrawn within one block must not move tvl_ema(): the read
+    inside the flash returns the pre-deposit value, and afterwards the EMA is unchanged."""
+    g, lp = gauge_env["gauge"], gauge_env["lp"]
+    attacker, honest = gauge_env["stakers"][0], gauge_env["stakers"][1]
+
+    # A modest honest stake, then let the EMA settle onto it over time.
+    lp._mint_for_testing(honest, 100 * 10**18)
+    with boa.env.prank(honest):
+        lp.approve(g.address, 2**256 - 1)
+        g.deposit(100 * 10**18, honest)
+    boa.env.time_travel(seconds=15 * g.ema_time())   # >> ema_time: EMA converges to the stake
+    settled = g.tvl_ema()
+    assert abs(settled - 100 * 10**18) < 10**16   # ~100 LP
+
+    # Flash: deposit a huge stake, read within the SAME block, then withdraw it.
+    huge = 10**24
+    lp._mint_for_testing(attacker, huge)
+    with boa.env.prank(attacker):
+        lp.approve(g.address, 2**256 - 1)
+        g.deposit(huge, attacker)
+        during = g.tvl_ema()                  # read inside the flash
+        g.withdraw(huge, attacker, attacker)
+    # The in-flash read saw the pre-deposit value, not the inflated stake.
+    assert during == settled
+    # And the EMA is completely unmoved afterwards (same block, so no time weight).
+    assert g.tvl_ema() == settled
+
+
+def test_fastgauge_tvl_ema_converges_to_sustained_stake(gauge_env):
+    """Held across time, the EMA converges toward the real staked amount; a partial
+    reading after ~ema_time is between the old and new levels (monotone toward it)."""
+    g, lp = gauge_env["gauge"], gauge_env["lp"]
+    u = gauge_env["stakers"][0]
+
+    lp._mint_for_testing(u, 50 * 10**18)
+    with boa.env.prank(u):
+        lp.approve(g.address, 2**256 - 1)
+        g.deposit(50 * 10**18, u)
+    # Right after the first deposit the EMA has not yet ramped from 0.
+    assert g.tvl_ema() < 50 * 10**18
+    boa.env.time_travel(seconds=g.ema_time())          # ~1 - 1/e of the way
+    mid = g.tvl_ema()
+    assert 0 < mid < 50 * 10**18
+    boa.env.time_travel(seconds=20 * g.ema_time())     # long tail -> essentially there
+    assert abs(g.tvl_ema() - 50 * 10**18) < 10**17
+
+
+def test_fastgauge_set_ema_time_access_and_effect(gauge_env):
+    g = gauge_env["gauge"]
+    admin, outsider = gauge_env["admin"], gauge_env["stakers"][0]
+    with boa.env.prank(outsider):
+        with boa.reverts():
+            g.set_ema_time(3600)
+    with boa.env.prank(admin):
+        with boa.reverts("ema_time"):
+            g.set_ema_time(0)
+        g.set_ema_time(7200)
+    assert g.ema_time() == 7200
+
+
 # --- FeeSplitter -------------------------------------------------------------
 
 def test_feesplitter_split(token, accts):
@@ -501,8 +564,8 @@ def test_pid_step_matches_reference(token, accts):
     np = boa.loads(NP_MOCK, 0, 0)
     mr = boa.loads(MR_MOCK, 35 * 10**15)        # 3.5% market rate
     fd = boa.loads(FD_MOCK)                       # empty token set -> no conversion
-    sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # 1e24 LP, vprice 1.0
-    gauge = boa.loads(GAUGE_MOCK, 5 * 10**23)    # totalAssets
+    sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # vprice 1.0 (totalSupply unused now)
+    gauge = boa.loads(GAUGE_MOCK, 10**24)        # tvl_ema: staked LP in our gauge
     factory = boa.loads(FACTORY_MOCK, boa.loads(AGG_MOCK).address)
 
     pid = boa.load("contracts/net_pressure/PID.vy", crvusd.address, factory.address,
@@ -516,8 +579,10 @@ def test_pid_step_matches_reference(token, accts):
              max_integral=pid.max_integral(), sink_cap=pid.sink_cap(),
              dead_band=pid.dead_band(), sink_per_offer=pid.sink_per_offer())
     state = dict(I=0, prevP=0)
-    vp = 10**18
-    staked_value = 5 * 10**23 * vp // PRECISION
+    # Sink and stream-scaling value both come from the gauge's manipulation-resistant
+    # staked-LP EMA valued at the sink vprice (the same quantity now).
+    sink_abs = gauge.tvl_ema() * sink.get_virtual_price() // PRECISION
+    staked_value = sink_abs
 
     # scripted pressure scenarios (absolute net crvUSD; half_tvl = AMM equity, fixed)
     half_tvl = 5 * 10**23             # H = Σ half_tvl (no extra /2)
@@ -527,7 +592,6 @@ def test_pid_step_matches_reference(token, accts):
         np.set(net, half_tvl)
         boa.env.time_travel(seconds=dt)
         pressure = (max(0, net) * PRECISION) // H
-        sink_abs = sink.totalSupply() * sink.get_virtual_price() // PRECISION
         sink_norm = sink_abs * PRECISION // H
         expected = _pid_reference(state, pressure, sink_norm, mr.rate(), staked_value, dt, g)
         pid.trigger()
@@ -581,6 +645,7 @@ class StatefulFastGauge(RuleBasedStateMachine):
                 self.lp.approve(self.gauge.address, 2**256 - 1)
         self.total_claimed = 0
         self.dust_budget = 0
+        self.max_supply = 0
 
     def _supply(self):
         return self.gauge.totalSupply()
@@ -680,6 +745,13 @@ class StatefulFastGauge(RuleBasedStateMachine):
     def solvent_for_settled(self):
         settled = sum(self.gauge.claimable(u) for u in self.users)
         assert self.crvusd.balanceOf(self.gauge.address) >= settled
+
+    @invariant()
+    def tvl_ema_bounded(self):
+        # The staked-LP EMA is a convex blend of past recorded supplies, so it can never
+        # exceed the historical peak stake - a flash spike above it is impossible.
+        self.max_supply = max(self.max_supply, self.gauge.totalSupply())
+        assert self.gauge.tvl_ema() <= self.max_supply
 
     # --- teardown ------------------------------------------------------------
 
