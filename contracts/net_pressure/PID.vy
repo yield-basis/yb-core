@@ -102,6 +102,7 @@ struct CachedPt:
 
 
 PRECISION: constant(uint256) = 10**18
+PRECISION_SIGNED: constant(int256) = 10**18   # 1e18 for the controller's int256 fixed-point
 FEE_DENOM: constant(uint256) = 10**10   # Curve pool fee() is scaled to 1e10
 SECONDS_PER_YEAR: constant(uint256) = 365 * 86400
 MAX_POOLS: constant(uint256) = 20
@@ -302,20 +303,19 @@ def trigger():
     dt_years: int256 = convert((block.timestamp - self.last_ts) * PRECISION // SECONDS_PER_YEAR, int256)
     error: int256 = convert(s.pressure, int256) - convert(s.sink, int256)
 
-    integral: int256 = self.integral + error * dt_years // convert(PRECISION, int256)
+    integral: int256 = self.integral + error * dt_years // PRECISION_SIGNED
     integral = max(0, min(integral, self.max_integral))
     self.integral = integral
 
     d_pressure: int256 = 0
     if s.pressure > self.prev_pressure:
-        d_pressure = convert(s.pressure - self.prev_pressure, int256) * convert(PRECISION, int256) // dt_years
+        d_pressure = convert(s.pressure - self.prev_pressure, int256) * PRECISION_SIGNED // dt_years
     self.prev_pressure = s.pressure
 
-    p18: int256 = convert(PRECISION, int256)
-    target: int256 = (self.feedforward_gain * convert(s.pressure, int256) // p18
-                      + self.kp * error // p18
-                      + self.ki * integral // p18
-                      + self.kd * d_pressure // p18)
+    target: int256 = (self.feedforward_gain * convert(s.pressure, int256) // PRECISION_SIGNED
+                      + self.kp * error // PRECISION_SIGNED
+                      + self.ki * integral // PRECISION_SIGNED
+                      + self.kd * d_pressure // PRECISION_SIGNED)
     target = max(0, min(target, self.sink_cap))
     target_sink: uint256 = convert(target, uint256)
 
