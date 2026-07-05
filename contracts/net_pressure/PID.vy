@@ -290,7 +290,7 @@ def _signals(agg_price: uint256) -> Signals:
 @nonreentrant
 def trigger():
     """
-    @notice Convert fees and (once per new block) update the gauge rate.
+    @notice Convert fees and update the gauge rate.
             Permissionless; FeeSplitter calls it after forwarding the PID's share.
     """
     # One crvUSD aggregator read (it is heavy) shared by the whole trigger: every
@@ -298,13 +298,12 @@ def trigger():
     # price_w: state-changing path, so also checkpoint the aggregator's EMA.
     agg_price: uint256 = extcall (staticcall FACTORY.agg()).price_w()
     self._convert_fees(agg_price)
-    # Step at most once per block: strictly positive elapsed time (dt) is required for
-    # the integral/derivative (and avoids div-by-zero on same-block calls). The derivative
-    # filter (Tf) and the dt-exact integral make the loop robust to the trigger cadence, so
-    # there is no need to throttle it further - update as often as it is called.
-    if block.timestamp <= self.last_ts:
-        return  # same block; fees still converted above
-
+    # Step the controller on EVERY call, with no same-block/min-interval throttle - so the
+    # rate reflects the LAST state in a block, not the first. A same-block re-trigger has
+    # dt == 0, which is safe: the integral is dt-weighted so it just adds 0, and the
+    # derivative denominator (Tf + dt) stays positive because d_filter_time (Tf) > 0 is
+    # enforced. The filter and the dt-exact integral already make the loop robust to how
+    # often it is triggered, so there is nothing to gain from throttling.
     s: Signals = self._signals(agg_price)
 
     dt_years: int256 = convert((block.timestamp - self.last_ts) * PRECISION // SECONDS_PER_YEAR, int256)
@@ -319,9 +318,10 @@ def trigger():
     # occasional spike. Smooth it with a first-order filter instead (Åström discrete form,
     # dt & Tf in years):  d[k] = (Tf*d[k-1] + Δpressure) / (Tf + dt). This converges to the
     # true slope on a steady ramp, turns a step into a bounded pulse (~Δ/Tf) that decays
-    # over Tf, and stays finite as dt->0 (denominator never vanishes). Tf == 0 recovers the
-    # raw derivative. Stored signed so it decays correctly; only its rising part feeds the
-    # target (the D term adds urgency on rising pressure, it does not subtract on falling).
+    # over Tf, and stays finite even when dt == 0 (a same-block re-trigger): Tf > 0 is
+    # enforced, so the denominator (Tf + dt) never vanishes. Stored signed so it decays
+    # correctly; only its rising part feeds the target (the D term adds urgency on rising
+    # pressure, it does not subtract on falling).
     tf_years: int256 = convert(self.d_filter_time * PRECISION // SECONDS_PER_YEAR, int256)
     dp: int256 = convert(s.pressure, int256) - convert(self.prev_pressure, int256)
     d_pressure: int256 = (tf_years * self.d_pressure // PRECISION_SIGNED + dp) * PRECISION_SIGNED // (tf_years + dt_years)
@@ -433,7 +433,8 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               d_filter_time: uint256):
     """
     @notice Set the controller gains and clamps (all 1e18-scaled except d_filter_time).
-    @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0.
+    @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0,
+         d_filter_time > 0.
     @param feedforward_gain Proportional gain on the raw pressure.
     @param kp Proportional gain on the coverage error (pressure - sink).
     @param ki Integral gain on the coverage error.
@@ -442,11 +443,11 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
     @param sink_cap Clamp on the target sink.
     @param dead_band Offered APR multiple at zero target sink.
     @param sink_per_offer Target sink drawn per unit of offer above the dead band.
-    @param d_filter_time Derivative low-pass filter time constant Tf (seconds); 0 == raw
-           unfiltered derivative.
+    @param d_filter_time Derivative low-pass filter time constant Tf (seconds); must be > 0
+           (it is the derivative denominator floor, so a same-block dt==0 step stays finite).
     """
     ownable._check_owner()
-    assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0
+    assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0 and d_filter_time > 0
     self.feedforward_gain = feedforward_gain
     self.kp = kp
     self.ki = ki

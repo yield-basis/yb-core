@@ -601,6 +601,40 @@ def test_pid_no_bonus_when_no_sink_wanted(pid_env):
     assert pid.d_pressure() == 0
 
 
+def test_set_gains_rejects_zero_filter_time(pid_env):
+    """Tf == 0 is forbidden: it is the derivative denominator floor (Tf + dt), so with the
+    same-block dt==0 step allowed, Tf==0 would divide by zero. set_gains must reject it and
+    accept any positive value."""
+    pid, admin = pid_env["pid"], pid_env["admin"]
+    g = _gains(pid)
+    args = (g["ff"], g["kp"], g["ki"], g["kd"], g["max_integral"], g["sink_cap"],
+            g["dead_band"], g["sink_per_offer"])
+    with boa.env.prank(admin):
+        with boa.reverts():
+            pid.set_gains(*args, 0)             # Tf == 0 rejected
+        pid.set_gains(*args, 3600)             # any positive Tf accepted
+    assert pid.d_filter_time() == 3600
+
+
+def test_trigger_same_block_last_state_wins(pid_env):
+    """Two trigger()s in one block both succeed - a same-block re-trigger has dt == 0, which
+    is safe because Tf > 0 keeps the derivative denominator positive - and the rate follows
+    the LAST state in the block, not the first (no min-interval / same-block throttle)."""
+    pid, np, gauge = (pid_env[k] for k in ("pid", "np", "gauge"))
+    H = 5 * 10**23
+    # Baseline step with real elapsed time: strong net pressure -> a positive reward rate.
+    np.set(6 * 10**24, H)
+    boa.env.time_travel(seconds=7200)
+    pid.trigger()
+    assert gauge.last_rate() > 0
+    # SAME block (no time travel): drop net pressure to zero and re-trigger. dt == 0 must not
+    # revert, and the controller now wants no sink -> the rate follows the last state to 0,
+    # rather than staying pinned at the first trigger's positive value.
+    np.set(0, H)
+    pid.trigger()
+    assert gauge.last_rate() == 0
+
+
 # --- FastGauge stateful invariants -------------------------------------------
 
 class StatefulFastGauge(RuleBasedStateMachine):
