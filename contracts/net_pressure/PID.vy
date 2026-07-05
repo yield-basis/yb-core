@@ -13,10 +13,10 @@
        error        = pressure - sink                                 (coverage gap)
        integral    += error * dt           clamped to [0, max_integral]
        d_pressure   = max(0, d(pressure)/dt)                          (rising only)
-       target_sink  = clip(feedforward_gain*pressure + kp*error
-                           + ki*integral + kd*d_pressure, 0, sink_cap)
-       offer        = dead_band + target_sink / sink_per_offer        (APR multiple)
-       bonus_apr    = (offer - 1) * market_rate
+       target       = min(feedforward_gain*pressure + kp*error
+                          + ki*integral + kd*d_pressure, sink_cap)     (signed; may be < 0)
+       offer        = max(1, dead_band + target / sink_per_offer)      (APR multiple, floored 1x)
+       bonus_apr    = (offer - 1) * market_rate                        (0 when no sink is wanted)
        rate         = bonus_apr * staked_value / seconds_per_year     (crvUSD/sec)
      Gains/params are DAO-settable storage (not constants). The reserve is just this
      contract's crvUSD balance; the FastGauge pulls from it at checkpoint, so
@@ -332,10 +332,16 @@ def trigger():
                       + self.kp * error // PRECISION_SIGNED
                       + self.ki * integral // PRECISION_SIGNED
                       + self.kd * max(0, d_pressure) // PRECISION_SIGNED)
-    target = max(0, min(target, self.sink_cap))
-    target_sink: uint256 = convert(target, uint256)
+    # Clamp only the TOP (sink_cap); target stays signed. When no sink is wanted it goes
+    # negative, so the offer below can fall back to 1x (no bonus) and the sink drains -
+    # instead of being pinned at the dead band, paying a perpetual (dead_band-1)*market.
+    target = min(target, self.sink_cap)
 
-    offer_multiple: uint256 = self.dead_band + target_sink * PRECISION // self.sink_per_offer
+    # Offered APR multiple, built signed and floored at 1x (PRECISION). bonus_apr is then
+    # zero exactly when the controller wants no sink (offer clamped to 1x).
+    offer_signed: int256 = (convert(self.dead_band, int256)
+                            + target * PRECISION_SIGNED // convert(self.sink_per_offer, int256))
+    offer_multiple: uint256 = convert(max(offer_signed, PRECISION_SIGNED), uint256)
     market_rate: uint256 = staticcall self.market_rate_getter.rate()
     bonus_apr: uint256 = 0
     if offer_multiple > PRECISION:

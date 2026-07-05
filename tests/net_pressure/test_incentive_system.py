@@ -560,8 +560,10 @@ def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g)
     state["prevP"] = pressure
     target = (_tdiv(g["ff"] * pressure, PRECISION) + _tdiv(g["kp"] * error, PRECISION)
               + _tdiv(g["ki"] * integral, PRECISION) + _tdiv(g["kd"] * max(0, d_pressure), PRECISION))
-    target = max(0, min(target, g["sink_cap"]))
-    offer = g["dead_band"] + target * PRECISION // g["sink_per_offer"]
+    target = min(target, g["sink_cap"])                          # signed; clamp only the top
+    # Offer built signed and floored at 1x (matches PID.vy, and the signed-offer structure of
+    # incentive_sim_linresp.py: xk = max(x_lo + raw, 1.0)). bonus is 0 when offer clamps to 1x.
+    offer = max(g["dead_band"] + _tdiv(target * PRECISION, g["sink_per_offer"]), PRECISION)
     bonus = (offer - PRECISION) * market_rate // PRECISION if offer > PRECISION else 0
     rate = bonus * staked_value // PRECISION // SECONDS_PER_YEAR
     return rate
@@ -604,12 +606,14 @@ def test_pid_step_matches_reference(pid_env):
 
     half_tvl = 5 * 10**23             # H = Σ half_tvl
     H = half_tvl
-    # (net, dt): a rising ramp, a big jump over a SINGLE second, then a fall - so the
-    # filtered derivative is exercised on a 1-block step (the spike case) and on falling
-    # pressure (goes negative). Both the rate and the derivative state are pinned.
+    # (net, dt): a rising ramp that CROSSES the staked sink (sink_norm = 2.0 here, so net
+    # must exceed sink_abs = 1e24 for the controller to want more sink and pay a bonus), a
+    # big jump over a SINGLE second, then a fall back below the sink to zero pressure - so the
+    # run exercises a positive bonus, the 1-block derivative spike, and the drain (offer
+    # clamped to 1x -> rate 0). Both the rate and the derivative state are pinned.
     prev_p = 0
-    for net, dt in [(2 * 10**22, 7200), (5 * 10**22, 7200), (9 * 10**22, 1),
-                    (1 * 10**22, 3600), (0, 7200)]:
+    for net, dt in [(1 * 10**24, 7200), (3 * 10**24, 7200), (6 * 10**24, 1),
+                    (1 * 10**24, 3600), (0, 7200)]:
         np.set(net, half_tvl)
         boa.env.time_travel(seconds=dt)
         pressure = (max(0, net) * PRECISION) // H
@@ -643,6 +647,89 @@ def test_pid_derivative_converges_to_ramp_slope(pid_env):
     dt_years = dt * PRECISION // SECONDS_PER_YEAR
     true_slope = dp_step * PRECISION // dt_years
     assert abs(pid.d_pressure() - true_slope) < true_slope // 100   # within 1%
+
+
+def _pid_float_model(fs, pressure, sink, market, staked_value, dt_secs, g):
+    """FLOAT dynamics model = the ground truth used for the research fits / sims in
+    yb-research-scripts/rates:
+      * PID step with the 6h Astrom-filtered derivative  -> sim_reserve_dfilter.py
+        `register_pidf` and sim_pid_dfilter.py `astrom`;
+      * signed offer floored at 1x (no perpetual dead-band baseline) -> the signed offer of
+        incentive_sim_linresp.py, `xk = max(x_lo + raw, 1.0)`.
+    The contract is 1e18 fixed point, so results are compared to this float model with a
+    tolerance. `g` holds the (1e18-scaled) gains read from the deployed contract.
+    Returns (rate crvUSD/s, target, offer, bonus, d_pressure) as floats. Mutates `fs`."""
+    SPY = SECONDS_PER_YEAR
+    dt = dt_secs / SPY
+    ff, kp, ki, kd = g["ff"] / 1e18, g["kp"] / 1e18, g["ki"] / 1e18, g["kd"] / 1e18
+    imax, scap = g["max_integral"] / 1e18, g["sink_cap"] / 1e18
+    dead, spo = g["dead_band"] / 1e18, g["sink_per_offer"] / 1e18
+    tf = g["d_filter_time"] / SPY
+    P, S, m = pressure / 1e18, sink / 1e18, market / 1e18
+    err = P - S
+    I = min(max(fs["I"] + err * dt, 0.0), imax)                  # integral, clamped [0, imax]
+    d = (tf * fs["D"] + (P - fs["prevP"])) / (tf + dt)           # Astrom filtered derivative
+    fs["I"], fs["D"], fs["prevP"] = I, d, P
+    target = ff * P + kp * err + ki * I + kd * max(0.0, d)
+    target = min(target, scap)                                   # signed; clamp only the top
+    offer = max(1.0, dead + target / spo)                       # signed offer, floored at 1x
+    bonus = (offer - 1.0) * m if offer > 1.0 else 0.0           # bonus APR as a fraction
+    rate = bonus * staked_value / SPY                           # crvUSD wei/s (staked_value in wei)
+    return rate, target, offer, bonus, d
+
+
+def test_pid_matches_dynamics_model(pid_env):
+    """The deployed PID step reproduces the float dynamics model behind the research
+    fits/sims (yb-research-scripts/rates) to fixed-point tolerance, across a realistic
+    ramp / crash-spike / decay-to-zero net-pressure path - and pins the offer fix: the
+    reward rate is EXACTLY 0 once the controller wants no sink (offer clamps to 1x), never
+    the perpetual (dead_band-1)*market the pre-fix code streamed."""
+    pid, np, mr, sink, gauge = (pid_env[k] for k in ("pid", "np", "mr", "sink", "gauge"))
+    g = _gains(pid)
+    staked_value = gauge.tvl_ema() * sink.get_virtual_price() // PRECISION
+    market = mr.rate()
+    H = 5 * 10**23                              # sink_abs = 1e24 -> sink_norm = 2.0
+    fs = dict(I=0.0, D=0.0, prevP=0.0)
+    # net crosses the sink (net > 1e24 => pressure > sink => wants sink), spikes over 1s,
+    # then falls to zero (drain). pressures: 2, 6, 12, 2, 0, 0, 0.
+    path = [(1 * 10**24, 7200), (3 * 10**24, 7200), (6 * 10**24, 1),
+            (1 * 10**24, 3600), (0, 7200), (0, 7200), (0, 30 * 86400)]
+    saw_positive = saw_zero = False
+    for net, dt in path:
+        np.set(net, H)
+        boa.env.time_travel(seconds=dt)
+        pressure = (max(0, net) * PRECISION) // H
+        sink_norm = staked_value * PRECISION // H
+        rate_f, _tgt, _off, bonus_f, d_f = _pid_float_model(
+            fs, pressure, sink_norm, market, staked_value, dt, g)
+        pid.trigger()
+        rate_c = gauge.last_rate()
+        d_c = pid.d_pressure() / 1e18
+        # filtered derivative and reward rate agree with the float model (fixed-point tol)
+        assert abs(d_c - d_f) <= 1e-6 * abs(d_f) + 1e-9, f"net={net} dt={dt}: d {d_c} vs {d_f}"
+        assert abs(rate_c - rate_f) <= 1e-6 * abs(rate_f) + 2.0, \
+            f"net={net} dt={dt}: rate {rate_c} vs {rate_f}"
+        if bonus_f == 0.0:                      # model wants no sink -> contract pays nothing
+            assert rate_c == 0, f"net={net}: model bonus 0 but contract rate {rate_c}"
+            saw_zero = True
+        if rate_c > 0:
+            saw_positive = True
+    assert saw_positive and saw_zero            # both regimes were exercised
+
+
+def test_pid_no_bonus_when_no_sink_wanted(pid_env):
+    """Regression for the dead-band baseline bug: at zero net pressure with a staked sink,
+    the controller wants no sink (target < 0), so bonus_apr and the reward rate must be
+    EXACTLY 0 - not `(dead_band-1)*market` on the whole stake forever. Matches the model,
+    which only pays when the controller wants sink (incentive_sim_pyusd/leakage: `if st>0`;
+    incentive_sim_linresp: offer clamps to 1x)."""
+    pid, np, gauge = (pid_env[k] for k in ("pid", "np", "gauge"))
+    assert gauge.tvl_ema() > 0                  # there IS a staked sink, so a bonus -> rate>0
+    np.set(0, 5 * 10**23)                       # zero net pressure
+    boa.env.time_travel(seconds=7200)
+    pid.trigger()
+    assert gauge.last_rate() == 0              # ...yet the controller offers 1x -> zero rate
+    assert pid.d_pressure() == 0
 
 
 # --- FastGauge stateful invariants -------------------------------------------

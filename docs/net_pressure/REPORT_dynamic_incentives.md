@@ -226,10 +226,13 @@ while True:
     # (P - prev_P)/dt is a spike train on stepwise on-chain net pressure (§9).
     d_p    = (TF * d_p + (P - prev_P)) / (TF + dt)   # filtered derivative (state; Tf,dt in yr)
     prev_P = P
-    S_target = clip(ALPHA*P + KP*e + KI*I + KD*max(0.0, d_p),  0.0, S_CAP)
+    target   = min(ALPHA*P + KP*e + KI*I + KD*max(0.0, d_p),  S_CAP)   # SIGNED; clamp only the top
 
     # 4. map the target sink to an offered APR and set it
-    x         = DEAD_BAND + S_target / BETA         # offered scrvUSD APR as a multiple of m
+    x         = max(1.0, DEAD_BAND + target / BETA) # offered APR multiple, floored at 1x: when
+                                                    # the controller wants no sink (target < 0)
+                                                    # the offer falls to 1x and bonus_apr is 0,
+                                                    # so the sink drains (not pinned at the band)
     bonus_apr = (x - 1.0) * m                        # paid ONLY on the program's deposits S
     set_incentive_apr(bonus_apr)                    # the one thing the controller controls
 
@@ -390,11 +393,13 @@ number is the trustworthy one to budget against. Recommended deployed constants:
 A deployment runs, each step (`dt` in years): read the pool, form
 `P = max(0, net_pressure)` with `net_pressure = 2·(debt − b0)/(b0 + b1·p)`; read the
 market norm `m` (Aave USDC, 7-day EMA — provided as a time series in
-`aave_rate_smoothed.csv.xz`, column `aave_apr_ema7d`); run the PID on `e = P − S` for a target sink
-`S* = clip(α·P + Kp·e + Ki·I + Kd·max(0, d_p), 0, S_cap)`, with `d_p` the **6h-filtered**
-derivative of §9 (`d_p ← (Tf·d_p + ΔP)/(Tf+dt)`, `Tf = d_filter_time = 6 h`); map to an advertised APR
-multiple `x = dead_band + S*/β` (with `S*` clamped at `S_cap`); set **bonus APR = (x − 1)·m** paid only
-on the program's deposits `S`. The depositor plant is `dS/dt = (S*−S)/τ` with the rush
+`aave_rate_smoothed.csv.xz`, column `aave_apr_ema7d`); run the PID on `e = P − S` for a **signed**
+target `T = min(α·P + Kp·e + Ki·I + Kd·max(0, d_p), S_cap)` (clamp only the top), with `d_p` the
+**6h-filtered** derivative of §9 (`d_p ← (Tf·d_p + ΔP)/(Tf+dt)`, `Tf = d_filter_time = 6 h`); map to an
+advertised APR multiple `x = max(1, dead_band + T/β)` (**floored at 1×**); set **bonus APR = (x − 1)·m**
+paid only on the program's deposits `S`. When the controller wants no sink `T` goes negative, `x`
+falls to 1× and the bonus is **exactly 0**, so the sink drains instead of being pinned at the dead
+band (paying a perpetual `(dead_band−1)·m`). The depositor plant is `dS/dt = (S*−S)/τ` with the rush
 acceleration on inflow.
 
 ### Measured physics (transferable — these are the science)

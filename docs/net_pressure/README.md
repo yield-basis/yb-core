@@ -101,12 +101,17 @@ sink         = gauge_staked_TVL / H     # FastGauge.tvl_ema()·vprice; H = Σ ha
 error        = pressure − sink                              # coverage gap
 integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
 d_pressure   = (d_filter_time·d_pressure + Δpressure) / (d_filter_time + dt)   # filtered derivative
-target_sink  = clip(feedforward_gain·pressure + kp·error
-                    + ki·integral + kd·max(0, d_pressure), 0, sink_cap)
-offer        = dead_band + target_sink / sink_per_offer     # offered APR as a multiple of market rate
-bonus_apr    = (offer − 1) · market_rate
+target       = min(feedforward_gain·pressure + kp·error
+                   + ki·integral + kd·max(0, d_pressure), sink_cap)   # SIGNED; clamp only the top
+offer        = max(1, dead_band + target / sink_per_offer)  # APR multiple, FLOORED at 1x
+bonus_apr    = (offer − 1) · market_rate                    # 0 when offer == 1x (no sink wanted)
 rate         = bonus_apr · staked_value / seconds_per_year  # crvUSD/sec; staked_value = gauge_staked_TVL
 ```
+
+`target` is kept **signed** (clamped only at the top, `sink_cap`), and the offer is floored at
+`1×`: when the controller wants no sink `target` goes negative, the offer falls to `1×` and
+`bonus_apr` is exactly `0`, so the sink drains — instead of being pinned at the dead band paying a
+perpetual `(dead_band − 1)·market_rate` on the whole stake.
 
 The derivative uses a first-order (low-pass) filter rather than a raw `Δpressure/dt`:
 because deposits are stepwise, the raw finite difference is mostly zeros with occasional
