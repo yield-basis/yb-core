@@ -14,139 +14,7 @@ PRECISION = 10**18
 SECONDS_PER_YEAR = 365 * 86400
 
 
-# --- mocks -------------------------------------------------------------------
-
-SUSDS_MOCK = """
-# pragma version 0.4.3
-ssr: public(uint256)
-@deploy
-def __init__(r: uint256):
-    self.ssr = r
-"""
-
-FD_MOCK = """
-# pragma version 0.4.3
-from ethereum.ercs import IERC20
-MAX_TOKENS: constant(uint256) = 100
-cset: public(uint256)
-sets: HashMap[uint256, DynArray[IERC20, MAX_TOKENS]]
-filled: public(uint256)
-@deploy
-def __init__():
-    self.cset = 1
-@external
-def set_tokens(t: DynArray[IERC20, MAX_TOKENS]):
-    self.sets[1] = t
-@external
-@view
-def current_token_set() -> uint256:
-    return self.cset
-@external
-@view
-def token_sets(i: uint256) -> DynArray[IERC20, MAX_TOKENS]:
-    return self.sets[i]
-@external
-def fill_epochs():
-    self.filled += 1
-"""
-
-PID_MOCK = """
-# pragma version 0.4.3
-triggered: public(uint256)
-@external
-def trigger():
-    self.triggered += 1
-"""
-
-NP_MOCK = """
-# pragma version 0.4.3
-struct PressureTvl:
-    net_pressure: int256
-    half_tvl: uint256
-net: public(int256)
-htvl: public(uint256)
-@deploy
-def __init__(n: int256, t: uint256):
-    self.net = n
-    self.htvl = t
-@external
-def set(n: int256, t: uint256):
-    self.net = n
-    self.htvl = t
-@external
-@view
-def net_pressure_and_tvl(lt: address, agg_price: uint256) -> PressureTvl:
-    return PressureTvl(net_pressure=self.net, half_tvl=self.htvl)
-"""
-
-AGG_MOCK = """
-# pragma version 0.4.3
-p: public(uint256)
-@deploy
-def __init__():
-    self.p = 10**18
-@external
-@view
-def price() -> uint256:
-    return self.p
-@external
-def price_w() -> uint256:
-    return self.p
-"""
-
-FACTORY_MOCK = """
-# pragma version 0.4.3
-agg: public(address)
-@deploy
-def __init__(a: address):
-    self.agg = a
-"""
-
-MR_MOCK = """
-# pragma version 0.4.3
-r: public(uint256)
-@deploy
-def __init__(x: uint256):
-    self.r = x
-@external
-@view
-def rate() -> uint256:
-    return self.r
-"""
-
-SINK_MOCK = """
-# pragma version 0.4.3
-ts: public(uint256)
-vp: public(uint256)
-@deploy
-def __init__(t: uint256, v: uint256):
-    self.ts = t
-    self.vp = v
-@external
-@view
-def totalSupply() -> uint256:
-    return self.ts
-@external
-@view
-def get_virtual_price() -> uint256:
-    return self.vp
-"""
-
-GAUGE_MOCK = """
-# pragma version 0.4.3
-last_rate: public(uint256)
-tvl: public(uint256)
-@deploy
-def __init__(t: uint256):
-    self.tvl = t
-@external
-def set_reward_rate(rate: uint256):
-    self.last_rate = rate
-@external
-@view
-def tvl_ema() -> uint256:
-    return self.tvl
-"""
+# Mock sources and compile-once deployers (real contracts + mocks) live in conftest.py.
 
 
 @pytest.fixture(scope="module")
@@ -161,10 +29,10 @@ def accts():
 
 # --- MarketRateGetter --------------------------------------------------------
 
-def test_market_rate_getter():
+def test_market_rate_getter(susds_mock, mrate_getter_deployer):
     ssr = 1000000001121484774769253326  # live-ish sUSDS value (~3.54% APR)
-    susds = boa.loads(SUSDS_MOCK, ssr)
-    getter = boa.load("contracts/net_pressure/MarketRateGetter.vy", susds.address)
+    susds = susds_mock.deploy(ssr)
+    getter = mrate_getter_deployer.deploy(susds.address)
     rate = getter.rate()
     # (ssr - RAY) * SECONDS_PER_YEAR / 1e9
     expected = (ssr - 10**27) * SECONDS_PER_YEAR // 10**9
@@ -172,10 +40,10 @@ def test_market_rate_getter():
     assert 0.03 * 1e18 < rate < 0.05 * 1e18
 
 
-def test_market_rate_getter_zero_rate_no_underflow():
+def test_market_rate_getter_zero_rate_no_underflow(susds_mock, mrate_getter_deployer):
     # ssr == RAY (0% rate) and ssr < RAY (degenerate) must return 0, not revert.
-    susds = boa.loads(SUSDS_MOCK, 10**27)  # constructor requires ssr >= RAY
-    getter = boa.load("contracts/net_pressure/MarketRateGetter.vy", susds.address)
+    susds = susds_mock.deploy(10**27)  # constructor requires ssr >= RAY
+    getter = mrate_getter_deployer.deploy(susds.address)
     assert getter.rate() == 0                       # ssr == RAY
     susds.eval("self.ssr = 10**27 - 1")             # below RAY
     assert getter.rate() == 0                       # no underflow revert
@@ -184,11 +52,11 @@ def test_market_rate_getter_zero_rate_no_underflow():
 # --- FastGauge ---------------------------------------------------------------
 
 @pytest.fixture
-def fg_setup(token, accts):
+def fg_setup(token, accts, fastgauge_deployer):
     admin, pid, u1, u2, _ = accts
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     lp = token.deploy("LP", "LP", 18)
-    gauge = boa.load("contracts/net_pressure/FastGauge.vy", lp.address, crvusd.address, admin)
+    gauge = fastgauge_deployer.deploy(lp.address, crvusd.address, admin)
     with boa.env.prank(admin):
         gauge.set_pid(pid)
     # fund the PID and approve the gauge to pull
@@ -239,7 +107,7 @@ def test_fastgauge_min_total_supply(fg_setup):
     assert g.totalSupply() == 0
 
 
-def test_fastgauge_available_from_pid_internal(fg_setup):
+def test_fastgauge_available_from_pid_internal(fg_setup, fastgauge_deployer):
     s = fg_setup
     g, pid, crvusd, admin = s["gauge"], s["pid"], s["crvusd"], s["admin"]
     # min(PID balance, allowance); fixture funds PID and approves max -> balance.
@@ -254,7 +122,7 @@ def test_fastgauge_available_from_pid_internal(fg_setup):
         crvusd.transfer(admin, crvusd.balanceOf(pid) - 5 * 10**17)
     assert g.internal._available_from_pid() == 5 * 10**17
     # no PID set -> 0
-    g2 = boa.load("contracts/net_pressure/FastGauge.vy", s["lp"].address, crvusd.address, admin)
+    g2 = fastgauge_deployer.deploy(s["lp"].address, crvusd.address, admin)
     assert g2.internal._available_from_pid() == 0
 
 
@@ -297,13 +165,13 @@ MIN_STAKE = 10 * 10**18
 
 
 @pytest.fixture
-def gauge_env(token, accts):
+def gauge_env(token, accts, fastgauge_deployer):
     """A FastGauge with a deep, uncapped PID reserve and a pool of fresh stakers, so a
     property test can drive arbitrary stake splits without the pull ever being capped."""
     admin, pid = accts[0], accts[1]
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     lp = token.deploy("LP", "LP", 18)
-    gauge = boa.load("contracts/net_pressure/FastGauge.vy", lp.address, crvusd.address, admin)
+    gauge = fastgauge_deployer.deploy(lp.address, crvusd.address, admin)
     with boa.env.prank(admin):
         gauge.set_pid(pid)
     crvusd._mint_for_testing(pid, 10**30)  # deep reserve: the stream is never pull-capped
@@ -482,16 +350,16 @@ def test_fastgauge_set_ema_time_access_and_effect(gauge_env):
 
 # --- FeeSplitter -------------------------------------------------------------
 
-def test_feesplitter_split(token, accts):
+def test_feesplitter_split(token, accts, fd_mock, pid_mock, feesplitter_deployer):
     admin, _, _, _, _ = accts
-    fd = boa.loads(FD_MOCK)
-    pid = boa.loads(PID_MOCK)
+    fd = fd_mock.deploy()
+    pid = pid_mock.deploy()
     lt1 = token.deploy("LT1", "LT1", 18)
     lt2 = token.deploy("LT2", "LT2", 18)
     fd.set_tokens([lt1.address, lt2.address])
 
     fraction = PRECISION // 4  # 25% to PID
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, pid.address, fraction, admin)
+    fs = feesplitter_deployer.deploy(fd.address, pid.address, fraction, admin)
 
     # Simulate fees already minted to the splitter (admin-fee LT shares).
     lt1._mint_for_testing(fs.address, 10**20)
@@ -507,10 +375,10 @@ def test_feesplitter_split(token, accts):
     assert fd.filled() == 1
 
 
-def test_feesplitter_recover(token, accts):
+def test_feesplitter_recover(token, accts, fd_mock, feesplitter_deployer):
     admin, other = accts[0], accts[1]
-    fd = boa.loads(FD_MOCK)
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, accts[2], PRECISION // 2, admin)
+    fd = fd_mock.deploy()
+    fs = feesplitter_deployer.deploy(fd.address, accts[2], PRECISION // 2, admin)
     t = token.deploy("T", "T", 18)
     t._mint_for_testing(fs.address, 10**20)
     with boa.env.prank(other):
@@ -521,12 +389,12 @@ def test_feesplitter_recover(token, accts):
     assert t.balanceOf(admin) == 10**20
 
 
-def test_feesplitter_validates_distributor(token, accts):
+def test_feesplitter_validates_distributor(token, accts, fd_mock, feesplitter_deployer):
     admin = accts[0]
-    fd = boa.loads(FD_MOCK)
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, accts[2], PRECISION // 2, admin)
+    fd = fd_mock.deploy()
+    fs = feesplitter_deployer.deploy(fd.address, accts[2], PRECISION // 2, admin)
     # A real FeeDistributor (responds to fill_epochs) is accepted.
-    fd2 = boa.loads(FD_MOCK)
+    fd2 = fd_mock.deploy()
     with boa.env.prank(admin):
         fs.set_destinations(accts[2], fd2.address)
     assert fs.fee_distributor() == fd2.address
@@ -570,17 +438,18 @@ def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g)
 
 
 @pytest.fixture
-def pid_env(token, accts):
+def pid_env(token, accts, np_mock, mr_mock, fd_mock, sink_mock, gauge_mock,
+            factory_mock, agg_mock, pid_deployer):
     admin = accts[0]
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
-    np = boa.loads(NP_MOCK, 0, 0)
-    mr = boa.loads(MR_MOCK, 35 * 10**15)         # 3.5% market rate
-    fd = boa.loads(FD_MOCK)                       # empty token set -> no conversion
-    sink = boa.loads(SINK_MOCK, 10**24, 10**18)  # vprice 1.0
-    gauge = boa.loads(GAUGE_MOCK, 10**24)        # tvl_ema: staked LP in our gauge
-    factory = boa.loads(FACTORY_MOCK, boa.loads(AGG_MOCK).address)
-    pid = boa.load("contracts/net_pressure/PID.vy", crvusd.address, factory.address,
-                   np.address, mr.address, fd.address, admin)
+    np = np_mock.deploy(0, 0)
+    mr = mr_mock.deploy(35 * 10**15)             # 3.5% market rate
+    fd = fd_mock.deploy()                         # empty token set -> no conversion
+    sink = sink_mock.deploy(10**24, 10**18)      # vprice 1.0
+    gauge = gauge_mock.deploy(10**24)            # tvl_ema: staked LP in our gauge
+    factory = factory_mock.deploy(agg_mock.deploy().address)
+    pid = pid_deployer.deploy(crvusd.address, factory.address,
+                              np.address, mr.address, fd.address, admin)
     with boa.env.prank(admin):
         pid.set_pressure_lts([boa.env.generate_address()])
         pid.set_gauge(gauge.address, sink.address)
@@ -766,8 +635,8 @@ class StatefulFastGauge(RuleBasedStateMachine):
         self.admin = self.accts[0]
         self.pid = self.accts[1]
         self.users = [boa.env.generate_address() for _ in range(4)]
-        self.gauge = boa.load("contracts/net_pressure/FastGauge.vy",
-                              self.lp.address, self.crvusd.address, self.admin)
+        self.gauge = self.fastgauge_deployer.deploy(
+            self.lp.address, self.crvusd.address, self.admin)
         with boa.env.prank(self.admin):
             self.gauge.set_pid(self.pid)
         self.pid_funded = 10**21                       # modest reserve: depletes/caps sometimes
@@ -909,7 +778,7 @@ class StatefulFastGauge(RuleBasedStateMachine):
         super().teardown()
 
 
-def test_stateful_fastgauge(token, accts):
+def test_stateful_fastgauge(token, accts, fastgauge_deployer):
     StatefulFastGauge.TestCase.settings = settings(
         max_examples=50, stateful_step_count=30, deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture])

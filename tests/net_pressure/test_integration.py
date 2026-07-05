@@ -13,62 +13,11 @@ Flow exercised:
 import boa
 
 
-FD_MOCK = """
-# pragma version 0.4.3
-from ethereum.ercs import IERC20
-MAX_TOKENS: constant(uint256) = 100
-cset: public(uint256)
-sets: HashMap[uint256, DynArray[IERC20, MAX_TOKENS]]
-filled: public(uint256)
-@deploy
-def __init__():
-    self.cset = 1
-@external
-def set_tokens(t: DynArray[IERC20, MAX_TOKENS]):
-    self.sets[1] = t
-@external
-@view
-def current_token_set() -> uint256:
-    return self.cset
-@external
-@view
-def token_sets(i: uint256) -> DynArray[IERC20, MAX_TOKENS]:
-    return self.sets[i]
-@external
-def fill_epochs():
-    self.filled += 1
-"""
-
-SUSDS_MOCK = """
-# pragma version 0.4.3
-ssr: public(uint256)
-@deploy
-def __init__(r: uint256):
-    self.ssr = r
-"""
-
-SINK_MOCK = """
-# pragma version 0.4.3
-ts: public(uint256)
-vp: public(uint256)
-@deploy
-def __init__(t: uint256, v: uint256):
-    self.ts = t
-    self.vp = v
-@external
-@view
-def totalSupply() -> uint256:
-    return self.ts
-@external
-@view
-def get_virtual_price() -> uint256:
-    return self.vp
-"""
-
-
 def test_full_stack(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
     yb_allocated, seed_cryptopool, token_mock, factory,
+    net_pressure, mrate_getter_deployer, fastgauge_deployer, pid_deployer,
+    feesplitter_deployer, susds_mock, fd_mock, sink_mock,
 ):
     staker = accounts[4]
 
@@ -98,19 +47,19 @@ def test_full_stack(
         boa.env.time_travel(1200)
 
     # --- deploy the system -------------------------------------------------
-    oracle = boa.load("contracts/net_pressure/YBNetPressure.vy")
-    susds = boa.loads(SUSDS_MOCK, 1000000001121484774769253326)  # ~3.5% APR
-    mrate = boa.load("contracts/net_pressure/MarketRateGetter.vy", susds.address)
-    fd = boa.loads(FD_MOCK)
+    oracle = net_pressure
+    susds = susds_mock.deploy(1000000001121484774769253326)  # ~3.5% APR
+    mrate = mrate_getter_deployer.deploy(susds.address)
+    fd = fd_mock.deploy()
     fd.set_tokens([yb_lt.address])
     sink_lp = token_mock.deploy("sinkLP", "sLP", 18)
-    sink_pool = boa.loads(SINK_MOCK, 10**21, 10**18)  # modest sink so error>0
+    sink_pool = sink_mock.deploy(10**21, 10**18)  # modest sink so error>0
 
-    gauge = boa.load("contracts/net_pressure/FastGauge.vy", sink_lp.address, stablecoin.address, admin)
-    pid = boa.load("contracts/net_pressure/PID.vy", stablecoin.address, factory.address,
-                   oracle.address, mrate.address, fd.address, admin)
+    gauge = fastgauge_deployer.deploy(sink_lp.address, stablecoin.address, admin)
+    pid = pid_deployer.deploy(stablecoin.address, factory.address,
+                              oracle.address, mrate.address, fd.address, admin)
     fraction = 10**18 // 2  # 50% to PID
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, pid.address, fraction, admin)
+    fs = feesplitter_deployer.deploy(fd.address, pid.address, fraction, admin)
 
     with boa.env.prank(admin):
         pid.set_pressure_lts([yb_lt.address])

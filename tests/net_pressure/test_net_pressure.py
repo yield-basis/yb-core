@@ -32,12 +32,6 @@ BALANCE_CASES = [
 ]
 
 
-@pytest.fixture(scope="session")
-def net_pressure():
-    # Stateless (takes the LT as a call arg); safe to share read-only across tests.
-    return boa.load('contracts/net_pressure/YBNetPressure.vy')
-
-
 def _settle(cryptopool):
     """Let price_oracle (EMA) settle onto price_scale: time-travel, no trades."""
     for _ in range(10):
