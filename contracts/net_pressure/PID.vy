@@ -130,7 +130,6 @@ dead_band: public(uint256)
 sink_per_offer: public(uint256)    # beta
 d_filter_time: public(uint256)     # derivative low-pass filter time constant Tf (s)
 swap_fee_multiplier: public(uint256)  # min_dy = oracle * (1 - mult*pool_fee)
-min_interval: public(uint256)
 dust_floor: public(uint256)        # skip converting LT balances below this
 
 # State
@@ -186,7 +185,6 @@ def __init__(crvusd: IERC20, factory: Factory, net_pressure: NetPressureOracle,
     self.sink_per_offer = 500_000_000_000_000_000          # 0.5
     self.d_filter_time = 6 * 3600                          # 6h derivative filter (Tf)
     self.swap_fee_multiplier = 3 * 10**18 // 2             # 1.5
-    self.min_interval = 3600
     self.dust_floor = 10**12
     self.last_ts = block.timestamp
 
@@ -292,7 +290,7 @@ def _signals(agg_price: uint256) -> Signals:
 @nonreentrant
 def trigger():
     """
-    @notice Convert fees and (at most every min_interval) update the gauge rate.
+    @notice Convert fees and (once per new block) update the gauge rate.
             Permissionless; FeeSplitter calls it after forwarding the PID's share.
     """
     # One crvUSD aggregator read (it is heavy) shared by the whole trigger: every
@@ -300,10 +298,12 @@ def trigger():
     # price_w: state-changing path, so also checkpoint the aggregator's EMA.
     agg_price: uint256 = extcall (staticcall FACTORY.agg()).price_w()
     self._convert_fees(agg_price)
-    # Need strictly positive elapsed time (dt) for the integral/derivative; the
-    # max(.,1) also makes min_interval=0 safe (avoids div-by-zero on same-block calls).
-    if block.timestamp < self.last_ts + max(self.min_interval, 1):
-        return  # too soon to step the controller; fees still converted above
+    # Step at most once per block: strictly positive elapsed time (dt) is required for
+    # the integral/derivative (and avoids div-by-zero on same-block calls). The derivative
+    # filter (Tf) and the dt-exact integral make the loop robust to the trigger cadence, so
+    # there is no need to throttle it further - update as often as it is called.
+    if block.timestamp <= self.last_ts:
+        return  # same block; fees still converted above
 
     s: Signals = self._signals(agg_price)
 
@@ -460,17 +460,15 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
 
 
 @external
-def set_execution_params(swap_fee_multiplier: uint256, min_interval: uint256, dust_floor: uint256):
+def set_execution_params(swap_fee_multiplier: uint256, dust_floor: uint256):
     """
-    @notice Set fee-conversion and cadence parameters.
+    @notice Set fee-conversion parameters.
     @dev DAO only.
     @param swap_fee_multiplier Slippage multiplier (1e18); min_dy = oracle*(1 -
            multiplier*pool_fee).
-    @param min_interval Minimum seconds between controller steps.
     @param dust_floor LT balance below which fee conversion is skipped.
     """
     ownable._check_owner()
     self.swap_fee_multiplier = swap_fee_multiplier
-    self.min_interval = min_interval
     self.dust_floor = dust_floor
     log SetParams()

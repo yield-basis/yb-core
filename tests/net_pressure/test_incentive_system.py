@@ -584,7 +584,7 @@ def pid_env(token, accts):
     with boa.env.prank(admin):
         pid.set_pressure_lts([boa.env.generate_address()])
         pid.set_gauge(gauge.address, sink.address)
-        pid.set_execution_params(3 * 10**18 // 2, 0, 10**12)  # min_interval=0
+        pid.set_execution_params(3 * 10**18 // 2, 10**12)
     return dict(pid=pid, np=np, mr=mr, sink=sink, gauge=gauge, admin=admin)
 
 

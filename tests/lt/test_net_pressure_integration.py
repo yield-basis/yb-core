@@ -115,7 +115,7 @@ def test_full_stack(
     with boa.env.prank(admin):
         pid.set_pressure_lts([yb_lt.address])
         pid.set_gauge(gauge.address, sink_pool.address)
-        pid.set_execution_params(3 * 10**18 // 2, 0, 10**12)  # min_interval=0
+        pid.set_execution_params(3 * 10**18 // 2, 10**12)
         gauge.set_pid(pid.address)
 
     net = oracle.net_pressure_oracle(yb_lt.address)
