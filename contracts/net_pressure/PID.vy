@@ -134,6 +134,15 @@ SECONDS_PER_YEAR: constant(uint256) = 365 * 86400
 MAX_POOLS: constant(uint256) = 20
 MAX_TOKENS: constant(uint256) = 100   # must match FeeDistributor.MAX_TOKENS
 
+# Generous magnitude ceilings on the DAO-set params. Purely a safety rail: they keep the
+# controller's target/offer/integral products (gain*signal, gain*gain) well inside int256,
+# so no configuration can make trigger() overflow-revert and brick the controller. Set far
+# above any sane tuned value (the largest default is ki = 1988e18 << 1e24), so they never
+# constrain real tuning.
+MAX_PARAM: constant(uint256) = 10**24
+MAX_PARAM_SIGNED: constant(int256) = 10**24
+MAX_FILTER_TIME: constant(uint256) = 10**9   # ~31.7 yr ceiling on the derivative filter Tf (s)
+
 CRVUSD: public(immutable(IERC20))
 FACTORY: public(immutable(Factory))   # owns the crvUSD aggregator config (Factory.agg)
 
@@ -460,7 +469,9 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               d_filter_time: uint256):
     """
     @notice Set the controller gains and clamps (all 1e18-scaled except d_filter_time).
-    @dev DAO only. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0,
+    @dev DAO only. Every param is magnitude-bounded (|signed| <= MAX_PARAM_SIGNED, unsigned
+         <= MAX_PARAM, d_filter_time in (0, MAX_FILTER_TIME]) so the controller math cannot
+         overflow int256. Also requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0,
          d_filter_time > 0.
     @param feedforward_gain Proportional gain on the raw pressure.
     @param kp Proportional gain on the coverage error (pressure - sink).
@@ -474,7 +485,13 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
            (it is the derivative denominator floor, so a same-block dt==0 step stays finite).
     """
     ownable._check_owner()
-    assert max_integral >= 0 and sink_cap >= 0 and sink_per_offer > 0 and d_filter_time > 0
+    assert abs(feedforward_gain) <= MAX_PARAM_SIGNED and abs(kp) <= MAX_PARAM_SIGNED
+    assert abs(ki) <= MAX_PARAM_SIGNED and abs(kd) <= MAX_PARAM_SIGNED
+    assert max_integral >= 0 and max_integral <= MAX_PARAM_SIGNED
+    assert sink_cap >= 0 and sink_cap <= MAX_PARAM_SIGNED
+    assert dead_band <= MAX_PARAM
+    assert sink_per_offer > 0 and sink_per_offer <= MAX_PARAM
+    assert d_filter_time > 0 and d_filter_time <= MAX_FILTER_TIME
     self.feedforward_gain = feedforward_gain
     self.kp = kp
     self.ki = ki
@@ -495,10 +512,12 @@ def set_execution_params(swap_fee_multiplier: uint256, dust_floor: uint256):
     @notice Set fee-conversion parameters.
     @dev DAO only.
     @param swap_fee_multiplier Slippage multiplier (1e18); min_dy = oracle*(1 -
-           multiplier*pool_fee).
+           multiplier*pool_fee). Bounded by MAX_PARAM so swap_fee_multiplier*pool.fee()
+           cannot overflow before the discount is capped at PRECISION.
     @param dust_floor LT balance below which fee conversion is skipped.
     """
     ownable._check_owner()
+    assert swap_fee_multiplier <= MAX_PARAM
     self.swap_fee_multiplier = swap_fee_multiplier
     self.dust_floor = dust_floor
     log SetExecutionParams(swap_fee_multiplier=swap_fee_multiplier, dust_floor=dust_floor)

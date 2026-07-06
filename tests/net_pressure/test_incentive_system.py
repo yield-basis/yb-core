@@ -616,6 +616,54 @@ def test_set_gains_rejects_zero_filter_time(pid_env):
     assert pid.d_filter_time() == 3600
 
 
+def test_setters_reject_out_of_bounds(pid_env):
+    """Every DAO-set param is magnitude-bounded so the controller's int256 math can't
+    overflow-revert and brick trigger(). Values past the ceiling are rejected; the ceiling
+    itself is accepted."""
+    pid, admin = pid_env["pid"], pid_env["admin"]
+    BIG = 10**24               # MAX_PARAM / MAX_PARAM_SIGNED
+    MAX_TF = 10**9             # MAX_FILTER_TIME (seconds)
+    g = _gains(pid)
+    base = [g["ff"], g["kp"], g["ki"], g["kd"], g["max_integral"], g["sink_cap"],
+            g["dead_band"], g["sink_per_offer"], g["d_filter_time"]]
+    idx = {"ff": 0, "kp": 1, "ki": 2, "kd": 3, "max_integral": 4, "sink_cap": 5,
+           "dead_band": 6, "sink_per_offer": 7, "d_filter_time": 8}
+
+    def gains(**over):
+        a = list(base)
+        for k, v in over.items():
+            a[idx[k]] = v
+        return a
+
+    with boa.env.prank(admin):
+        # signed gains are bounded on BOTH sides
+        for k in ("ff", "kp", "ki", "kd"):
+            with boa.reverts():
+                pid.set_gains(*gains(**{k: BIG + 1}))
+            with boa.reverts():
+                pid.set_gains(*gains(**{k: -(BIG + 1)}))
+        # non-negative clamps / unsigned params: upper bound
+        for k in ("max_integral", "sink_cap", "dead_band", "sink_per_offer"):
+            with boa.reverts():
+                pid.set_gains(*gains(**{k: BIG + 1}))
+        with boa.reverts():
+            pid.set_gains(*gains(d_filter_time=MAX_TF + 1))
+        # the ceilings themselves are accepted (signed gains at +/- the bound)
+        pid.set_gains(*gains(ff=BIG, kp=-BIG, ki=BIG, kd=-BIG, max_integral=BIG,
+                             sink_cap=BIG, dead_band=BIG, sink_per_offer=BIG,
+                             d_filter_time=MAX_TF))
+    assert pid.feedforward_gain() == BIG
+    assert pid.kp() == -BIG
+    assert pid.d_filter_time() == MAX_TF
+
+    # execution params: swap_fee_multiplier is bounded too (it multiplies pool.fee())
+    with boa.env.prank(admin):
+        with boa.reverts():
+            pid.set_execution_params(BIG + 1, 10**12)
+        pid.set_execution_params(BIG, 10**12)
+    assert pid.swap_fee_multiplier() == BIG
+
+
 def test_trigger_same_block_last_state_wins(pid_env):
     """Two trigger()s in one block both succeed - a same-block re-trigger has dt == 0, which
     is safe because Tf > 0 keeps the derivative denominator positive - and the rate follows
