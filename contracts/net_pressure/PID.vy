@@ -83,7 +83,33 @@ event Trigger:
     bonus_apr: uint256
     rate: uint256
 
-event SetParams: pass
+event SetPressureLts:
+    lts: DynArray[address, MAX_POOLS]
+
+event SetGauge:
+    gauge: indexed(address)
+    sink_pool: indexed(address)
+
+event SetSources:
+    net_pressure: indexed(address)
+    market_rate_getter: indexed(address)
+    fee_distributor: indexed(address)
+
+event SetGains:
+    feedforward_gain: int256
+    kp: int256
+    ki: int256
+    kd: int256
+    max_integral: int256
+    sink_cap: int256
+    dead_band: uint256
+    sink_per_offer: uint256
+    d_filter_time: uint256
+
+event SetExecutionParams:
+    swap_fee_multiplier: uint256
+    dust_floor: uint256
+
 event Recover:
     token: indexed(address)
     amount: uint256
@@ -392,7 +418,7 @@ def set_pressure_lts(lts: DynArray[address, MAX_POOLS]):
     """
     ownable._check_owner()
     self.pressure_lts = lts
-    log SetParams()
+    log SetPressureLts(lts=lts)
 
 
 @external
@@ -407,7 +433,7 @@ def set_gauge(gauge: FastGauge, sink_pool: StableswapPool):
     self.gauge = gauge
     self.sink_pool = sink_pool
     assert extcall CRVUSD.approve(gauge.address, max_value(uint256), default_return_value=True)
-    log SetParams()
+    log SetGauge(gauge=gauge.address, sink_pool=sink_pool.address)
 
 
 @external
@@ -424,7 +450,8 @@ def set_sources(net_pressure: NetPressureOracle, market_rate_getter: MarketRateG
     self.net_pressure = net_pressure
     self.market_rate_getter = market_rate_getter
     self.fee_distributor = fee_distributor
-    log SetParams()
+    log SetSources(net_pressure=net_pressure.address, market_rate_getter=market_rate_getter.address,
+                   fee_distributor=fee_distributor.address)
 
 
 @external
@@ -457,7 +484,9 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
     self.dead_band = dead_band
     self.sink_per_offer = sink_per_offer
     self.d_filter_time = d_filter_time
-    log SetParams()
+    log SetGains(feedforward_gain=feedforward_gain, kp=kp, ki=ki, kd=kd, max_integral=max_integral,
+                 sink_cap=sink_cap, dead_band=dead_band, sink_per_offer=sink_per_offer,
+                 d_filter_time=d_filter_time)
 
 
 @external
@@ -472,4 +501,4 @@ def set_execution_params(swap_fee_multiplier: uint256, dust_floor: uint256):
     ownable._check_owner()
     self.swap_fee_multiplier = swap_fee_multiplier
     self.dust_floor = dust_floor
-    log SetParams()
+    log SetExecutionParams(swap_fee_multiplier=swap_fee_multiplier, dust_floor=dust_floor)
