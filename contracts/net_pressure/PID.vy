@@ -72,9 +72,12 @@ interface FastGauge:
     def set_reward_rate(rate: uint256): nonpayable
     def tvl_ema() -> uint256: view      # manipulation-resistant staked-LP EMA
 
+# The real FeeDistributor (contracts/dao/FeeDistributor.vy) stores the sets as a
+# DynArray[..., MAX_TOKENS][N], so its only public accessor is the element getter
+# token_sets(set_id, i) -> token (no whole-array getter, no length) - see _token_set.
 interface FeeDistributor:
     def current_token_set() -> uint256: view
-    def token_sets(i: uint256) -> DynArray[address, MAX_TOKENS]: view
+    def token_sets(set_id: uint256, i: uint256) -> address: view
 
 
 event Trigger:
@@ -241,6 +244,28 @@ def _ensure_pool_approval(pool: CryptoPool, asset: IERC20):
 
 
 @internal
+@view
+def _token_set() -> DynArray[address, MAX_TOKENS]:
+    """Read the FeeDistributor's current token set. Its `token_sets` is a DynArray[][], so
+    the only getter is token_sets(set_id, i) -> token (no whole-array getter, no length) -
+    enumerate by index until the bounds check reverts."""
+    fd: address = self.fee_distributor.address
+    set_id: uint256 = staticcall self.fee_distributor.current_token_set()
+    out: DynArray[address, MAX_TOKENS] = []
+    for i: uint256 in range(MAX_TOKENS):
+        success: bool = False
+        response: Bytes[32] = b""
+        success, response = raw_call(
+            fd,
+            abi_encode(set_id, i, method_id=method_id("token_sets(uint256,uint256)")),
+            max_outsize=32, is_static_call=True, revert_on_failure=False)
+        if not success:
+            break  # index past the end of the DynArray -> bounds check reverted
+        out.append(abi_decode(response, address))
+    return out
+
+
+@internal
 def _convert_fees(agg_price: uint256):
     """
     @notice Convert any held LT fees into crvUSD.
@@ -252,8 +277,7 @@ def _convert_fees(agg_price: uint256):
          controller can reuse it without re-running the lp_oracle_2 solve.
     @param agg_price The crvUSD aggregator price (1e18), read once per trigger.
     """
-    token_set: DynArray[address, MAX_TOKENS] = staticcall self.fee_distributor.token_sets(
-        staticcall self.fee_distributor.current_token_set())
+    token_set: DynArray[address, MAX_TOKENS] = self._token_set()
     for lt_addr: address in token_set:
         lt: LT = LT(lt_addr)
         shares: uint256 = staticcall lt.balanceOf(self)

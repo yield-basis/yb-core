@@ -29,12 +29,21 @@ pins.
 
 ## Test 1 — full flow (`test_net_pressure_e2e.py`)
 
-At the fee-peak block, deploy the whole system (`YBNetPressure` / `MarketRateGetter` /
-`FastGauge` / `PID` / `FeeSplitter` + a `FeeDistributor` mock), install the FeeSplitter as
-the Factory's `fee_receiver`, stake crvUSD/pyUSD sink LP in the gauge, and run a **single
+At the fee-peak block, deploy `YBNetPressure` / `MarketRateGetter` / `FastGauge` / `PID` /
+`FeeSplitter` against the **real, live FeeDistributor** (`contracts/dao/FeeDistributor.vy`
+at the Factory's current `fee_receiver`), install the FeeSplitter as the Factory's
+`fee_receiver`, stake crvUSD/pyUSD sink LP in the gauge, and run a **single
 `FeeSplitter.trigger()`**. The controller aggregates the net pressure of **all four markets
 7–10** (`pressure_lts`); at this block markets 8/9 are imbalanced, so the aggregate signal
 is **P ≈ 12–13%** of half-TVL.
+
+> **Reading the FeeDistributor's token set.** This surfaced a real bug: the FeeSplitter/PID
+> originally called `token_sets(setId) -> DynArray`, but the FeeDistributor stores the sets
+> as a `DynArray[IERC20, MAX_TOKENS][N]`, so its only accessor is the *element* getter
+> `token_sets(setId, i) -> token` (no whole-array getter, no length). Calling the one-arg
+> form reverts against the real contract. Both were fixed to **enumerate the set by index
+> until the bounds check reverts**, which is what let this test drop the mock and use the
+> live FeeDistributor.
 
 Checked, against a ground-truth `realized` amount measured in a rolled-back `anchor()`:
 

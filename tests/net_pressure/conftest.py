@@ -19,27 +19,22 @@ def __init__(r: uint256):
     self.ssr = r
 """
 
+# Mirrors the real FeeDistributor (contracts/dao/FeeDistributor.vy): token_sets is a
+# DynArray[IERC20, MAX_TOKENS][N], so its only accessor is the element getter
+# token_sets(set_id, i) -> token (2 args) - which is exactly what FeeSplitter/PID enumerate.
 FD_MOCK = """
 # pragma version 0.4.3
 from ethereum.ercs import IERC20
 MAX_TOKENS: constant(uint256) = 100
-cset: public(uint256)
-sets: HashMap[uint256, DynArray[IERC20, MAX_TOKENS]]
+token_sets: public(DynArray[IERC20, MAX_TOKENS][16])
+current_token_set: public(uint256)
 filled: public(uint256)
 @deploy
 def __init__():
-    self.cset = 1
+    self.current_token_set = 1
 @external
 def set_tokens(t: DynArray[IERC20, MAX_TOKENS]):
-    self.sets[1] = t
-@external
-@view
-def current_token_set() -> uint256:
-    return self.cset
-@external
-@view
-def token_sets(i: uint256) -> DynArray[IERC20, MAX_TOKENS]:
-    return self.sets[i]
+    self.token_sets[1] = t
 @external
 def fill_epochs():
     self.filled += 1

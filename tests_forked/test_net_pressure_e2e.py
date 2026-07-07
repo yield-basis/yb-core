@@ -12,9 +12,14 @@ deliberately mis-tuned gain set (kp=0 so the controller ignores the existing cov
 a raised dead band) instead produces a POSITIVE rate. Both are run as parameters of the
 same test.
 
+The FeeDistributor is the REAL one (contracts/dao/FeeDistributor.vy, live at the Factory's
+current fee_receiver): the FeeSplitter/PID read its token set (markets 3-10) through its
+actual element getter token_sets(set_id, i). Only market 7 has pending fees at this block.
+
 Flow exercised by FeeSplitter.trigger():
-  withdraw_admin_fees() on the LT (mints fee shares to the FeeSplitter = Factory fee_receiver)
-    -> split split_fraction to the PID, the rest to the FeeDistributor(mock)
+  withdraw_admin_fees() on each LT in the real FeeDistributor's token set (mints fee shares
+    to the FeeSplitter = Factory fee_receiver)
+    -> split split_fraction to the PID, the rest back to the real FeeDistributor
     -> PID converts its LT shares to a crvUSD reserve (LT.withdraw + cryptopool swap)
     -> PID controller sets the FastGauge crvUSD/sec rate from the real net pressure
   then a staker of the crvUSD/pyUSD sink LP accrues and claims crvUSD from the gauge.
@@ -59,33 +64,6 @@ ERC20_ABI = """[
  {"name":"decimals","outputs":[{"type":"uint8"}],"inputs":[],"stateMutability":"view","type":"function"}
 ]"""
 
-# Minimal FeeDistributor: current_token_set / token_sets(i) / fill_epochs, plus set_tokens.
-FD_MOCK = """
-# pragma version 0.4.3
-from ethereum.ercs import IERC20
-MAX_TOKENS: constant(uint256) = 100
-cset: public(uint256)
-sets: HashMap[uint256, DynArray[IERC20, MAX_TOKENS]]
-filled: public(uint256)
-@deploy
-def __init__():
-    self.cset = 1
-@external
-def set_tokens(t: DynArray[IERC20, MAX_TOKENS]):
-    self.sets[1] = t
-@external
-@view
-def current_token_set() -> uint256:
-    return self.cset
-@external
-@view
-def token_sets(i: uint256) -> DynArray[IERC20, MAX_TOKENS]:
-    return self.sets[i]
-@external
-def fill_epochs():
-    self.filled += 1
-"""
-
 
 @pytest.fixture(autouse=True)
 def forked_env():
@@ -100,25 +78,24 @@ def _gains_tuple(g):
             g["sink_cap"], g["dead_band"], g["sink_per_offer"], g["d_filter_time"])
 
 
-def _deploy_system(lt_addrs, gains, owner):
+def _deploy_system(fd_addr, pressure_lts, gains, owner):
     """Deploy YBNetPressure/MarketRateGetter/FastGauge/PID/FeeSplitter and wire them, with
-    the given controller gains. `lt_addrs` is the aggregated market set (pressure + fees)."""
+    the given controller gains. `fd_addr` is the real FeeDistributor (fee/token-set source);
+    `pressure_lts` is the DAO-selected set whose net pressure the controller aggregates."""
     oracle = boa.load("contracts/net_pressure/YBNetPressure.vy")
     mrate = boa.load("contracts/net_pressure/MarketRateGetter.vy", SUSDS)
-    fd = boa.loads(FD_MOCK)
-    fd.set_tokens(lt_addrs)
     gauge = boa.load("contracts/net_pressure/FastGauge.vy", "crvUSD/pyUSD", "PYcrv",
                      SINK_LP, CRVUSD, owner)
     pid = boa.load("contracts/net_pressure/PID.vy", CRVUSD, FACTORY, oracle.address,
-                   mrate.address, fd.address, owner)
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, pid.address,
+                   mrate.address, fd_addr, owner)
+    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd_addr, pid.address,
                   SPLIT_FRACTION, owner)
     with boa.env.prank(owner):
-        pid.set_pressure_lts(lt_addrs)
+        pid.set_pressure_lts(pressure_lts)
         pid.set_gauge(gauge.address, SINK_LP)
         pid.set_gains(*_gains_tuple(gains))
         gauge.set_pid(pid.address)
-    return oracle, mrate, fd, gauge, pid, fs
+    return oracle, mrate, gauge, pid, fs
 
 
 @pytest.mark.parametrize("gains,expect_positive_rate",
@@ -127,15 +104,16 @@ def _deploy_system(lt_addrs, gains, owner):
 def test_net_pressure_end_to_end(gains, expect_positive_rate):
     factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
     lt_d = boa.load_partial("contracts/LT.vy")
-    lt_addrs = [factory.markets(i).lt for i in MARKET_IDS]
+    pressure_lts = [factory.markets(i).lt for i in MARKET_IDS]
     lt = lt_d.at(factory.markets(FEE_MARKET).lt)   # the only market with pending fees
+    real_fd = factory.fee_receiver()               # the live FeeDistributor (contracts/dao)
     crvusd = boa.loads_abi(ERC20_ABI).at(CRVUSD)
     sink = boa.loads_abi(ERC20_ABI).at(SINK_LP)
 
     owner = boa.env.generate_address()
     staker = boa.env.generate_address()
 
-    oracle, mrate, fd, gauge, pid, fs = _deploy_system(lt_addrs, gains, owner)
+    oracle, mrate, gauge, pid, fs = _deploy_system(real_fd, pressure_lts, gains, owner)
 
     # Point the Factory's fee_receiver at our FeeSplitter so withdraw_admin_fees() mints the
     # realized admin fees to it (impersonate the Factory admin, whatever contract it is).
@@ -160,18 +138,17 @@ def test_net_pressure_end_to_end(gains, expect_positive_rate):
     to_pid = realized * SPLIT_FRACTION // 10**18
     to_fd = realized - to_pid
 
-    fd_lt_before = lt.balanceOf(fd.address)
+    fd_lt_before = lt.balanceOf(real_fd)
     pid_crvusd_before = crvusd.balanceOf(pid.address)
 
     # --- the whole flow -----------------------------------------------------
     fs.trigger()
 
-    # 1) Fee split is exact: FeeDistributor got the remainder, PID converted its share, and
-    #    the FeeSplitter is left empty.
-    assert lt.balanceOf(fd.address) - fd_lt_before == to_fd
+    # 1) Fee split is exact: the real FeeDistributor got the remainder of market 7's fee, the
+    #    PID converted its share, and the FeeSplitter is left empty.
+    assert lt.balanceOf(real_fd) - fd_lt_before == to_fd
     assert lt.balanceOf(fs.address) == 0
     assert lt.balanceOf(pid.address) == 0, "PID did not fully convert its LT shares"
-    assert fd.filled() == 1
 
     # 2) The PID's share was converted into a crvUSD reserve.
     pid_reserve = crvusd.balanceOf(pid.address) - pid_crvusd_before
@@ -214,14 +191,15 @@ def test_warmup_before_connect_removes_cold_start():
     factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
     lt_d = boa.load_partial("contracts/LT.vy")
     lt = lt_d.at(factory.markets(FEE_MARKET).lt)
+    real_fd = factory.fee_receiver()               # the live FeeDistributor (contracts/dao)
     crvusd = boa.loads_abi(ERC20_ABI).at(CRVUSD)
     sink = boa.loads_abi(ERC20_ABI).at(SINK_LP)
     owner = boa.env.generate_address()
     staker = boa.env.generate_address()
 
-    # A single market (7), default gains. The FeeSplitter is deployed but NOT yet the
-    # fee_receiver - fees stay with the live receiver until we connect below.
-    oracle, mrate, fd, gauge, pid, fs = _deploy_system([lt.address], DEFAULT_GAINS, owner)
+    # Pressure on a single market (7), default gains. The FeeSplitter is deployed but NOT yet
+    # the fee_receiver - fees stay with the live receiver until we connect below.
+    oracle, mrate, gauge, pid, fs = _deploy_system(real_fd, [lt.address], DEFAULT_GAINS, owner)
 
     boa.deal(sink, staker, WARMUP_SINK_LP, adjust_supply=False)
     with boa.env.prank(staker):
@@ -255,12 +233,12 @@ def test_warmup_before_connect_removes_cold_start():
     assert realized > 0, "warm-up (pid.trigger) must not have consumed the pending fee"
     to_fd = realized - realized * SPLIT_FRACTION // 10**18
 
-    fd_lt_before = lt.balanceOf(fd.address)
+    fd_lt_before = lt.balanceOf(real_fd)
     pid_crvusd_before = crvusd.balanceOf(pid.address)
     fs.trigger()
 
     # Fee claimed and split as usual, converted into a crvUSD reserve.
-    assert lt.balanceOf(fd.address) - fd_lt_before == to_fd
+    assert lt.balanceOf(real_fd) - fd_lt_before == to_fd
     assert lt.balanceOf(fs.address) == 0
     assert crvusd.balanceOf(pid.address) - pid_crvusd_before > 0
 

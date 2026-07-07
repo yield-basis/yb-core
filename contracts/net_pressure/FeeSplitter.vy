@@ -17,9 +17,12 @@ initializes: ownable
 exports: (ownable.owner, ownable.transfer_ownership)
 
 
+# The real FeeDistributor (contracts/dao/FeeDistributor.vy) stores the sets as a
+# DynArray[IERC20, MAX_TOKENS][N], so its only public accessor is the element getter
+# token_sets(set_id, i) -> token (no whole-array getter, no length). We enumerate it.
 interface FeeDistributor:
     def current_token_set() -> uint256: view
-    def token_sets(i: uint256) -> DynArray[IERC20, MAX_TOKENS]: view
+    def token_sets(set_id: uint256, i: uint256) -> IERC20: view
     def fill_epochs(): nonpayable
 
 interface PID:
@@ -64,6 +67,27 @@ def __init__(fee_distributor: FeeDistributor, pid: address, split_fraction: uint
     self.split_fraction = split_fraction
 
 
+@internal
+@view
+def _token_set(fd: FeeDistributor) -> DynArray[IERC20, MAX_TOKENS]:
+    """Read the FeeDistributor's current token set. Its `token_sets` is a
+    DynArray[IERC20, MAX_TOKENS][N], so the only getter is token_sets(set_id, i) -> token,
+    with no whole-array getter and no length - enumerate by index until it reverts."""
+    set_id: uint256 = staticcall fd.current_token_set()
+    out: DynArray[IERC20, MAX_TOKENS] = []
+    for i: uint256 in range(MAX_TOKENS):
+        success: bool = False
+        response: Bytes[32] = b""
+        success, response = raw_call(
+            fd.address,
+            abi_encode(set_id, i, method_id=method_id("token_sets(uint256,uint256)")),
+            max_outsize=32, is_static_call=True, revert_on_failure=False)
+        if not success:
+            break  # index past the end of the DynArray -> bounds check reverted
+        out.append(IERC20(abi_decode(response, address)))
+    return out
+
+
 @external
 @nonreentrant
 def trigger():
@@ -72,7 +96,7 @@ def trigger():
             Permissionless.
     """
     fd: FeeDistributor = self.fee_distributor
-    token_set: DynArray[IERC20, MAX_TOKENS] = staticcall fd.token_sets(staticcall fd.current_token_set())
+    token_set: DynArray[IERC20, MAX_TOKENS] = self._token_set(fd)
     pid: address = self.pid
     fraction: uint256 = self.split_fraction
 
