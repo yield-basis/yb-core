@@ -176,7 +176,8 @@ getter for a different source.
 ## Testing
 
 - `tests/net_pressure/test_incentive_system.py` — unit tests (mocks): MarketRateGetter, FastGauge accrual/split/access/depletion plus a property-based reward-split test and a stateful invariant machine, FeeSplitter split/recover/validation, and the PID step vs a Python reference of the control law.
-- `tests/lt/test_net_pressure_integration.py` — full stack on a real LT/AMM/cryptopool.
-- `tests/lt/test_net_pressure.py` — the net-pressure oracle itself.
+- `tests/net_pressure/test_integration.py` — full stack on a real LT/AMM/cryptopool.
+- `tests/net_pressure/test_net_pressure.py` — the net-pressure oracle itself.
 - `tests_forked/test_market_rate_forked.py` — `MarketRateGetter` vs live sUSDS at the fixed fork block.
 - `tests_forked/test_net_pressure.py` — the net-pressure oracle against live pools and the real crvUSD aggregator.
+- `tests_forked/test_net_pressure_e2e.py` and `tests_forked/test_net_pressure_balanced.py` — the whole fee→reserve→stream flow and the cold-start behaviour on live mainnet state; see [`REPORT_e2e_fork_tests.md`](./REPORT_e2e_fork_tests.md).
