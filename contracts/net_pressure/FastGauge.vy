@@ -27,8 +27,6 @@ exports: (
     erc4626.erc20.approve,
     erc4626.erc20.allowance,
     erc4626.decimals,
-    erc4626.name,
-    erc4626.symbol,
     erc4626.asset,
     erc4626.totalAssets,
     erc4626.convertToShares,
@@ -71,6 +69,12 @@ MIN_TOTAL_SUPPLY: public(constant(uint256)) = 10 * 10**18
 REWARD_TOKEN: public(immutable(IERC20))  # crvUSD
 LP_TOKEN: public(immutable(IERC20))      # Curve stableswap LP staked here
 
+# ERC20 metadata, exposed directly (not via the erc4626 module, whose String[25]/[5]
+# bounds are too tight for a per-market name). Sizes follow the common ERC20 convention
+# (name String[64], symbol String[32]); each gauge gets a distinct, market-specific name.
+name: public(immutable(String[64]))
+symbol: public(immutable(String[32]))
+
 # The PID controller: the only address allowed to set the rate and the source the
 # gauge pulls reward tokens from. Set by the DAO (owner) after deployment.
 pid: public(address)
@@ -95,17 +99,24 @@ ema_time: public(uint256)                # EMA smoothing time constant (s), DAO-
 
 
 @deploy
-def __init__(lp_token: IERC20, reward_token: IERC20, owner: address):
+def __init__(_name: String[50], _symbol: String[29], lp_token: IERC20, reward_token: IERC20,
+             owner: address):
     """
     @notice Deploy a gauge staking `lp_token` and streaming `reward_token`.
+    @param _name Sink-pool pair suffix; the token name is "YB FastGauge: {_name}"
+           (e.g. _name="crvUSD/pyUSD" -> "YB FastGauge: crvUSD/pyUSD").
+    @param _symbol Sink-pool suffix; the token symbol is "fg-{_symbol}".
     @param lp_token The Curve stableswap LP token staked here (the vault asset).
     @param reward_token The streamed reward token (crvUSD).
     @param owner DAO address that can set the PID.
     """
-    # Pass 0 so the module's own MIN_SHARES check is a no-op (MIN_SHARES = 1); we
-    # enforce our own MIN_TOTAL_SUPPLY floor below instead.
-    erc4626.__init__("YB FastGauge", "fg", lp_token, 0, "Just say no", "to EIP712")
+    # The erc4626 module still needs a name/symbol, but we expose our own (above) and do
+    # not export the module's - so pass empty strings here. Pass 0 so the module's own
+    # MIN_SHARES check is a no-op (MIN_SHARES = 1); we enforce MIN_TOTAL_SUPPLY below.
+    erc4626.__init__("", "", lp_token, 0, "Just say no", "to EIP712")
     erc4626.ownable.owner = owner
+    name = concat("YB FastGauge: ", _name)
+    symbol = concat("fg-", _symbol)
     LP_TOKEN = lp_token
     REWARD_TOKEN = reward_token
     self.last_update = block.timestamp

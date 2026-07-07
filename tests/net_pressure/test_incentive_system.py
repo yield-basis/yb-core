@@ -56,7 +56,7 @@ def fg_setup(token, accts, fastgauge_deployer):
     admin, pid, u1, u2, _ = accts
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     lp = token.deploy("LP", "LP", 18)
-    gauge = fastgauge_deployer.deploy(lp.address, crvusd.address, admin)
+    gauge = fastgauge_deployer.deploy("test", "t", lp.address, crvusd.address, admin)
     with boa.env.prank(admin):
         gauge.set_pid(pid)
     # fund the PID and approve the gauge to pull
@@ -122,7 +122,7 @@ def test_fastgauge_available_from_pid_internal(fg_setup, fastgauge_deployer):
         crvusd.transfer(admin, crvusd.balanceOf(pid) - 5 * 10**17)
     assert g.internal._available_from_pid() == 5 * 10**17
     # no PID set -> 0
-    g2 = fastgauge_deployer.deploy(s["lp"].address, crvusd.address, admin)
+    g2 = fastgauge_deployer.deploy("crvUSD/pyUSD", "pyusd", s["lp"].address, crvusd.address, admin)
     assert g2.internal._available_from_pid() == 0
 
 
@@ -171,7 +171,7 @@ def gauge_env(token, accts, fastgauge_deployer):
     admin, pid = accts[0], accts[1]
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     lp = token.deploy("LP", "LP", 18)
-    gauge = fastgauge_deployer.deploy(lp.address, crvusd.address, admin)
+    gauge = fastgauge_deployer.deploy("test", "t", lp.address, crvusd.address, admin)
     with boa.env.prank(admin):
         gauge.set_pid(pid)
     crvusd._mint_for_testing(pid, 10**30)  # deep reserve: the stream is never pull-capped
@@ -718,7 +718,7 @@ class StatefulFastGauge(RuleBasedStateMachine):
         self.pid = self.accts[1]
         self.users = [boa.env.generate_address() for _ in range(4)]
         self.gauge = self.fastgauge_deployer.deploy(
-            self.lp.address, self.crvusd.address, self.admin)
+            "test", "t", self.lp.address, self.crvusd.address, self.admin)
         with boa.env.prank(self.admin):
             self.gauge.set_pid(self.pid)
         self.pid_funded = 10**21                       # modest reserve: depletes/caps sometimes

@@ -55,7 +55,7 @@ def test_full_stack(
     sink_lp = token_mock.deploy("sinkLP", "sLP", 18)
     sink_pool = sink_mock.deploy(10**21, 10**18)  # modest sink so error>0
 
-    gauge = fastgauge_deployer.deploy(sink_lp.address, stablecoin.address, admin)
+    gauge = fastgauge_deployer.deploy("sink", "sink", sink_lp.address, stablecoin.address, admin)
     pid = pid_deployer.deploy(stablecoin.address, factory.address,
                               oracle.address, mrate.address, fd.address, admin)
     fraction = 10**18 // 2  # 50% to PID
