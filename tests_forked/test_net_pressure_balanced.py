@@ -28,27 +28,6 @@ ERC20_ABI = """[
  {"name":"approve","outputs":[{"type":"bool"}],"inputs":[{"type":"address"},{"type":"uint256"}],"stateMutability":"nonpayable","type":"function"}
 ]"""
 
-# Mirrors the real FeeDistributor's element getter token_sets(set_id, i) -> token (its
-# token_sets is a DynArray[][], so there is no whole-array getter) - what FeeSplitter/PID
-# enumerate. A single-market set keeps this test focused on the controller, not the fee flow.
-FD_MOCK = """
-# pragma version 0.4.3
-from ethereum.ercs import IERC20
-MAX_TOKENS: constant(uint256) = 100
-token_sets: public(DynArray[IERC20, MAX_TOKENS][16])
-current_token_set: public(uint256)
-filled: public(uint256)
-@deploy
-def __init__():
-    self.current_token_set = 1
-@external
-def set_tokens(t: DynArray[IERC20, MAX_TOKENS]):
-    self.token_sets[1] = t
-@external
-def fill_epochs():
-    self.filled += 1
-"""
-
 
 @pytest.fixture(autouse=True)
 def forked_env():
@@ -63,19 +42,19 @@ def forked_env():
 def test_balanced_wbtc_cold_start_settles(sink_lp, zero_rate):
     factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
     lt = factory.markets(MARKET_ID).lt
+    real_fd = factory.fee_receiver()               # the live FeeDistributor (contracts/dao)
     sink = boa.loads_abi(ERC20_ABI).at(SINK_LP)
     owner = boa.env.generate_address()
     staker = boa.env.generate_address()
 
     oracle = boa.load("contracts/net_pressure/YBNetPressure.vy")
     mrate = boa.load("contracts/net_pressure/MarketRateGetter.vy", SUSDS)
-    fd = boa.loads(FD_MOCK)
-    fd.set_tokens([lt])
     gauge = boa.load("contracts/net_pressure/FastGauge.vy", "WBTC", "wbtc", SINK_LP, CRVUSD, owner)
     pid = boa.load("contracts/net_pressure/PID.vy", CRVUSD, FACTORY, oracle.address,
-                   mrate.address, fd.address, owner)
-    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", fd.address, pid.address,
+                   mrate.address, real_fd, owner)
+    fs = boa.load("contracts/net_pressure/FeeSplitter.vy", real_fd, pid.address,
                   10**18 // 2, owner)
+    # Pressure on WBTC only; fees come from the real FeeDistributor's set (markets 3-10).
     with boa.env.prank(owner):
         pid.set_pressure_lts([lt])
         pid.set_gauge(gauge.address, SINK_LP)
