@@ -176,18 +176,16 @@ def test_net_pressure_end_to_end(gains, expect_positive_rate):
     assert crvusd.balanceOf(pid.address) < reserve_before_claim
 
 
-# Barely covers market 7's net pressure, so the cold-start derivative kick is visible in the
-# rate (rather than being dominated by an over-provisioned sink).
-WARMUP_SINK_LP = 400_000 * 10**18
+WARMUP_SINK_LP = 400_000 * 10**18   # barely covers market 7 -> a positive settled rate once live
 
 
-def test_warmup_before_connect_removes_cold_start():
-    """Production sequence: the pool/PID exist a few days before the FeeSplitter is installed
-    as fee_receiver. Running the permissionless pid.trigger() during that window warms the
-    controller (sets prev_pressure, decays the derivative) WITHOUT touching the pending admin
-    fees (pid.trigger does not call withdraw_admin_fees). So when the splitter is finally
-    connected and the fee is claimed, there is no cold-start derivative bump - the rate is the
-    settled value."""
+def test_controller_gated_off_until_connected():
+    """The controller is OFF until the DAO installs our FeeSplitter as the Factory
+    fee_receiver (PID._connected). Through the multi-day pre-connection window, permissionless
+    pid.trigger() calls are no-ops: the integral never winds, the derivative stays 0 and the
+    rate stays 0, and the pending admin fee is untouched. The instant the splitter is
+    connected, the controller starts from a clean slate (no derivative kick, no windup) and
+    the fee is claimed/split/converted."""
     factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
     lt_d = boa.load_partial("contracts/LT.vy")
     lt = lt_d.at(factory.markets(FEE_MARKET).lt)
@@ -198,7 +196,7 @@ def test_warmup_before_connect_removes_cold_start():
     staker = boa.env.generate_address()
 
     # Pressure on a single market (7), default gains. The FeeSplitter is deployed but NOT yet
-    # the fee_receiver - fees stay with the live receiver until we connect below.
+    # the fee_receiver, so the controller stays gated off until we connect below.
     oracle, mrate, gauge, pid, fs = _deploy_system(real_fd, [lt.address], DEFAULT_GAINS, owner)
 
     boa.deal(sink, staker, WARMUP_SINK_LP, adjust_supply=False)
@@ -207,20 +205,14 @@ def test_warmup_before_connect_removes_cold_start():
         gauge.deposit(WARMUP_SINK_LP, staker)
     boa.env.time_travel(seconds=20 * gauge.ema_time())
 
-    # --- warm-up window (~4 days), splitter NOT connected -------------------
-    cold_rate = 0
-    d_cold = 0
-    for i in range(9):
-        pid.trigger()                      # steps the controller; converts no fees (PID holds none)
-        if i == 0:                         # the actual cold start (prev_pressure was 0)
-            cold_rate = gauge.reward_rate()
-            d_cold = pid.d_pressure()
+    # --- pre-connection window (~4 days): pid.trigger() is a no-op -----------
+    for _ in range(9):
+        pid.trigger()
         boa.env.time_travel(seconds=12 * 3600)
-    d_warm = pid.d_pressure()
-
-    # The cold start had a sizeable derivative; four days of triggers decayed it to ~0.
-    assert d_cold > 10**18, f"expected a real cold-start kick, got {d_cold}"
-    assert d_warm < d_cold // 100, f"derivative not warmed down: {d_cold} -> {d_warm}"
+    assert not pid.active(), "controller must not run before the splitter is connected"
+    assert pid.integral() == 0, "no windup allowed over the dead pre-connection window"
+    assert pid.d_pressure() == 0
+    assert gauge.reward_rate() == 0
 
     # --- connect the FeeSplitter and claim the (still-pending) fee ----------
     with boa.env.prank(factory.admin()):
@@ -230,7 +222,7 @@ def test_warmup_before_connect_removes_cold_start():
     with boa.env.anchor():
         lt.withdraw_admin_fees()
         realized = lt.balanceOf(fs.address) - fs_lt0
-    assert realized > 0, "warm-up (pid.trigger) must not have consumed the pending fee"
+    assert realized > 0, "the pending fee must survive the pre-connection window intact"
     to_fd = realized - realized * SPLIT_FRACTION // 10**18
 
     fd_lt_before = lt.balanceOf(real_fd)
@@ -242,8 +234,9 @@ def test_warmup_before_connect_removes_cold_start():
     assert lt.balanceOf(fs.address) == 0
     assert crvusd.balanceOf(pid.address) - pid_crvusd_before > 0
 
-    # No cold-start bump at connection: the derivative is still ~0 and the rate is the
-    # SETTLED value, strictly below the cold-start rate the same gains produced day 0.
-    assert pid.d_pressure() < d_cold // 100
-    warm_rate = gauge.reward_rate()
-    assert 0 < warm_rate < cold_rate, f"cold {cold_rate} -> connected {warm_rate}"
+    # Clean start at connection: now active, integral still 0, no derivative kick, and the
+    # rate is the settled value (positive for this barely-covering sink) - no cold-start bump.
+    assert pid.active()
+    assert pid.integral() == 0
+    assert pid.d_pressure() == 0
+    assert gauge.reward_rate() > 0

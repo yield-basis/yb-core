@@ -48,6 +48,7 @@ interface PriceOracle:
 
 interface Factory:
     def agg() -> PriceOracle: view
+    def fee_receiver() -> address: view
 
 interface LT:
     def balanceOf(addr: address) -> uint256: view
@@ -175,6 +176,7 @@ integral: public(int256)
 prev_pressure: public(uint256)
 d_pressure: public(int256)         # filtered derivative of pressure (per year, 1e18)
 last_ts: public(uint256)
+active: public(bool)               # controller runs only while connected (see _connected)
 
 # cryptopool -> its asset already given an infinite approval. Each pool has exactly
 # one asset (coin1), so a single flag per pool lets us approve once and then skip the
@@ -345,25 +347,61 @@ def _signals(agg_price: uint256) -> Signals:
     return s
 
 
+@internal
+@view
+def _connected() -> bool:
+    """True iff the DAO has installed OUR FeeSplitter as the Factory fee_receiver - i.e. the
+    live fee route is a contract whose pid() points back at this PID. The controller runs
+    only while connected, so it never integrates over the (multi-day) pre-connection window.
+    Self-verifying: no stored splitter address, and only the DAO (admin-gated) can install a
+    fee_receiver, so it cannot be spoofed."""
+    fr: address = staticcall FACTORY.fee_receiver()
+    if fr == empty(address):
+        return False
+    # fr may be a plain FeeDistributor with no pid() - safe-call, treat a miss as not-connected.
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(fr, method_id("pid()"), max_outsize=32,
+                                 is_static_call=True, revert_on_failure=False)
+    return success and len(response) == 32 and abi_decode(response, address) == self
+
+
 @external
 @nonreentrant
 def trigger():
     """
     @notice Convert fees and update the gauge rate.
             Permissionless; FeeSplitter calls it after forwarding the PID's share.
+    @dev A no-op that only keeps the clock fresh until the DAO installs our FeeSplitter as the
+         Factory fee_receiver (see _connected). The controller then starts from a clean slate,
+         so it never winds the integral or kicks the derivative over the multi-day
+         pre-connection window.
     """
-    # One crvUSD aggregator read (it is heavy) shared by the whole trigger: every
-    # market's PressureTvl uses the same agg_price. Factory owns the agg config.
-    # price_w: state-changing path, so also checkpoint the aggregator's EMA.
+    if not self._connected():
+        if self.active:                          # active -> inactive edge: stop the stream
+            self.active = False
+            extcall self.gauge.set_reward_rate(0)
+        self.last_ts = block.timestamp           # keep the clock fresh; integrate nothing
+        return
+
+    # One crvUSD aggregator read (it is heavy) shared by the whole trigger: every market's
+    # PressureTvl uses the same agg_price. price_w checkpoints the aggregator's EMA too.
     agg_price: uint256 = extcall (staticcall FACTORY.agg()).price_w()
     self._convert_fees(agg_price)
-    # Step the controller on EVERY call, with no same-block/min-interval throttle - so the
-    # rate reflects the LAST state in a block, not the first. A same-block re-trigger has
-    # dt == 0, which is safe: the integral is dt-weighted so it just adds 0, and the
-    # derivative denominator (Tf + dt) stays positive because d_filter_time (Tf) > 0 is
-    # enforced. The filter and the dt-exact integral already make the loop robust to how
-    # often it is triggered, so there is nothing to gain from throttling.
     s: Signals = self._signals(agg_price)
+
+    if not self.active:
+        # Just connected: restart from now with a clean slate (dt == 0 and dp == 0 this step,
+        # integral/derivative zeroed) so the dormant gap neither integrates nor kicks.
+        self.active = True
+        self.last_ts = block.timestamp
+        self.prev_pressure = s.pressure
+        self.integral = 0
+        self.d_pressure = 0
+
+    # The controller steps on EVERY connected call (no min-interval throttle). A same-block
+    # re-trigger has dt == 0, which is safe: the integral is dt-weighted (adds 0) and the
+    # derivative denominator (Tf + dt) stays positive because d_filter_time (Tf) > 0.
 
     dt_years: int256 = convert((block.timestamp - self.last_ts) * PRECISION // SECONDS_PER_YEAR, int256)
     error: int256 = convert(s.pressure, int256) - convert(s.sink, int256)

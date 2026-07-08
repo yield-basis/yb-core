@@ -87,9 +87,23 @@ def price_w() -> uint256:
 FACTORY_MOCK = """
 # pragma version 0.4.3
 agg: public(address)
+fee_receiver: public(address)
 @deploy
 def __init__(a: address):
     self.agg = a
+@external
+def set_fee_receiver(fr: address):
+    self.fee_receiver = fr
+"""
+
+# Stands in for the FeeSplitter in PID._connected(): the PID activates only when the
+# Factory's fee_receiver is a contract whose pid() points back at it.
+SPLITTER_MOCK = """
+# pragma version 0.4.3
+pid: public(address)
+@deploy
+def __init__(p: address):
+    self.pid = p
 """
 
 MR_MOCK = """
@@ -197,6 +211,11 @@ def agg_mock():
 @pytest.fixture(scope="session")
 def factory_mock():
     return boa.loads_partial(FACTORY_MOCK)
+
+
+@pytest.fixture(scope="session")
+def splitter_mock():
+    return boa.loads_partial(SPLITTER_MOCK)
 
 
 @pytest.fixture(scope="session")

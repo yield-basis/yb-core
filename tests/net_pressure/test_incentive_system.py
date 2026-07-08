@@ -439,7 +439,7 @@ def _pid_reference(state, pressure, sink, market_rate, staked_value, dt_secs, g)
 
 @pytest.fixture
 def pid_env(token, accts, np_mock, mr_mock, fd_mock, sink_mock, gauge_mock,
-            factory_mock, agg_mock, pid_deployer):
+            factory_mock, agg_mock, splitter_mock, pid_deployer):
     admin = accts[0]
     crvusd = token.deploy("crvUSD", "crvUSD", 18)
     np = np_mock.deploy(0, 0)
@@ -450,6 +450,9 @@ def pid_env(token, accts, np_mock, mr_mock, fd_mock, sink_mock, gauge_mock,
     factory = factory_mock.deploy(agg_mock.deploy().address)
     pid = pid_deployer.deploy(crvusd.address, factory.address,
                               np.address, mr.address, fd.address, admin)
+    # Connect: install a FeeSplitter-like fee_receiver whose pid() points back at the PID, so
+    # PID._connected() is true and the controller runs (see the connection gate in trigger()).
+    factory.set_fee_receiver(splitter_mock.deploy(pid.address).address)
     with boa.env.prank(admin):
         pid.set_pressure_lts([boa.env.generate_address()])
         pid.set_gauge(gauge.address, sink.address)
@@ -475,6 +478,10 @@ def test_pid_step_matches_reference(pid_env):
 
     half_tvl = 5 * 10**23             # H = Σ half_tvl
     H = half_tvl
+    # Activate the controller from a clean slate (net=0 -> prevP=0, I=0, D=0), matching the
+    # reference's initial state, so the loop below compares like-for-like.
+    np.set(0, H)
+    pid.trigger()
     # (net, dt): a rising ramp that CROSSES the staked sink (sink_norm = 2.0 here, so net
     # must exceed sink_abs = 1e24 for the controller to want more sink and pay a bonus), a
     # big jump over a SINGLE second, then a fall back below the sink to zero pressure - so the
@@ -507,6 +514,8 @@ def test_pid_derivative_converges_to_ramp_slope(pid_env):
     H = 5 * 10**23
     dt = 3600
     step_net = 10**22                      # constant net increment per step
+    np.set(0, H)
+    pid.trigger()                          # activate the controller from a clean slate
     for i in range(1, 60):                 # >> Tf/dt (=6), so the filter fully converges
         np.set(i * step_net, H)
         boa.env.time_travel(seconds=dt)
@@ -559,6 +568,8 @@ def test_pid_matches_dynamics_model(pid_env):
     market = mr.rate()
     H = 5 * 10**23                              # sink_abs = 1e24 -> sink_norm = 2.0
     fs = dict(I=0.0, D=0.0, prevP=0.0)
+    np.set(0, H)
+    pid.trigger()                               # activate the controller from a clean slate
     # net crosses the sink (net > 1e24 => pressure > sink => wants sink), spikes over 1s,
     # then falls to zero (drain). pressures: 2, 6, 12, 2, 0, 0, 0.
     path = [(1 * 10**24, 7200), (3 * 10**24, 7200), (6 * 10**24, 1),

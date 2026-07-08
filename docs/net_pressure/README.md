@@ -134,9 +134,8 @@ Tuned offline against historical net pressure (see the report); all DAO-settable
 | `sink_cap` | 22 | clamp on the target sink |
 | `dead_band` | 1.6 | offered APR multiple at zero target sink |
 | `sink_per_offer` | 0.5 | target sink drawn per unit offer above the dead band |
-| `d_filter_time` | 6 h | derivative low-pass filter time constant Tf (0 = raw derivative) |
+| `d_filter_time` | 6 h | derivative low-pass filter time constant Tf (must be > 0; it is the `Tf + dt` denominator floor) |
 | `swap_fee_multiplier` | 1.5 | fee-conversion slippage buffer (× pool fee) |
-| `min_interval` | 3600 s | minimum spacing between controller steps |
 
 `kd` and `d_filter_time` are **coupled**: the 6 h filter attenuates the raw `Δpressure/dt`
 peak, so `kd` is set to ~3× the raw-derivative optimum (`0.0158`) to keep ~99% crash
@@ -171,7 +170,11 @@ getter for a different source.
 1. Deploy `YBNetPressure`, `MarketRateGetter(sUSDS)`, the sink `FastGauge(lp, crvUSD, dao)`, the `PID(crvUSD, oracle, marketRate, feeDistributor, dao)`, and `FeeSplitter(feeDistributor, pid, fraction, dao)`.
 2. `PID.set_pressure_lts([...])`, `PID.set_gauge(fastGauge, sinkPool)` (approves crvUSD pulls), `FastGauge.set_pid(pid)`.
 3. Make sure the LT tokens are in the FeeDistributor token set (FeeSplitter/PID read it from there).
-4. Point `Factory.set_fee_receiver(feeSplitter)` via the FactoryOwner/DAO path.
+4. Point `Factory.set_fee_receiver(feeSplitter)` via the FactoryOwner/DAO path. This is also
+   the **on switch**: `PID.trigger()` is a clock-keeping no-op (no integration, rate 0) until
+   the Factory routes fees through our FeeSplitter (`PID._connected` checks
+   `fee_receiver.pid() == self`), then the controller starts from a clean slate. So the pool
+   can exist days before connection without winding up the controller.
 
 ## Testing
 
@@ -180,4 +183,4 @@ getter for a different source.
 - `tests/net_pressure/test_net_pressure.py` — the net-pressure oracle itself.
 - `tests_forked/test_market_rate_forked.py` — `MarketRateGetter` vs live sUSDS at the fixed fork block.
 - `tests_forked/test_net_pressure.py` — the net-pressure oracle against live pools and the real crvUSD aggregator.
-- `tests_forked/test_net_pressure_e2e.py` and `tests_forked/test_net_pressure_balanced.py` — the whole fee→reserve→stream flow and the cold-start behaviour on live mainnet state; see [`REPORT_e2e_fork_tests.md`](./REPORT_e2e_fork_tests.md).
+- `tests_forked/test_net_pressure_e2e.py` and `tests_forked/test_net_pressure_balanced.py` — the whole fee→reserve→stream flow, the connection gate, and the controller on live mainnet state; see [`REPORT_e2e_fork_tests.md`](./REPORT_e2e_fork_tests.md).

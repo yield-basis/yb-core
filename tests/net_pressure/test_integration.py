@@ -66,6 +66,9 @@ def test_full_stack(
         pid.set_gauge(gauge.address, sink_pool.address)
         pid.set_execution_params(3 * 10**18 // 2, 10**12)
         gauge.set_pid(pid.address)
+        # Install the FeeSplitter as the Factory fee_receiver so PID._connected() is true and
+        # the controller runs (the gate keeps it off until our splitter is the fee route).
+        factory.set_fee_receiver(fs.address)
 
     net = oracle.net_pressure_oracle(yb_lt.address)
     assert net > 0, f"expected positive net pressure, got {net}"
@@ -87,11 +90,16 @@ def test_full_stack(
 
     # --- the trigger --------------------------------------------------------
     boa.env.time_travel(seconds=7200)  # let dt elapse since PID deploy
+    # fs is the Factory fee_receiver, so its trigger realizes admin fees to itself on top of
+    # the synthetic transfer. Measure the total it will split (anchor: realize, then roll back).
+    with boa.env.anchor():
+        yb_lt.withdraw_admin_fees()
+        total_fee = yb_lt.balanceOf(fs.address)
     fs.trigger()
 
-    # Split: `fraction` of the LT fee went to the PID (converted), the rest to the FeeDistributor.
-    to_pid = lt_fee * fraction // 10**18
-    assert yb_lt.balanceOf(fd.address) - fd_lt_before == lt_fee - to_pid
+    # Split: `fraction` of the total fee went to the PID (converted), the rest to the FeeDistributor.
+    to_pid = total_fee * fraction // 10**18
+    assert yb_lt.balanceOf(fd.address) - fd_lt_before == total_fee - to_pid
     assert fd.filled() == 1
     # PID converted its LT shares into a crvUSD reserve.
     pid_reserve = stablecoin.balanceOf(pid.address) - pid_crvusd_before

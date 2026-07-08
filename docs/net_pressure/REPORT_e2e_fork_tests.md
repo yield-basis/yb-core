@@ -3,15 +3,15 @@
 These are integration tests that run the **whole net-pressure stack against live mainnet
 state** (a `boa.fork`), rather than against unit mocks. They validate the on-chain
 *plumbing* — realizing LT admin fees, splitting them, converting to a crvUSD reserve, and
-streaming from the gauge — and they characterize the **controller's cold-start behaviour**
-on real net pressure. The closed-loop *depositor* dynamics (how the sink actually fills in
+streaming from the gauge — and they exercise the **connection gate** and the controller's
+behaviour on real net pressure. The closed-loop *depositor* dynamics (how the sink actually fills in
 response to the offer) are out of scope here and live in the simulations behind
 [`REPORT_dynamic_incentives.md`](./REPORT_dynamic_incentives.md); these tests hold the sink
 fixed and check what the controller *outputs*.
 
 Tests:
 - [`tests_forked/test_net_pressure_e2e.py`](../../tests_forked/test_net_pressure_e2e.py) — the full fee→reserve→stream flow on a block chosen for having real pending fees.
-- [`tests_forked/test_net_pressure_balanced.py`](../../tests_forked/test_net_pressure_balanced.py) — a single balanced pool (WBTC), characterizing the cold-start derivative transient.
+- [`tests_forked/test_net_pressure_balanced.py`](../../tests_forked/test_net_pressure_balanced.py) — a single balanced pool (WBTC), the clean-start rate on a healthy pool.
 
 Run them with `uv run pytest -vv tests_forked/test_net_pressure_e2e.py tests_forked/test_net_pressure_balanced.py` (fork-based tests take no `-n`/`--forked`).
 
@@ -69,77 +69,53 @@ Two implementation notes that bit us and are worth remembering:
 - Fabricate the sink with `boa.deal(..., adjust_supply=False)`. Bumping `totalSupply` would dilute the pool's `get_virtual_price` (`≈ D/supply`) and silently mis-value the sink.
 - Each parametrization re-forks (function-scoped fixture) so both see the intact pending fees.
 
-## Test 2 — a balanced pool, and the cold-start transient (`test_net_pressure_balanced.py`)
+## The connection gate — no cold start at all
 
-A more representative case: **WBTC alone** at a recent head (block 25483052), where its net
-pressure is only **~1.05%** of half-TVL — a healthy, unstressed pool.
+`PID.trigger()` runs the controller **only while connected** — i.e. when the Factory's
+`fee_receiver` is a contract whose `pid()` points back at this PID (our FeeSplitter). This
+directly fixes the pre-connection reality: in production the pool/PID exist **3–4 days
+before** the DAO installs the FeeSplitter as `fee_receiver`, and `trigger()` is permissionless.
 
-The point is the **cold start**. On the first-ever trigger `prev_pressure` steps `0 → P`, so
-the (6h-filtered) derivative spikes and briefly lifts the offer; over ~`Tf` it decays and
-the offer settles to what the feedforward/proportional terms alone sustain. Triggering every
-6h with a sink that *barely* covers P (S ≈ 1.36%):
+- **Before connection:** every `trigger()` is a no-op that only keeps the clock fresh — it
+  never integrates, so the integral cannot wind up over that dead window, and the rate stays 0.
+- **At connection:** the controller starts from a **clean slate** — `last_ts` reset to now
+  (no big-`dt` jump), `prev_pressure = P` (no `0 → P` derivative kick), `integral = 0`. So
+  there is **no cold-start transient** and **no windup**; the rate is the settled value from
+  the first connected trigger.
 
-| trigger (h) | d_pressure | offer (×market) | rate (wei/s) |
-|---:|---:|---:|---:|
-| 0 (cold) | 8.47 | **2.14×** | 3.85e14 |
-| 6 | 4.23 | 1.72× | 2.45e14 |
-| 12 | 2.12 | 1.51× | 1.74e14 |
-| 18 | 1.06 | 1.41× | 1.39e14 |
-| 24 | 0.53 | 1.36× | 1.22e14 |
-| 30 | 0.27 | **1.33×** | 1.13e14 |
+This obviates the earlier "warm up first" dance and removes the integral-windup / overspend
+risk of running the controller against an empty reserve.
 
-With an **over-provisioned** sink (S ≈ 9%) instead, the rate is **0 at every trigger** — the
-coverage term dominates even the cold-start kick.
+## Test 2 — a balanced pool (`test_net_pressure_balanced.py`)
 
-What this establishes:
+**WBTC alone** at a recent head (block 25483052), net pressure only **~1.05%** of half-TVL —
+a healthy, unstressed pool. Triggering every 6h with two sink sizes confirms the clean-start
+behaviour:
 
-- **The derivative kick is a pure transient.** It halves every `Tf = 6h` (the `0→P` step response of the Åström filter) and contributes nothing once calmed. It front-loads the offer to fill the sink faster; it is not a standing cost.
-- **What's left is the feedforward residual.** On a barely-covered balanced pool the offer settles to **~1.3×**; over-covered it settles to **0**.
-- **The integral never winds up** (`integral == 0` asserted). Because the sink covers the small pressure, the coverage error is ≤ 0, so nothing drives the integral toward `sink_cap`.
+- **barely covers P** (S ≈ 1.36%): a **small, steady positive rate** (the feedforward
+  residual) from the first trigger — no bump to decay. `d_pressure ≈ 0`, `integral == 0`.
+- **over-provisioned** (S ≈ 9%): **rate 0** throughout — the coverage term wants no sink.
 
-## Test 3 — warm-up before connection removes the cold start (`test_net_pressure_e2e.py`)
+So a healthy pool costs almost nothing, and the integral never leans toward `sink_cap`
+because the coverage error is ≤ 0.
 
-In production the pool/PID typically exist **3–4 days before** the FeeSplitter is installed
-as the Factory `fee_receiver`. `trigger()` is permissionless, so the controller can be run
-during that window — and doing so removes the cold-start artifact entirely.
+## Test 3 — the gate (`test_net_pressure_e2e.py::test_controller_gated_off_until_connected`)
 
-The test warms the PID with `pid.trigger()` every 12h for ~4 days *before* connecting the
-splitter. Crucially it uses **`pid.trigger()`, not `fs.trigger()`**: the former steps the
-controller and converts only the PID's own (zero) LT balance, so it does **not** call
-`withdraw_admin_fees()` and the pending fee is preserved for the real claim.
+Single market 7, barely-covering sink. Pre-connection, `pid.trigger()` is called every 12h
+for ~4 days; then the FeeSplitter is installed and the fee claimed:
 
-Warm-up (single market 7, barely-covered sink so the derivative shows in the rate):
-
-| t (h) | d_pressure | rate (wei/s) |
-|---:|---:|---:|
-| 0 (cold) | 16.50 | 1.12e15 |
-| 12 | 5.50 | 6.33e14 |
-| 24 | 1.83 | 4.75e14 |
-| 48 | 0.20 | 4.13e14 |
-| 72 | 0.023 | 4.15e14 |
-| 96 | 0.0025 | 4.23e14 |
-
-Then the splitter is connected (`set_fee_receiver`) and `fs.trigger()` claims the fee:
-
-- the pending fee is **still claimable** (`~0.0689` shares — `pid.trigger` didn't touch it), and splits/converts normally (~2125 crvUSD to the reserve);
-- `d_pressure ≈ 0.0008` at connection — the derivative artifact is **gone**;
-- the rate at connection is the **settled** value (`~4.3e14`), strictly below the day-0 cold rate (`1.12e15`) — no cold-start bump.
-
-So warming the controller during the pre-connection window means it starts *connected* in
-steady state. The cold-start derivative spike the other tests exhibit is a one-time artifact
-that a few pre-connection triggers absorb (it halves every `Tf = 6h`, so after 3–4 days it is
-~10⁻⁵ of the kick). Staking the sink before warm-up also keeps the integral at 0, so the
-controller reaches true steady state with no transient of any kind.
+- through the window: `active == False`, `integral == 0`, `d_pressure == 0`, `reward_rate == 0` — **no windup**;
+- the pending admin fee is **untouched** (still claimable) — the controller never converted anything;
+- on connection: `active == True`, `integral == 0`, `d_pressure == 0` (**clean start, no kick**), the fee splits/converts, and the rate is the settled positive value.
 
 ### Spend consistency
 
-The settled offer of ~1.3× on a balanced pool corresponds to
+The settled offer of ~1.3× on a barely-covered balanced pool corresponds to
 `spend = (x−1)·m·S ≈ 0.3 · 3.5% · 1.36% ≈ 0.015%/yr of half-TVL` — i.e. **a healthy pool
-costs almost nothing**. That is exactly the model's behaviour: the headline **0.1–0.15%/yr**
-of YB TVL in [`REPORT_dynamic_incentives.md`](./REPORT_dynamic_incentives.md) is the
-time-average dominated by the *stress* episodes, not the calm baseline. The cold-start bump
-is a bounded transient, not a standing cost, so starting the controller at an existing
-imbalance does not change the sustained spend.
+costs almost nothing**. That matches the model: the headline **0.1–0.15%/yr** of YB TVL in
+[`REPORT_dynamic_incentives.md`](./REPORT_dynamic_incentives.md) is the time-average
+dominated by the *stress* episodes, not the calm baseline. With the gate the controller
+starts clean at connection, so there is no cold-start bump on top of that steady spend.
 
 ## Caveats
 

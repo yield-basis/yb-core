@@ -2,14 +2,12 @@
 Fork test of the net-pressure controller on a single BALANCED, unstressed pool: WBTC
 (market 7) at a recent head block, where its net pressure is only ~1% of half-TVL.
 
-It characterizes the cold-start behaviour the way the controller actually runs it: the very
-first trigger sees pressure step 0 -> P, so the (filtered) derivative spikes and briefly
-lifts the offer; over ~Tf (6h) that derivative decays and the offer settles to what the
-feedforward/proportional terms alone sustain. With a sink that merely covers the small
-pressure, that settled offer is a tiny residual (~1.3x market); with an over-provisioned
-sink the rate is zero throughout. Either way the integral never winds up (no plant here,
-but the sink already covers P, so the coverage error is <= 0) - i.e. a healthy pool costs
-almost nothing.
+The connection gate makes the controller start from a CLEAN slate the moment it goes live
+(no 0 -> P derivative kick, integral 0), so there is no cold-start transient: the rate is
+the settled value from the first connected trigger. With a sink that merely covers the small
+pressure, that settled offer is a tiny residual (small positive rate); with an
+over-provisioned sink the rate is zero. Either way the integral never winds up (the sink
+already covers P, so the coverage error is <= 0) - i.e. a healthy pool costs almost nothing.
 """
 import boa
 import pytest
@@ -74,25 +72,23 @@ def test_balanced_wbtc_cold_start_settles(sink_lp, zero_rate):
     assert 0 < sig.pressure < 2 * 10**16, f"expected a balanced pool, P={sig.pressure}"
 
     # Trigger the controller repeatedly, 6h apart, and watch the cold-start derivative decay.
-    rates, derivs = [], []
+    rates = []
     for _ in range(6):
         fs.trigger()
         rates.append(gauge.reward_rate())
-        derivs.append(pid.d_pressure())
         boa.env.time_travel(seconds=6 * 3600)
 
-    # The derivative kick (pressure stepped 0 -> P on the first trigger) decays away.
-    assert derivs[-1] < derivs[0] // 2, f"derivative did not calm: {derivs}"
+    # Clean start (the gate resets prev_pressure -> P), so there is NO cold-start derivative
+    # kick: the derivative is ~0 from the first connected trigger and stays there on steady
+    # pressure - the rate is the settled value immediately, no transient to decay.
+    assert abs(pid.d_pressure()) < 10**17, f"unexpected derivative: {pid.d_pressure()}"
     # No integral windup: the sink already covers the small pressure (coverage error <= 0),
     # so the controller never leans on the integral - the offer is not driven to sink_cap.
     assert pid.integral() == 0
 
     if zero_rate:
-        # Over-provisioned sink: the controller wants no sink, so rate is zero from the start
-        # (the coverage term dominates even the cold-start derivative kick).
+        # Over-provisioned sink: the controller wants no sink -> zero rate throughout.
         assert all(r == 0 for r in rates), f"expected zero rate throughout, got {rates}"
     else:
-        # Barely-covered: a positive rate that DECAYS from the cold-start transient toward the
-        # small feedforward-sustained residual as the derivative calms.
-        assert rates[0] > 0 and rates[-1] > 0
-        assert rates[-1] < rates[0], f"cold-start rate should decay: {rates}"
+        # Barely-covered: a small, steady positive rate (the feedforward residual), no bump.
+        assert all(r > 0 for r in rates), f"expected a steady positive rate, got {rates}"
