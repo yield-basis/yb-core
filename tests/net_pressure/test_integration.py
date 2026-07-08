@@ -58,7 +58,7 @@ def test_full_stack(
     gauge = fastgauge_deployer.deploy("sink", "sink", sink_lp.address, stablecoin.address, admin)
     pid = pid_deployer.deploy(stablecoin.address, factory.address,
                               oracle.address, mrate.address, fd.address, admin)
-    fraction = 10**18 // 2  # 50% to PID
+    fraction = 5 * 10**16  # 5% to PID (realistic split per the incentive data)
     fs = feesplitter_deployer.deploy(fd.address, pid.address, fraction, admin)
 
     with boa.env.prank(admin):
@@ -89,8 +89,9 @@ def test_full_stack(
     boa.env.time_travel(seconds=7200)  # let dt elapse since PID deploy
     fs.trigger()
 
-    # Split: half the LT fee went to the FeeDistributor, half to the PID (converted).
-    assert yb_lt.balanceOf(fd.address) - fd_lt_before == lt_fee - lt_fee // 2
+    # Split: `fraction` of the LT fee went to the PID (converted), the rest to the FeeDistributor.
+    to_pid = lt_fee * fraction // 10**18
+    assert yb_lt.balanceOf(fd.address) - fd_lt_before == lt_fee - to_pid
     assert fd.filled() == 1
     # PID converted its LT shares into a crvUSD reserve.
     pid_reserve = stablecoin.balanceOf(pid.address) - pid_crvusd_before

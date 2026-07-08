@@ -53,7 +53,7 @@ def test_balanced_wbtc_cold_start_settles(sink_lp, zero_rate):
     pid = boa.load("contracts/net_pressure/PID.vy", CRVUSD, FACTORY, oracle.address,
                    mrate.address, real_fd, owner)
     fs = boa.load("contracts/net_pressure/FeeSplitter.vy", real_fd, pid.address,
-                  10**18 // 2, owner)
+                  5 * 10**16, owner)      # 5% of fees to the PID reserve (realistic)
     # Pressure on WBTC only; fees come from the real FeeDistributor's set (markets 3-10).
     with boa.env.prank(owner):
         pid.set_pressure_lts([lt])
