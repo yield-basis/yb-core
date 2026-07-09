@@ -37,7 +37,7 @@ LTs ──admin-fee LT shares──▶ FeeSplitter ──(1−frac)──▶ Fee
 
 | Contract | Role |
 |---|---|
-| [`FeeSplitter.vy`](../../contracts/net_pressure/FeeSplitter.vy) | Installed as `Factory.fee_receiver`. Reads the LT token set from the FeeDistributor, sends `split_fraction` of each LT balance to the PID and the rest to the FeeDistributor, then pokes `PID.trigger()` and `FeeDistributor.fill_epochs()`. |
+| [`FeeSplitter.vy`](../../contracts/net_pressure/FeeSplitter.vy) | Installed as `Factory.fee_receiver`. Reads the LT token set from the FeeDistributor, sends `split_fraction` of each LT balance to the PID and the rest to the FeeDistributor, then pokes `PID.trigger()` and `FeeDistributor.fill_epochs()`. Entry point is `trigger()`, with `fill_epochs()` as an alias so keepers that poke the old fee_receiver's ABI keep working. |
 | [`PID.vy`](../../contracts/net_pressure/PID.vy) | Converts the LT fees it receives into a crvUSD reserve, runs the control loop on aggregate net pressure, and sets the FastGauge stream rate. Holds the reserve. |
 | [`FastGauge.vy`](../../contracts/net_pressure/FastGauge.vy) | ERC4626 staking gauge over a Curve **stableswap** LP (the sink). Streams a single reward (crvUSD) at a rate only the PID sets; pulls crvUSD from the PID at checkpoint. |
 | [`MarketRateGetter.vy`](../../contracts/net_pressure/MarketRateGetter.vy) | Reports the "market rate" the offer is quoted against. First implementation reads the Sky Savings Rate (sUSDS). Swappable by the DAO. |

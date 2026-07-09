@@ -95,6 +95,21 @@ def trigger():
     @notice Realize LT admin fees, split them PID/FeeDistributor, then poke both.
             Permissionless.
     """
+    self._trigger()
+
+
+@external
+@nonreentrant
+def fill_epochs():
+    """
+    @notice Alias of trigger() for FeeDistributor ABI compatibility: keepers that poke the
+            fee_receiver via fill_epochs() drive the split/poke too. Permissionless.
+    """
+    self._trigger()
+
+
+@internal
+def _trigger():
     fd: FeeDistributor = self.fee_distributor
     token_set: DynArray[IERC20, MAX_TOKENS] = self._token_set(fd)
     pid: address = self.pid

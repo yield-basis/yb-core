@@ -375,6 +375,31 @@ def test_feesplitter_split(token, accts, fd_mock, pid_mock, feesplitter_deployer
     assert fd.filled() == 1
 
 
+def test_feesplitter_fill_epochs_is_trigger_alias(token, accts, fd_mock, pid_mock, feesplitter_deployer):
+    """fill_epochs() exists for FeeDistributor ABI compatibility and does exactly what
+    trigger() does: realize+split the fees and poke the PID and FeeDistributor."""
+    admin = accts[0]
+    fd = fd_mock.deploy()
+    pid = pid_mock.deploy()
+    lt1 = token.deploy("LT1", "LT1", 18)
+    lt2 = token.deploy("LT2", "LT2", 18)
+    fd.set_tokens([lt1.address, lt2.address])
+
+    fraction = PRECISION // 4  # 25% to PID
+    fs = feesplitter_deployer.deploy(fd.address, pid.address, fraction, admin)
+    lt1._mint_for_testing(fs.address, 10**20)
+    lt2._mint_for_testing(fs.address, 4 * 10**20)
+
+    fs.fill_epochs()  # the alias, not trigger()
+
+    assert lt1.balanceOf(pid.address) == 10**20 // 4
+    assert lt1.balanceOf(fd.address) == 10**20 - 10**20 // 4
+    assert lt2.balanceOf(pid.address) == 4 * 10**20 // 4
+    assert lt2.balanceOf(fd.address) == 4 * 10**20 - 4 * 10**20 // 4
+    assert pid.triggered() == 1
+    assert fd.filled() == 1
+
+
 def test_feesplitter_recover(token, accts, fd_mock, feesplitter_deployer):
     admin, other = accts[0], accts[1]
     fd = fd_mock.deploy()
