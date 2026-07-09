@@ -42,6 +42,7 @@ LTs ──admin-fee LT shares──▶ FeeSplitter ──(1−frac)──▶ Fee
 | [`FastGauge.vy`](../../contracts/net_pressure/FastGauge.vy) | ERC4626 staking gauge over a Curve **stableswap** LP (the sink). Streams a single reward (crvUSD) at a rate only the PID sets; pulls crvUSD from the PID at checkpoint. |
 | [`MarketRateGetter.vy`](../../contracts/net_pressure/MarketRateGetter.vy) | Reports the "market rate" the offer is quoted against. First implementation reads the Sky Savings Rate (sUSDS). Swappable by the DAO. |
 | [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and the AMM's half-TVL (`half_tvl_oracle` = its equity at `price_oracle`, the normalizer); `net_pressure_and_tvl` returns both in one call (sharing the `lp_oracle_2` solve) for the controller's per-pool loop. |
+| [`LTSwapZap.vy`](../../contracts/utils/LTSwapZap.vy) | Permissionless utility: `convert(lt)` pulls a caller's shares of one LT (`transferFrom`, approve-first), withdraws them and swaps to crvUSD with the same on-chain oracle-bounded `min_dy` as `PID._convert_fees`, sending the crvUSD to the caller. Best-effort — if the swap can't meet its min the swap error is swallowed and the withdrawn asset is handed back instead. Used to seed the reserve from one-off share holdings (e.g. deprecated-market fees recovered from the FeeDistributor to the DAO). |
 
 ## Manipulation resistance
 
@@ -184,3 +185,4 @@ getter for a different source.
 - `tests_forked/test_market_rate_forked.py` — `MarketRateGetter` vs live sUSDS at the fixed fork block.
 - `tests_forked/test_net_pressure.py` — the net-pressure oracle against live pools and the real crvUSD aggregator.
 - `tests_forked/test_net_pressure_e2e.py` and `tests_forked/test_net_pressure_balanced.py` — the whole fee→reserve→stream flow, the connection gate, and the controller on live mainnet state; see [`REPORT_e2e_fork_tests.md`](./REPORT_e2e_fork_tests.md).
+- `tests_forked/test_lt_swap_zap.py` — the DAO recovering the deprecated markets' fee shares from the live FeeDistributor, approving `LTSwapZap`, and calling `convert(lt)` per token to swap to crvUSD; plus the swallowed-swap path (withdrawn asset handed back) and the withdraw-floor revert that keeps the caller's shares.
