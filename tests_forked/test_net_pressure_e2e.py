@@ -35,6 +35,9 @@ SINK_LP = "0x625E92624Bc2D88619ACCc1788365A69767f6200"   # crvUSD/pyUSD stablesw
 SUSDS = "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"      # Sky Savings Rate, for MarketRateGetter
 MARKET_IDS = [7, 8, 9, 10]                                # aggregated for pressure + fee set
 FEE_MARKET = 7                                            # the only 7-10 with pending fees here
+DEPRECATED_MARKETS = [0, 1, 2]                            # long-deprecated; their fees are DAO-recoverable
+FD_OWNER = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"  # FeeDistributor owner (can recover_token)
+ZAP_SLIPPAGE = 3 * 10**18 // 2                            # 1.5x: enough slippage room to convert all three
 
 SPLIT_FRACTION = 15 * 10**16                              # 15% of fees to the PID reserve (self-funds the spend)
 # Staked sink, fabricated via boa.deal(adjust_supply=False) so the pool's virtual_price is
@@ -240,3 +243,87 @@ def test_controller_gated_off_until_connected():
     assert pid.integral() == 0
     assert pid.d_pressure() == 0
     assert gauge.reward_rate() > 0
+
+
+def test_pid_reserve_seeded_from_deprecated_fees_via_zap():
+    """Seed the PID reserve from the long-deprecated markets' (0-2) fees, then stream them.
+
+    Mirroring the real governance timeline: the system is deployed and sits through a ~4-day
+    warmup during which permissionless pid.trigger() calls are gated no-ops (the FeeSplitter is
+    not yet the fee_receiver). Right before the FeeSplitter is voted in, the DAO recovers the
+    deprecated markets' LT fee shares from the live FeeDistributor, converts them to crvUSD with
+    LTSwapZap, and sends the crvUSD to the PID as its starting reserve. Once the splitter is
+    connected the controller runs from that zap-seeded reserve and a staker claims crvUSD out of
+    it. (The clean-slate connection gate makes the warmup length immaterial to the result, but
+    it is included to match how this would actually be rolled out.)"""
+    factory = boa.load_partial("contracts/Factory.vy").at(FACTORY)
+    real_fd = factory.fee_receiver()               # the live FeeDistributor (contracts/dao)
+    fd = boa.load_partial("contracts/dao/FeeDistributor.vy").at(real_fd)
+    lt_d = boa.load_partial("contracts/LT.vy")
+    pressure_lts = [factory.markets(i).lt for i in MARKET_IDS]
+    deprecated_lts = [factory.markets(i).lt for i in DEPRECATED_MARKETS]
+    crvusd = boa.loads_abi(ERC20_ABI).at(CRVUSD)
+    sink = boa.loads_abi(ERC20_ABI).at(SINK_LP)
+
+    dao = boa.env.generate_address()               # owns the PID + its reserve
+    staker = boa.env.generate_address()
+
+    # Mis-tuned gains (kp=0, wide dead band) so the controller streams a positive rate here.
+    oracle, mrate, gauge, pid, fs = _deploy_system(real_fd, pressure_lts, WRONG_GAINS, dao)
+
+    # A staker stakes the sink LP and the gauge's EMA converges onto it (needed for a rate).
+    boa.deal(sink, staker, SINK_LP_AMOUNT, adjust_supply=False)
+    with boa.env.prank(staker):
+        sink.approve(gauge.address, 2**256 - 1)
+        gauge.deposit(SINK_LP_AMOUNT, staker)
+    boa.env.time_travel(seconds=20 * gauge.ema_time())
+
+    # --- ~4-day warmup before the vote: pid.trigger() is a gated no-op ------
+    for _ in range(8):                              # 8 * 12h = 4 days
+        pid.trigger()
+        boa.env.time_travel(seconds=12 * 3600)
+    assert not pid.active(), "controller must not run before the splitter is connected"
+    assert pid.integral() == 0 and pid.d_pressure() == 0
+    assert gauge.reward_rate() == 0
+    assert crvusd.balanceOf(pid.address) == 0, "no reserve before the DAO seeds it"
+
+    # --- right before the vote: the DAO seeds the reserve via the zap -------
+    zap = boa.load("contracts/utils/LTSwapZap.vy", CRVUSD, oracle.address, ZAP_SLIPPAGE, dao)
+    with boa.env.prank(FD_OWNER):                   # recover the deprecated fee shares to the DAO
+        for lt_addr in deprecated_lts:
+            fd.recover_token(lt_addr, dao)          # token_balances==0 -> full balance
+    recovered = [lt_d.at(lt_addr).balanceOf(dao) for lt_addr in deprecated_lts]
+    assert all(s > 0 for s in recovered), "expected deprecated-market fee shares to recover"
+
+    seed = 0
+    with boa.env.prank(dao):
+        for lt_addr in deprecated_lts:
+            boa.loads_abi(ERC20_ABI).at(lt_addr).approve(zap.address, 2**256 - 1)
+            seed += zap.convert(lt_addr)            # crvUSD -> the DAO
+        crvusd.transfer(pid.address, seed)          # ...forwarded to the PID as its reserve
+    assert seed > 0, "the zap realized no crvUSD from the deprecated fees"
+    assert crvusd.balanceOf(pid.address) == seed, "PID reserve must be exactly the zap proceeds"
+    print(f"\nseeded PID reserve from deprecated markets 0-2: {seed / 1e18:,.2f} crvUSD")
+
+    # --- the FeeSplitter is voted in (connected) ---------------------------
+    with boa.env.prank(factory.admin()):
+        factory.set_fee_receiver(fs.address)
+
+    # --- the controller runs from the zap-seeded reserve -------------------
+    pid.trigger()                                   # not fs.trigger(): reserve stays the pure seed
+    assert pid.active()
+    assert gauge.reward_rate() > 0, "expected a positive reward rate under the mis-tuned gains"
+
+    # A staker accrues and claims crvUSD straight out of the seeded reserve.
+    reserve_before = crvusd.balanceOf(pid.address)
+    staker_before = crvusd.balanceOf(staker)
+    boa.env.time_travel(seconds=3600)
+    assert gauge.claimable_reward(staker) > 0
+    with boa.env.prank(staker):
+        paid = gauge.claim(staker)
+    assert paid > 0
+    assert crvusd.balanceOf(staker) - staker_before == paid
+    # The reward was pulled from the zap-seeded reserve (nothing else ever funded the PID); the
+    # gauge draws >= paid (a dust remainder truncates into the per-token accounting).
+    assert crvusd.balanceOf(pid.address) < reserve_before
+    assert reserve_before - crvusd.balanceOf(pid.address) >= paid
