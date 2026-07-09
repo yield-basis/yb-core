@@ -36,7 +36,7 @@ SUSDS = "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"      # Sky Savings Rate, fo
 MARKET_IDS = [7, 8, 9, 10]                                # aggregated for pressure + fee set
 FEE_MARKET = 7                                            # the only 7-10 with pending fees here
 
-SPLIT_FRACTION = 5 * 10**16                               # 5% of fees to the PID reserve (realistic)
+SPLIT_FRACTION = 15 * 10**16                              # 15% of fees to the PID reserve (self-funds the spend)
 # Staked sink, fabricated via boa.deal(adjust_supply=False) so the pool's virtual_price is
 # left intact (bumping totalSupply would dilute get_virtual_price and mis-value the sink).
 # Sized well above the AGGREGATE net pressure of all four markets (~$92M half-TVL, ~11.6%

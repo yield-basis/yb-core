@@ -58,7 +58,7 @@ def test_full_stack(
     gauge = fastgauge_deployer.deploy("sink", "sink", sink_lp.address, stablecoin.address, admin)
     pid = pid_deployer.deploy(stablecoin.address, factory.address,
                               oracle.address, mrate.address, fd.address, admin)
-    fraction = 5 * 10**16  # 5% to PID (realistic split per the incentive data)
+    fraction = 15 * 10**16  # 15% to PID (self-funds the spend from the fee-generating markets)
     fs = feesplitter_deployer.deploy(fd.address, pid.address, fraction, admin)
 
     with boa.env.prank(admin):
