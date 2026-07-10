@@ -18,6 +18,27 @@ from snekmate.utils import math
 from ..dao import erc4626
 
 
+# The staked LP may itself be a 2-coin Curve stableswap pool (self-LP), which enables the
+# add_liquidity/remove_liquidity zap helpers below. Only 2-coin pools are supported.
+POOL_N_COINS: constant(uint256) = 2
+
+
+# Views + the single-coin exit share the same selector across pool generations.
+interface StableswapPool:
+    def coins(i: uint256) -> address: view
+    def remove_liquidity_one_coin(amount: uint256, i: int128, min_received: uint256, receiver: address) -> uint256: nonpayable
+
+# Newer (Stableswap-NG) pools take/return DynArray amounts.
+interface StableswapPoolDyn:
+    def add_liquidity(amounts: DynArray[uint256, POOL_N_COINS], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
+    def remove_liquidity(amount: uint256, min_amounts: DynArray[uint256, POOL_N_COINS], receiver: address) -> DynArray[uint256, POOL_N_COINS]: nonpayable
+
+# Older pools take/return a fixed uint256[2].
+interface StableswapPoolStatic:
+    def add_liquidity(amounts: uint256[POOL_N_COINS], min_mint_amount: uint256, receiver: address) -> uint256: nonpayable
+    def remove_liquidity(amount: uint256, min_amounts: uint256[POOL_N_COINS], receiver: address) -> uint256[POOL_N_COINS]: nonpayable
+
+
 initializes: erc4626
 
 
@@ -57,6 +78,25 @@ event Claim:
     user: indexed(address)
     amount: uint256
 
+event AddLiquidity:
+    provider: indexed(address)
+    receiver: indexed(address)
+    amounts: DynArray[uint256, POOL_N_COINS]
+    lp: uint256
+
+event RemoveLiquidity:
+    owner: indexed(address)
+    receiver: indexed(address)
+    shares: uint256
+    amounts: DynArray[uint256, POOL_N_COINS]
+
+event RemoveLiquidityOne:
+    owner: indexed(address)
+    receiver: indexed(address)
+    shares: uint256
+    coin: int128
+    dy: uint256
+
 
 PRECISION: constant(uint256) = 10**18
 # Seed-the-market floor: total supply must be 0 or >= this (shares are 1:1 with the
@@ -68,6 +108,15 @@ PRECISION: constant(uint256) = 10**18
 MIN_TOTAL_SUPPLY: public(constant(uint256)) = 10 * 10**18
 REWARD_TOKEN: public(immutable(IERC20))  # crvUSD
 LP_TOKEN: public(immutable(IERC20))      # Curve stableswap LP staked here
+
+# Zap wiring: set iff LP_TOKEN is itself a 2-coin Curve pool (self-LP), auto-detected in
+# __init__. When enabled, add_liquidity/remove_liquidity/remove_liquidity_one_coin deposit
+# into / withdraw from the pool and (un)stake in one call. POOL_IS_DYNARRAY selects the
+# pool's add/remove ABI (newer NG DynArray vs older fixed uint256[2]).
+ZAP_ENABLED: public(immutable(bool))
+POOL_IS_DYNARRAY: public(immutable(bool))
+COIN0: public(immutable(IERC20))
+COIN1: public(immutable(IERC20))
 
 # ERC20 metadata, exposed directly (not via the erc4626 module, whose String[25]/[5]
 # bounds are too tight for a per-market name). Sizes follow the common ERC20 convention
@@ -125,6 +174,38 @@ def __init__(_name: String[50], _symbol: String[29], lp_token: IERC20, reward_to
     # EMA_TIME. Only sets the multi-block manipulation cost / responsiveness - the flash
     # (single-block) resistance is structural. DAO-tunable via set_ema_time.
     self.ema_time = 866
+
+    # --- zap detection: is the staked LP itself a 2-coin Curve pool? ---------
+    # Probe coins(0); a plain LP token (or mock) has no such selector, so the zap helpers
+    # stay disabled and the gauge is a pure LP-staking gauge.
+    ok: bool = False
+    ret: Bytes[32] = b""
+    ok, ret = raw_call(lp_token.address,
+                       abi_encode(empty(uint256), method_id=method_id("coins(uint256)")),
+                       max_outsize=32, is_static_call=True, revert_on_failure=False)
+    zap_enabled: bool = ok and len(ret) == 32
+    coin0: IERC20 = empty(IERC20)
+    coin1: IERC20 = empty(IERC20)
+    is_dynarray: bool = False
+    if zap_enabled:
+        coin0 = IERC20(abi_decode(ret, address))
+        coin1 = IERC20(staticcall StableswapPool(lp_token.address).coins(1))
+        # One-time infinite approvals so add_liquidity can pull the coins into the pool.
+        assert extcall coin0.approve(lp_token.address, max_value(uint256), default_return_value=True)
+        assert extcall coin1.approve(lp_token.address, max_value(uint256), default_return_value=True)
+        # Detect the pool's amounts ABI: only NG pools expose calc_token_amount(uint256[],bool).
+        dyn_ok: bool = False
+        dyn_ret: Bytes[32] = b""
+        probe: DynArray[uint256, POOL_N_COINS] = [0, 0]
+        dyn_ok, dyn_ret = raw_call(lp_token.address,
+                                   abi_encode(probe, True,
+                                              method_id=method_id("calc_token_amount(uint256[],bool)")),
+                                   max_outsize=32, is_static_call=True, revert_on_failure=False)
+        is_dynarray = dyn_ok
+    ZAP_ENABLED = zap_enabled
+    COIN0 = coin0
+    COIN1 = coin1
+    POOL_IS_DYNARRAY = is_dynarray
 
 
 @internal
@@ -392,6 +473,106 @@ def redeem(shares: uint256, receiver: address, owner: address) -> uint256:
     self._check_min_supply()
     self._checkpoint_tvl()
     return assets
+
+
+# --- zap: deposit into / withdraw from the pool and (un)stake in one call ----
+
+@external
+@nonreentrant
+def add_liquidity(amounts: DynArray[uint256, POOL_N_COINS], min_mint_amount: uint256,
+                  receiver: address) -> uint256:
+    """
+    @notice Deposit `amounts` of the pool's two coins into the pool and stake the minted LP
+            here, minting gauge shares to `receiver` - all in one transaction.
+    @dev Pulls the coins from the caller (approve this gauge first). Slippage-bounded by
+         min_mint_amount. Shares are 1:1 with the staked LP.
+    @param amounts Coin amounts to deposit ([coin0, coin1]); either may be 0.
+    @param min_mint_amount Minimum LP (== gauge shares) to mint, else revert.
+    @param receiver Recipient of the gauge shares.
+    @return Gauge shares minted (== LP staked).
+    """
+    assert ZAP_ENABLED, "No zap: LP is not a pool"
+    assert len(amounts) == POOL_N_COINS, "Bad amounts length"
+    if amounts[0] > 0:
+        assert extcall COIN0.transferFrom(msg.sender, self, amounts[0], default_return_value=True)
+    if amounts[1] > 0:
+        assert extcall COIN1.transferFrom(msg.sender, self, amounts[1], default_return_value=True)
+
+    # Add liquidity with this gauge as the LP receiver (approvals set in __init__).
+    lp: uint256 = 0
+    if POOL_IS_DYNARRAY:
+        lp = extcall StableswapPoolDyn(LP_TOKEN.address).add_liquidity(amounts, min_mint_amount, self)
+    else:
+        static_amounts: uint256[POOL_N_COINS] = [amounts[0], amounts[1]]
+        lp = extcall StableswapPoolStatic(LP_TOKEN.address).add_liquidity(static_amounts, min_mint_amount, self)
+
+    # Stake the freshly minted LP (already held here): mint 1:1 gauge shares to receiver.
+    self._checkpoint(receiver)
+    erc4626.erc20._mint(receiver, lp)
+    self._check_min_supply()
+    self._checkpoint_tvl()
+    log AddLiquidity(provider=msg.sender, receiver=receiver, amounts=amounts, lp=lp)
+    return lp
+
+
+@external
+@nonreentrant
+def remove_liquidity(shares: uint256, min_amounts: DynArray[uint256, POOL_N_COINS],
+                     receiver: address) -> DynArray[uint256, POOL_N_COINS]:
+    """
+    @notice Unstake `shares` gauge tokens and remove the underlying LP from the pool as both
+            coins, sent to `receiver` - all in one transaction.
+    @dev Burns the caller's gauge shares (1:1 with LP). Slippage-bounded by min_amounts.
+    @param shares Gauge shares to burn (== LP to remove).
+    @param min_amounts Minimum per-coin output ([coin0, coin1]), else revert.
+    @param receiver Recipient of the withdrawn coins.
+    @return Coin amounts sent to `receiver`.
+    """
+    assert ZAP_ENABLED, "No zap: LP is not a pool"
+    assert len(min_amounts) == POOL_N_COINS, "Bad min_amounts length"
+    self._checkpoint(msg.sender)
+    erc4626.erc20._burn(msg.sender, shares)
+    self._check_min_supply()
+
+    out: DynArray[uint256, POOL_N_COINS] = []
+    if POOL_IS_DYNARRAY:
+        out = extcall StableswapPoolDyn(LP_TOKEN.address).remove_liquidity(shares, min_amounts, receiver)
+    else:
+        static_min: uint256[POOL_N_COINS] = [min_amounts[0], min_amounts[1]]
+        got: uint256[POOL_N_COINS] = extcall StableswapPoolStatic(
+            LP_TOKEN.address).remove_liquidity(shares, static_min, receiver)
+        out = [got[0], got[1]]
+
+    self._checkpoint_tvl()
+    log RemoveLiquidity(owner=msg.sender, receiver=receiver, shares=shares, amounts=out)
+    return out
+
+
+@external
+@nonreentrant
+def remove_liquidity_one_coin(shares: uint256, i: int128, min_received: uint256,
+                              receiver: address) -> uint256:
+    """
+    @notice Unstake `shares` gauge tokens and remove the underlying LP from the pool as a
+            single coin `i`, sent to `receiver` - all in one transaction.
+    @dev Burns the caller's gauge shares (1:1 with LP). Slippage-bounded by min_received.
+    @param shares Gauge shares to burn (== LP to remove).
+    @param i Coin index to receive (0 or 1).
+    @param min_received Minimum coin output, else revert.
+    @param receiver Recipient of the withdrawn coin.
+    @return Coin amount sent to `receiver`.
+    """
+    assert ZAP_ENABLED, "No zap: LP is not a pool"
+    self._checkpoint(msg.sender)
+    erc4626.erc20._burn(msg.sender, shares)
+    self._check_min_supply()
+
+    # Same selector across pool generations (no amounts array).
+    dy: uint256 = extcall StableswapPool(LP_TOKEN.address).remove_liquidity_one_coin(
+        shares, i, min_received, receiver)
+    self._checkpoint_tvl()
+    log RemoveLiquidityOne(owner=msg.sender, receiver=receiver, shares=shares, coin=i, dy=dy)
+    return dy
 
 
 @external
