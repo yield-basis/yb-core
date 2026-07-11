@@ -215,3 +215,47 @@ def test_python_reference_matches_driver(env):
         worst_rel = max(worst_rel, max(abs(a - b) / max(1, abs(a), abs(b)) for a, b in zip(py, ref)))
         assert apr == sol.target_apr, f"step {k}: shipped APR {apr} != view {sol.target_apr}"
     assert worst_rel < 1e-9, f"reference diverged {worst_rel:.2e} relative from the view"
+
+
+ZERO = "0x0000000000000000000000000000000000000000"
+
+
+def test_manager_role(env, accts):
+    """The manager role may set_gains() (alongside the DAO); only the DAO appoints/clears it,
+    and clearing it to 0x0 returns those controls to DAO-only."""
+    driver, admin = env["driver"], env["admin"]
+    manager, rando = accts[1], accts[2]
+    g = [getattr(driver, n)() for n in Params._fields]     # current gains, to re-set unchanged
+
+    # default: no manager -> only the DAO (owner) can set_gains
+    assert driver.manager() == ZERO
+    with boa.env.prank(rando):
+        with boa.reverts():
+            driver.set_gains(*g)
+    with boa.env.prank(admin):
+        driver.set_gains(*g)                               # owner ok
+
+    # only the DAO can appoint a manager
+    with boa.env.prank(rando):
+        with boa.reverts():
+            driver.set_manager(manager)
+    with boa.env.prank(admin):
+        driver.set_manager(manager)
+    assert driver.manager() == manager
+
+    # the manager can now set_gains; a random address still cannot
+    with boa.env.prank(manager):
+        driver.set_gains(*g)
+    with boa.env.prank(rando):
+        with boa.reverts():
+            driver.set_gains(*g)
+
+    # DAO clears the role (0x0) -> the former manager loses access, DAO still controls
+    with boa.env.prank(admin):
+        driver.set_manager(ZERO)
+    assert driver.manager() == ZERO
+    with boa.env.prank(manager):
+        with boa.reverts():
+            driver.set_gains(*g)
+    with boa.env.prank(admin):
+        driver.set_gains(*g)                               # owner still ok

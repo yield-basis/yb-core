@@ -111,6 +111,9 @@ event SetPressureLts:
 event SetSinkPool:
     sink_pool: indexed(address)
 
+event SetManager:
+    manager: indexed(address)
+
 event SetSources:
     net_pressure: indexed(address)
     market_rate_getter: indexed(address)
@@ -162,6 +165,10 @@ pressure_lts: public(DynArray[address, MAX_POOLS])
 # `sink_tvl`. Never read on-chain (Merkl supplies the number); stored so the sink pool is
 # discoverable from the driver.
 sink_pool: public(address)
+
+# Optional operator role: may set_gains() and set up the Merkl campaign. The DAO (owner) can
+# do all of that too; setting manager to empty(address) makes those actions DAO-only.
+manager: public(address)
 
 # Controller params (1e18; signed where they can multiply a signed term)
 feedforward_gain: public(int256)   # alpha
@@ -421,7 +428,28 @@ def connected() -> bool:
     return success and len(response) == 32 and abi_decode(response, address) == self
 
 
-# --- DAO control -------------------------------------------------------------
+# --- DAO / manager control ---------------------------------------------------
+
+@internal
+@view
+def _check_owner_or_manager():
+    """Allow the DAO (owner) or the manager role. A zero manager is DAO-only, since
+    msg.sender can never be empty(address)."""
+    assert msg.sender == ownable.owner or msg.sender == self.manager, "Not manager"
+
+
+@external
+def set_manager(manager: address):
+    """
+    @notice Set (or clear) the manager role. DAO (owner) only.
+    @dev The manager may set_gains() and (later) set up the Merkl campaign. Set to
+         empty(address) to disable the role, making those actions DAO-only.
+    @param manager The new manager, or empty(address) to disable the role.
+    """
+    ownable._check_owner()
+    self.manager = manager
+    log SetManager(manager=manager)
+
 
 @external
 def recover(token: IERC20, amount: uint256, to: address):
@@ -484,8 +512,9 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
               d_filter_time: uint256):
     """
     @notice Set the controller gains and clamps (all 1e18-scaled except d_filter_time).
-    @dev DAO only. Every param is magnitude-bounded so no downstream reader overflows int256.
-         Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0, 0 < d_filter_time.
+    @dev DAO (owner) or manager. Every param is magnitude-bounded so no downstream reader
+         overflows int256. Requires max_integral >= 0, sink_cap >= 0, sink_per_offer > 0,
+         0 < d_filter_time.
     @param feedforward_gain Proportional gain on the raw pressure.
     @param kp Proportional gain on the coverage error (pressure - sink).
     @param ki Integral gain on the coverage error.
@@ -497,7 +526,7 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
     @param d_filter_time Derivative low-pass filter time constant Tf (seconds); must be > 0
            (it is the derivative denominator floor, so a same-block dt==0 step stays finite).
     """
-    ownable._check_owner()
+    self._check_owner_or_manager()
     assert abs(feedforward_gain) <= MAX_PARAM_SIGNED and abs(kp) <= MAX_PARAM_SIGNED
     assert abs(ki) <= MAX_PARAM_SIGNED and abs(kd) <= MAX_PARAM_SIGNED
     assert max_integral >= 0 and max_integral <= MAX_PARAM_SIGNED
