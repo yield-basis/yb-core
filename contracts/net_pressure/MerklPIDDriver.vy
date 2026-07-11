@@ -100,6 +100,34 @@ interface FeeDistributor:
     def current_token_set() -> uint256: view
     def token_sets(set_id: uint256, i: uint256) -> address: view
 
+# Merkl Pull-on-Claim wrapper (the deployed PullTokenWrapper, an ERC1967 proxy over Merkl's
+# audited impl). mint(amount) is holder-only and mints to the holder - this driver. We only
+# touch mint() + ERC20 approve; the wrapper's internals (pulling crvUSD from us at claim) stay
+# off our books.
+interface MerklWrapper:
+    def mint(amount: uint256): nonpayable
+    def approve(spender: address, amount: uint256) -> bool: nonpayable
+
+MAX_CAMPAIGN_DATA: constant(uint256) = 4096
+
+# Mirrors Merkl DistributionCreator.CampaignParameters. campaign_data is opaque (built
+# off-chain per Merkl's schema for the target-APR campaign type, which fetches the APR from
+# this contract itself); creator/reward_token/amount are filled in by this contract.
+struct CampaignParameters:
+    campaign_id: bytes32
+    creator: address
+    reward_token: address
+    amount: uint256
+    campaign_type: uint32
+    start_timestamp: uint32
+    duration: uint32
+    campaign_data: Bytes[MAX_CAMPAIGN_DATA]
+
+interface DistributionCreator:
+    def acceptConditions(): nonpayable
+    def createCampaign(campaign: CampaignParameters) -> bytes32: nonpayable
+    def overrideCampaign(campaign_id: bytes32, campaign: CampaignParameters): nonpayable
+
 
 event Converted:
     crvusd_gained: uint256
@@ -113,6 +141,20 @@ event SetSinkPool:
 
 event SetManager:
     manager: indexed(address)
+
+event SetMerkl:
+    creator: indexed(address)
+    wrapper: indexed(address)
+
+event CampaignCreated:
+    campaign_id: indexed(bytes32)
+    amount: uint256
+    campaign_type: uint32
+    duration: uint32
+
+event CampaignOverridden:
+    campaign_id: indexed(bytes32)
+    duration: uint32
 
 event SetSources:
     net_pressure: indexed(address)
@@ -169,6 +211,12 @@ sink_pool: public(address)
 # Optional operator role: may set_gains() and set up the Merkl campaign. The DAO (owner) can
 # do all of that too; setting manager to empty(address) makes those actions DAO-only.
 manager: public(address)
+
+# Merkl wiring (DAO-settable): the DistributionCreator we create/override campaigns on, and the
+# whitelisted Pull-on-Claim wrapper (crvUSD underlying, this contract as holder) used as the
+# campaign reward token. Zero until the DAO installs them via set_merkl.
+merkl_creator: public(DistributionCreator)
+reward_wrapper: public(MerklWrapper)
 
 # Controller params (1e18; signed where they can multiply a signed term)
 feedforward_gain: public(int256)   # alpha
@@ -449,6 +497,120 @@ def set_manager(manager: address):
     ownable._check_owner()
     self.manager = manager
     log SetManager(manager=manager)
+
+
+# --- Merkl campaigns ---------------------------------------------------------
+
+@external
+def set_merkl(creator: DistributionCreator, wrapper: MerklWrapper):
+    """
+    @notice Install Merkl's DistributionCreator + the whitelisted Pull-on-Claim wrapper, and
+            grant the two allowances the flow needs. DAO (owner) only.
+    @dev crvUSD is approved to the wrapper (so it can pull crvUSD from us at claim, and the fee
+         at creation); the wrapper is approved to the creator (so createCampaign can pull the
+         minted wrapper). Re-callable to migrate either address: the previously-installed pair's
+         infinite allowances are first revoked to 0, so a replaced wrapper/creator keeps no pull
+         on the reserve. That also stops an old wrapper from settling any still-live old-wrapper
+         campaigns, so migrate only once those are wound down. Pass empty(address) for either to
+         unset it - no allowance is granted to the zero address (revoking without re-granting).
+    @param creator The Merkl DistributionCreator (0x8BB4C975... on mainnet), or 0x0 to unset.
+    @param wrapper The PullTokenWrapperAllowImmutable (crvUSD underlying, this contract holder),
+           or 0x0 to unset (which skips the crvUSD approval entirely).
+    """
+    ownable._check_owner()
+    old_creator: address = self.merkl_creator.address
+    old_wrapper: MerklWrapper = self.reward_wrapper
+    old_wrapper_addr: address = old_wrapper.address
+    if old_wrapper_addr != empty(address):            # revoke the previously-installed pair
+        assert extcall CRVUSD.approve(old_wrapper_addr, 0, default_return_value=True)
+        assert extcall old_wrapper.approve(old_creator, 0, default_return_value=True)
+    self.merkl_creator = creator
+    self.reward_wrapper = wrapper
+    new_creator: address = creator.address
+    new_wrapper: address = wrapper.address
+    if new_wrapper != empty(address):                 # empty(address) unsets - never approve 0x0
+        assert extcall CRVUSD.approve(new_wrapper, max_value(uint256), default_return_value=True)
+        if new_creator != empty(address):
+            assert extcall wrapper.approve(new_creator, max_value(uint256), default_return_value=True)
+    log SetMerkl(creator=new_creator, wrapper=new_wrapper)
+
+
+@external
+def accept_conditions():
+    """
+    @notice Accept Merkl's terms on the DistributionCreator so createCampaign's `hasSigned` gate
+            passes. DAO or manager. Re-call if Merkl updates its terms (messageHash).
+    """
+    self._check_owner_or_manager()
+    extcall self.merkl_creator.acceptConditions()
+
+
+@external
+def create_campaign(amount: uint256, campaign_type: uint256, start_timestamp: uint256,
+                    duration: uint256, campaign_data: Bytes[MAX_CAMPAIGN_DATA]) -> bytes32:
+    """
+    @notice Mint `amount` wrapper and open a Merkl campaign funded by it (reward token = wrapper,
+            creator = this contract). crvUSD leaves our reserve only as users claim (plus the
+            Merkl fee, pulled at creation). DAO or manager.
+    @dev campaign_data is forwarded opaquely (built off-chain per Merkl's schema for the target-
+         APR type, which fetches the APR from this contract). `amount` is the distributable cap
+         and the fee scales with it, so size it to a sensible budget. Reverts if Merkl rejects
+         (wrapper not whitelisted, amount too low for the duration, conditions not accepted, ...).
+    @param amount Wrapper (== crvUSD, 1:1) cap for the campaign.
+    @param campaign_type Merkl campaign type id.
+    @param start_timestamp Campaign start (unix seconds); 0 lets Merkl start it.
+    @param duration Campaign duration in seconds.
+    @param campaign_data Opaque Merkl campaign config.
+    @return The Merkl campaign id.
+    """
+    self._check_owner_or_manager()
+    wrapper: MerklWrapper = self.reward_wrapper
+    extcall wrapper.mint(amount)                       # PullTokenWrapper mints to the holder (us)
+    ct: uint32 = convert(campaign_type, uint32)
+    dur: uint32 = convert(duration, uint32)
+    camp: CampaignParameters = CampaignParameters(
+        campaign_id=empty(bytes32),
+        creator=self,
+        reward_token=wrapper.address,
+        amount=amount,
+        campaign_type=ct,
+        start_timestamp=convert(start_timestamp, uint32),
+        duration=dur,
+        campaign_data=campaign_data,
+    )
+    campaign_id: bytes32 = extcall self.merkl_creator.createCampaign(camp)
+    log CampaignCreated(campaign_id=campaign_id, amount=amount, campaign_type=ct, duration=dur)
+    return campaign_id
+
+
+@external
+def override_campaign(campaign_id: bytes32, campaign_type: uint256, start_timestamp: uint256,
+                     duration: uint256, campaign_data: Bytes[MAX_CAMPAIGN_DATA]):
+    """
+    @notice Update a live campaign's data/duration/start. DAO or manager. Merkl keeps amount,
+            creator, reward token and id immutable; the target APR is fetched by the campaign
+            itself, so this is for adjusting the rules or extending, not the APR.
+    @param campaign_id The campaign to override.
+    @param campaign_type Merkl campaign type id.
+    @param start_timestamp New start (only effective before the campaign started).
+    @param duration New duration in seconds.
+    @param campaign_data New opaque Merkl campaign config.
+    """
+    self._check_owner_or_manager()
+    dur: uint32 = convert(duration, uint32)
+    # creator/reward_token/amount are overwritten by Merkl to the stored campaign's values.
+    camp: CampaignParameters = CampaignParameters(
+        campaign_id=campaign_id,
+        creator=self,
+        reward_token=self.reward_wrapper.address,
+        amount=0,
+        campaign_type=convert(campaign_type, uint32),
+        start_timestamp=convert(start_timestamp, uint32),
+        duration=dur,
+        campaign_data=campaign_data,
+    )
+    extcall self.merkl_creator.overrideCampaign(campaign_id, camp)
+    log CampaignOverridden(campaign_id=campaign_id, duration=dur)
 
 
 @external

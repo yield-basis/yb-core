@@ -130,7 +130,7 @@ def env(token, accts, np_mock, mr_mock, fd_mock, sink_mock, gauge_mock,
     with boa.env.prank(admin):
         driver.set_pressure_lts([lt])
         driver.set_sink_pool(sink.address)           # informational; Merkl supplies the TVL
-    return dict(pid=pid, driver=driver, np=np, mr=mr, sink=sink, gauge=gauge, admin=admin)
+    return dict(pid=pid, driver=driver, np=np, mr=mr, sink=sink, gauge=gauge, admin=admin, crvusd=crvusd)
 
 
 # net-pressure path: rising ramp that crosses the staked sink (sink_norm = 2.0, so net must
@@ -259,3 +259,161 @@ def test_manager_role(env, accts):
             driver.set_gains(*g)
     with boa.env.prank(admin):
         driver.set_gains(*g)                               # owner still ok
+
+
+# --- Merkl campaign create/override (Pull-on-Claim wrapper) -------------------
+
+# Minimal stand-ins: WRAPPER_MOCK is the Pull-on-Claim wrapper (mint + ERC20 approve/transferFrom
+# the driver touches); DC_MOCK is Merkl's DistributionCreator (typed createCampaign(P) so the
+# driver's abi_encode must round-trip, pulls the wrapper from the caller, records the fields).
+WRAPPER_MOCK = """
+# pragma version 0.4.3
+balanceOf: public(HashMap[address, uint256])
+allowance: public(HashMap[address, HashMap[address, uint256]])
+minted: public(uint256)
+@external
+def mint(amount: uint256):
+    self.balanceOf[msg.sender] += amount
+    self.minted += amount
+@external
+def approve(spender: address, amount: uint256) -> bool:
+    self.allowance[msg.sender][spender] = amount
+    return True
+@external
+def transferFrom(sender: address, receiver: address, amount: uint256) -> bool:
+    self.allowance[sender][msg.sender] -= amount
+    self.balanceOf[sender] -= amount
+    self.balanceOf[receiver] += amount
+    return True
+"""
+
+DC_MOCK = """
+# pragma version 0.4.3
+from ethereum.ercs import IERC20
+struct P:
+    campaign_id: bytes32
+    creator: address
+    reward_token: address
+    amount: uint256
+    campaign_type: uint32
+    start_timestamp: uint32
+    duration: uint32
+    campaign_data: Bytes[4096]
+signed: public(HashMap[address, bool])
+counter: public(uint256)
+last_creator: public(address)
+last_reward_token: public(address)
+last_amount: public(uint256)
+last_type: public(uint32)
+last_duration: public(uint32)
+last_data: public(Bytes[4096])
+last_override_id: public(bytes32)
+@external
+def acceptConditions():
+    self.signed[msg.sender] = True
+@external
+def createCampaign(p: P) -> bytes32:
+    assert self.signed[msg.sender], "not signed"
+    extcall IERC20(p.reward_token).transferFrom(msg.sender, self, p.amount)
+    self.last_creator = p.creator
+    self.last_reward_token = p.reward_token
+    self.last_amount = p.amount
+    self.last_type = p.campaign_type
+    self.last_duration = p.duration
+    self.last_data = p.campaign_data
+    self.counter += 1
+    return convert(self.counter, bytes32)
+@external
+def overrideCampaign(campaign_id: bytes32, p: P):
+    self.last_override_id = campaign_id
+    self.last_data = p.campaign_data
+    self.last_duration = p.duration
+"""
+
+MAX_UINT = 2**256 - 1
+
+
+def test_merkl_campaign(env, accts):
+    driver, admin, crvusd = env["driver"], env["admin"], env["crvusd"]
+    manager, rando = accts[1], accts[2]
+    dc = boa.loads(DC_MOCK)
+    wrapper = boa.loads(WRAPPER_MOCK)
+
+    # DAO installs Merkl + the wrapper -> both allowances granted (crvUSD->wrapper, wrapper->creator)
+    with boa.env.prank(admin):
+        driver.set_merkl(dc.address, wrapper.address)
+    assert driver.merkl_creator() == dc.address
+    assert driver.reward_wrapper() == wrapper.address
+    assert crvusd.allowance(driver.address, wrapper.address) == MAX_UINT   # wrapper pulls crvUSD at claim
+    assert wrapper.allowance(driver.address, dc.address) == MAX_UINT       # creator pulls the minted wrapper
+    with boa.env.prank(rando):                                            # set_merkl is owner-only
+        with boa.reverts():
+            driver.set_merkl(dc.address, wrapper.address)
+
+    # accept Merkl's terms (DAO or manager) so createCampaign's hasSigned passes
+    with boa.env.prank(admin):
+        driver.set_manager(manager)
+    with boa.env.prank(manager):
+        driver.accept_conditions()
+    assert dc.signed(driver.address)
+
+    # create: mints the wrapper cap, the DC pulls it, and the opaque campaign_data round-trips
+    data = bytes(range(48))
+    amount = 5000 * 10**18
+    with boa.env.prank(manager):
+        cid = driver.create_campaign(amount, 7, 0, 604800, data)
+    assert wrapper.minted() == amount                     # driver minted the full cap
+    assert wrapper.balanceOf(dc.address) == amount        # DC pulled it all (crvUSD stayed put)
+    assert wrapper.balanceOf(driver.address) == 0
+    assert dc.last_creator() == driver.address            # creator == this contract
+    assert dc.last_reward_token() == wrapper.address      # reward token == the wrapper
+    assert dc.last_amount() == amount
+    assert dc.last_type() == 7
+    assert dc.last_duration() == 604800
+    assert dc.last_data() == data                         # abi_encode(struct) round-tripped the bytes
+    assert cid == (1).to_bytes(32, "big")
+
+    # override: new data/duration recorded (Merkl keeps amount/creator/token/id immutable)
+    data2 = bytes(range(20, 40))
+    with boa.env.prank(manager):
+        driver.override_campaign(cid, 7, 0, 1209600, data2)
+    assert dc.last_override_id() == cid
+    assert dc.last_data() == data2
+    assert dc.last_duration() == 1209600
+
+    # gating: a random address can neither create nor override
+    with boa.env.prank(rando):
+        with boa.reverts():
+            driver.create_campaign(amount, 7, 0, 604800, data)
+        with boa.reverts():
+            driver.override_campaign(cid, 7, 0, 604800, data2)
+
+
+def test_set_merkl_revokes_old(env):
+    """Re-installing a new creator/wrapper zeroes the previous pair's infinite allowances, so a
+    replaced wrapper/creator keeps no pull on the reserve."""
+    driver, admin, crvusd = env["driver"], env["admin"], env["crvusd"]
+    dc1, wrapper1 = boa.loads(DC_MOCK), boa.loads(WRAPPER_MOCK)
+    dc2, wrapper2 = boa.loads(DC_MOCK), boa.loads(WRAPPER_MOCK)
+
+    with boa.env.prank(admin):
+        driver.set_merkl(dc1.address, wrapper1.address)
+    assert crvusd.allowance(driver.address, wrapper1.address) == MAX_UINT
+    assert wrapper1.allowance(driver.address, dc1.address) == MAX_UINT
+
+    with boa.env.prank(admin):
+        driver.set_merkl(dc2.address, wrapper2.address)     # migrate
+    # old pair fully revoked...
+    assert crvusd.allowance(driver.address, wrapper1.address) == 0
+    assert wrapper1.allowance(driver.address, dc1.address) == 0
+    # ...new pair granted
+    assert crvusd.allowance(driver.address, wrapper2.address) == MAX_UINT
+    assert wrapper2.allowance(driver.address, dc2.address) == MAX_UINT
+
+    # unset with 0x0: revokes the live pair and grants nothing to the zero address
+    with boa.env.prank(admin):
+        driver.set_merkl(ZERO, ZERO)
+    assert driver.merkl_creator() == ZERO
+    assert driver.reward_wrapper() == ZERO
+    assert crvusd.allowance(driver.address, wrapper2.address) == 0
+    assert wrapper2.allowance(driver.address, dc2.address) == 0
