@@ -17,6 +17,7 @@ dependencies = [
     "snekmate==0.1.2",
     "numpy>=2,<3",
     "curve-std",
+    "tqdm>=4.68.3",
 ]
 
 [tool.uv]
