@@ -52,7 +52,7 @@ MARKET_IDS = list(range(0, 12))        # probe these factory indices; non-existe
 FEE_DENOM = 10**10                     # Curve pool fee() scale
 PRECISION = 10**18
 
-MULTIPLIER = 2                         # discount = MULTIPLIER * pool_fee; THE knob - sweep to find enough
+MULTIPLIER = 1.5                       # discount = MULTIPLIER * pool_fee; THE knob - sweep to find enough
 SWAP_FEE_MULTIPLIER = int(MULTIPLIER * PRECISION)   # 1e18-scaled, as the contracts store it
 
 TARGET_NOTIONAL = 1_000                # probe swap size in crvUSD - kept tiny vs the pool (MIN_TVL/MAX_DX_FRAC)
@@ -228,7 +228,7 @@ def report(pools, rows, rpc):
     print(f"\n=== conversion-discount scan  (MULTIPLIER={MULTIPLIER}x, {len(rows)} samples, "
           f"TVL>=${MIN_TVL/1e6:.0f}M -> {OUT_CSV}) ===\n")
     print(f"{'markets':>12} {'asset':6} {'n':>6} {'scanned range':23} {'binds':7} "
-          f"{'fails':>6} {'max req':>8} {'worst date':11} {over_col:>6}")
+          f"{'fails':>6} {'max req':>8} {'worst date':11} {over_col:>6} {'revert%':>8}")
     for p in pools:
         pr = [r for r in rows if r["pool"] == p["pool"]]
         if not pr:
@@ -236,14 +236,17 @@ def report(pools, rows, rpc):
         fails = sum(not r["actual_pass"] for r in pr)
         worst = max(pr, key=lambda r: r["req_mult"])
         over = sum(r["req_mult"] > MULTIPLIER for r in pr)
+        over_pct = 100 * over / len(pr)   # share of this pool's scanned blocks that would revert
         binds = "yes" if sum(r["dy_over_min"] for r in pr) / len(pr) < 100 else "no(~0)"
         rng = f"{_date(rpc, min(r['block'] for r in pr))}..{_date(rpc, max(r['block'] for r in pr))}"
         print(f"{str(p['markets']):>12} {p['symbol']:6} {len(pr):>6} {rng:23} {binds:7} "
-              f"{fails:>6} {worst['req_mult']:>7.2f}x {_date(rpc, worst['block']):11} {over:>6}")
+              f"{fails:>6} {worst['req_mult']:>7.2f}x {_date(rpc, worst['block']):11} {over:>6} {over_pct:>7.2f}%")
 
     print("\nmax req = fee-widths below the oracle the swap actually executed; MULTIPLIER covers a")
-    print(f"sample when it stays <= MULTIPLIER. Each pool is scanned from its deploy block; only "
-          f"TVL>=${MIN_TVL/1e6:.0f}M blocks with the probe < {MAX_DX_FRAC:.1%} of the pool are counted.")
+    print(f"sample when it stays <= MULTIPLIER. {over_col} / revert% = count / share of a pool's counted")
+    print("blocks where req_mult > MULTIPLIER (the swap would miss its min_dy at the current discount).")
+    print(f"Each pool is scanned from its deploy block; only TVL>=${MIN_TVL/1e6:.0f}M blocks with the "
+          f"probe < {MAX_DX_FRAC:.1%} of the pool are counted.")
     print(f"\nMINIMUM MULTIPLIER covering every counted sample: {overall:.2f}x  "
           f"(current MULTIPLIER={MULTIPLIER}x -> {'ENOUGH' if overall <= MULTIPLIER else 'NOT enough'})")
 
