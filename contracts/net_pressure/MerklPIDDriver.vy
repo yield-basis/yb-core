@@ -309,7 +309,8 @@ def _convert_fees(agg_price: uint256):
          crvUSD in that LT's cryptopool. Both legs are bounded by the same
          manipulation-resistant discount (swap_fee_multiplier * pool fee): the withdraw by
          the price_oracle-fair value of the shares (half_tvl-based), the swap by the
-         price_oracle. Same logic as PID._convert_fees, minus the controller cache.
+         price_oracle. The swap is best-effort - a pool that can't meet its min_dy is skipped
+         rather than reverting the whole trigger. Same logic as PID._convert_fees, minus the cache.
     @param agg_price The crvUSD aggregator price (1e18), read once per trigger.
     """
     token_set: DynArray[address, MAX_TOKENS] = self._token_set()
@@ -335,10 +336,17 @@ def _convert_fees(agg_price: uint256):
         asset_out: uint256 = extcall lt.withdraw(shares, min_assets, self)
         if asset_out == 0:
             continue
-        # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount.
+        # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount. Best-effort:
+        #    a pool that can't meet min_dy (EMA gap wider than the discount) is skipped instead of
+        #    reverting the trigger, so one stuck pool can't block the rest. The withdrawn asset then
+        #    stays in the reserve (recoverable) until it can be converted.
         min_dy: uint256 = asset_out * p_o // PRECISION * (PRECISION - discount) // PRECISION
         self._ensure_pool_approval(pool, asset)
-        extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
+        swapped: bool = raw_call(
+            pool.address,
+            abi_encode(convert(1, uint256), convert(0, uint256), asset_out, min_dy, self,
+                       method_id=method_id("exchange(uint256,uint256,uint256,uint256,address)")),
+            max_outsize=0, revert_on_failure=False)  # coin1 (asset) -> coin0 (crvUSD)
 
 
 @external
@@ -713,14 +721,14 @@ def set_gains(feedforward_gain: int256, kp: int256, ki: int256, kd: int256,
 @external
 def set_execution_params(swap_fee_multiplier: uint256, dust_floor: uint256):
     """
-    @notice Set fee-conversion parameters.
-    @dev DAO only.
+    @notice Set fee-conversion parameters (the swap discount and dust floor).
+    @dev DAO (owner) or manager.
     @param swap_fee_multiplier Slippage multiplier (1e18); min_dy = oracle*(1 -
            multiplier*pool_fee). Bounded by MAX_PARAM so swap_fee_multiplier*pool.fee()
            cannot overflow before the discount is capped at PRECISION.
     @param dust_floor LT balance below which fee conversion is skipped.
     """
-    ownable._check_owner()
+    self._check_owner_or_manager()
     assert swap_fee_multiplier <= MAX_PARAM
     self.swap_fee_multiplier = swap_fee_multiplier
     self.dust_floor = dust_floor

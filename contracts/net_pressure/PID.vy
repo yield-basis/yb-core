@@ -275,8 +275,9 @@ def _convert_fees(agg_price: uint256):
          crvUSD in that LT's cryptopool. Both legs are bounded by the same
          manipulation-resistant discount (swap_fee_multiplier * pool fee): the withdraw
          by the price_oracle-fair value of the shares (half_tvl-based), the swap by the
-         price_oracle. Caches net_pressure_and_tvl in transient storage so the
-         controller can reuse it without re-running the lp_oracle_2 solve.
+         price_oracle. The swap is best-effort - a pool that can't meet its min_dy is
+         skipped rather than reverting the whole trigger. Caches net_pressure_and_tvl in
+         transient storage so the controller can reuse it without re-running the lp_oracle_2 solve.
     @param agg_price The crvUSD aggregator price (1e18), read once per trigger.
     """
     token_set: DynArray[address, MAX_TOKENS] = self._token_set()
@@ -305,10 +306,17 @@ def _convert_fees(agg_price: uint256):
         asset_out: uint256 = extcall lt.withdraw(shares, min_assets, self)
         if asset_out == 0:
             continue
-        # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount.
+        # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount. Best-effort:
+        #    a pool that can't meet min_dy (EMA gap wider than the discount) is skipped instead of
+        #    reverting the trigger, so one stuck pool can't block the rest. The withdrawn asset then
+        #    stays in the reserve (recoverable) until it can be converted.
         min_dy: uint256 = asset_out * p_o // PRECISION * (PRECISION - discount) // PRECISION
         self._ensure_pool_approval(pool, asset)
-        extcall pool.exchange(1, 0, asset_out, min_dy, self)  # coin1 (asset) -> coin0 (crvUSD)
+        swapped: bool = raw_call(
+            pool.address,
+            abi_encode(convert(1, uint256), convert(0, uint256), asset_out, min_dy, self,
+                       method_id=method_id("exchange(uint256,uint256,uint256,uint256,address)")),
+            max_outsize=0, revert_on_failure=False)  # coin1 (asset) -> coin0 (crvUSD)
 
 
 # --- controller --------------------------------------------------------------
