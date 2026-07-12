@@ -8,11 +8,12 @@ market's BTC asset -> crvUSD with an on-chain floor
     min_dy = asset_out * price_oracle // 1e18 * (1 - MULTIPLIER*fee)   (fee is the pool's live fee)
 and reverts/swallows if the pool can't meet it. price_oracle is the manipulation-resistant EMA,
 so the risk is: during a fast BTC drop the EMA lags above spot and the executable price falls more
-than MULTIPLIER*fee below it -> the swap can't meet min_dy. This samples every pool over a block
-window and, per block, compares the true executable price (get_dy) to that floor. Reads are
-batched: one Multicall3.aggregate3 per block (all pools x {price_oracle, fee, get_dy, balances}),
-fetch_multi'd. Only blocks where the pool TVL >= MIN_TVL (past the thin post-launch period) and
-where the probe swap is a tiny fraction of the pool are counted.
+than MULTIPLIER*fee below it -> the swap can't meet min_dy. This samples every pool over its full
+life and, per block, compares the true executable price (get_dy) to that floor. Reads are batched:
+one Multicall3.aggregate3 per block (all live pools x {price_oracle, fee, get_dy, balances}),
+fetch_multi'd. Each pool is scanned from its OWN deployment block (found by binary search; several
+LT markets share one cryptopool, so pools are de-duped), and only blocks where the pool TVL >=
+MIN_TVL (past the thin post-launch period) and the probe swap is a tiny fraction of it are counted.
 
 Two numbers per pool:
   * actual on-chain result - does the contract's min_dy bind? NOTE the contract multiplies
@@ -58,9 +59,10 @@ TARGET_NOTIONAL = 1_000                # probe swap size in crvUSD - kept tiny v
 MIN_TVL = 1_000_000                    # skip blocks where pool TVL < this ($): too close to launch / too thin
 MAX_DX_FRAC = 0.005                    # and require the probe swap to be < this fraction of the pool
 
-DAYS_BACK = 120                        # window: last DAYS_BACK days up to head
+FLOOR_BLOCK = 22_000_000               # binary-search floor for a pool's deploy block (node serves past this)
+MAX_LOOKBACK_DAYS = None               # cap history per pool (None = from each pool's deployment block)
 BLOCKS_PER_DAY = 7200
-STEP = 300                            # sample every STEP blocks (~1h); lower = catches shorter spikes
+STEP = 300                             # sample every STEP blocks (~1h); lower = catches shorter spikes
 CHUNK = 500                            # per-block multicalls per JSON-RPC batch
 OUT_CSV = os.path.join(tempfile.gettempdir(), "conversion_discount_scan.csv")
 
@@ -95,9 +97,31 @@ def _fetch_chunk(rpc, payloads):
         return out
 
 
-def load_pools():
-    """Per-pool static config (fork at head): pool, BTC asset, decimals, probe size dx."""
-    pools = []
+def _has_code(rpc, addr, block):
+    try:
+        return len(rpc.fetch("eth_getCode", [addr, hex(block)])) > 2
+    except Exception:
+        return None                       # block not served
+
+
+def _deploy_block(rpc, addr, lo, hi):
+    """Smallest block in [lo, hi] where addr has code (binary search; addr has code at hi)."""
+    if _has_code(rpc, addr, lo):
+        return lo
+    while lo < hi:
+        mid = (lo + hi) // 2
+        c = _has_code(rpc, addr, mid)
+        if c:
+            hi = mid
+        else:
+            lo = mid + 1                  # no code (or unserved) -> deployed later
+    return lo
+
+
+def load_pools(rpc, head):
+    """Unique cryptopools behind the markets: asset/decimals, probe size dx, the market ids that
+    share each pool (the migration reuses pools), and each pool's deployment block = its scan start."""
+    by_addr = {}
     with boa.fork(NETWORK, block_identifier="latest"):
         factory = boa.load_partial(os.path.join(REPO, "contracts/Factory.vy")).at(FACTORY)
         lt_d = boa.load_partial(os.path.join(REPO, "contracts/LT.vy"))
@@ -105,37 +129,47 @@ def load_pools():
             try:
                 pool = boa.loads_abi(POOL_ABI).at(lt_d.at(factory.markets(i).lt).CRYPTOPOOL())
                 if pool.coins(0).lower() != CRVUSD.lower():
-                    continue                      # conversion needs coin0 == crvUSD
+                    continue              # conversion needs coin0 == crvUSD
+                if pool.address in by_addr:
+                    by_addr[pool.address]["markets"].append(i)
+                    continue
                 asset = boa.loads_abi(ERC_ABI).at(pool.coins(1))
                 dec = asset.decimals()
                 dx = TARGET_NOTIONAL * PRECISION * 10**dec // pool.price_oracle()   # ~TARGET_NOTIONAL of asset
-                pools.append(dict(market=i, pool=pool.address, symbol=asset.symbol(), dec=dec, dx=dx))
+                by_addr[pool.address] = dict(pool=pool.address, symbol=asset.symbol(), dec=dec, dx=dx, markets=[i])
             except Exception:
-                continue                          # market index doesn't exist
+                continue                  # market index doesn't exist
+    pools = list(by_addr.values())
+    cap = head - MAX_LOOKBACK_DAYS * BLOCKS_PER_DAY if MAX_LOOKBACK_DAYS else 0
+    for p in pools:
+        p["start"] = max(_deploy_block(rpc, p["pool"], FLOOR_BLOCK, head), cap)
     return pools
 
 
 def scan():
-    pools = load_pools()
-    print(f"pools: {[(p['market'], p['symbol'], p['dec']) for p in pools]}")
     rpc = EthereumRPC(NETWORK)
     head = int(rpc.fetch("eth_blockNumber", []), 16)
-    start = head - DAYS_BACK * BLOCKS_PER_DAY
-    blocks = list(range(start, head + 1, STEP))
-
-    # One Multicall3.aggregate3 per block bundles all pools x {price_oracle, fee, get_dy,
-    # balances(0), balances(1)} into a single eth_call; the payload is identical every block (only
-    # the block tag changes), so build it once. fetch_multi JSON-RPC-batches those across blocks.
-    calls3 = []
+    pools = load_pools(rpc, head)
     for p in pools:
-        calls3 += [(p["pool"], True, SEL_PO),
+        print(f"  {p['symbol']:6s} markets {p['markets']}  pool {p['pool']}  start {p['start']}")
+
+    # Per-pool constant 5-call block; per sampled block, include only the pools alive by then, and
+    # bundle them into one Multicall3.aggregate3. fetch_multi JSON-RPC-batches those across blocks.
+    pool_calls = [[(p["pool"], True, SEL_PO),
                    (p["pool"], True, SEL_FEE),
                    (p["pool"], True, SEL_DY + encode(["uint256"] * 3, [1, 0, p["dx"]])),
                    (p["pool"], True, SEL_BAL + encode(["uint256"], [0])),
-                   (p["pool"], True, SEL_BAL + encode(["uint256"], [1]))]
-    agg = SEL_AGG3 + encode(["(address,bool,bytes)[]"], [calls3])
-    payloads = [("eth_call", [{"to": MULTICALL3, "data": "0x" + agg.hex()}, hex(b)]) for b in blocks]
-    print(f"scanning {len(blocks)} blocks x {len(pools)} pools via Multicall3 ({start}..{head}, step {STEP})")
+                   (p["pool"], True, SEL_BAL + encode(["uint256"], [1]))] for p in pools]
+    global_start = min(p["start"] for p in pools)
+    payloads, blk_alive = [], []
+    for b in range(global_start, head + 1, STEP):
+        alive = [pi for pi, p in enumerate(pools) if p["start"] <= b]
+        calls = [c for pi in alive for c in pool_calls[pi]]
+        agg = SEL_AGG3 + encode(["(address,bool,bytes)[]"], [calls])
+        payloads.append(("eth_call", [{"to": MULTICALL3, "data": "0x" + agg.hex()}, hex(b)]))
+        blk_alive.append((b, alive))
+    print(f"scanning {len(payloads)} blocks (up to {len(pools)} pools each) via Multicall3 "
+          f"({global_start}..{head}, step {STEP})")
 
     results = []
     with tqdm(total=len(payloads), desc="blocks", unit="blk") as bar:
@@ -145,42 +179,42 @@ def scan():
             bar.update(len(batch))
 
     rows = []
-    for bi, b in enumerate(blocks):
-        res = results[bi]
+    for (b, alive), res in zip(blk_alive, results):
         if not res or len(res) <= 2:
             continue
         try:
             decoded = decode(["(bool,bytes)[]"], bytes.fromhex(res[2:]))[0]
         except Exception:
             continue
-        for pi, p in enumerate(pools):
-            oks_vals = decoded[5 * pi:5 * pi + 5]
+        for k, pi in enumerate(alive):
+            p = pools[pi]
+            oks_vals = decoded[5 * k:5 * k + 5]
             if not all(ok for ok, _ in oks_vals):
                 continue
             p_o, fee, dy, bal0, bal1 = (int.from_bytes(v, "big") for _, v in oks_vals)
             if not p_o or not dy or not bal1:
-                continue                          # pre-creation / empty return
+                continue
             scale1 = 10 ** (18 - p["dec"])
             tvl = bal0 + bal1 * scale1 * p_o // PRECISION            # crvUSD (~USD), 1e18
             if tvl < MIN_TVL * PRECISION:
                 continue                          # too close to launch / too thin
-            dx_notional = p["dx"] * scale1 * p_o // PRECISION        # crvUSD value of the probe swap
-            if dx_notional > int(MAX_DX_FRAC * tvl):
+            if p["dx"] * scale1 * p_o // PRECISION > int(MAX_DX_FRAC * tvl):
                 continue                          # probe not small enough vs the pool
             discount = min(SWAP_FEE_MULTIPLIER * fee // FEE_DENOM, PRECISION)
             min_dy = p["dx"] * p_o // PRECISION * (PRECISION - discount) // PRECISION
             p_exec = dy * PRECISION // (p["dx"] * scale1)            # crvUSD per whole asset, 1e18
             fee_f = fee / FEE_DENOM
             req_mult = ((p_o - p_exec) / p_o) / fee_f if fee_f else 0.0   # fee-widths below the oracle
-            rows.append(dict(block=b, market=p["market"], symbol=p["symbol"], tvl_musd=tvl / PRECISION / 1e6,
-                             p_o=p_o, fee_bp=fee_f * 1e4, dy=dy, min_dy=min_dy, dy_over_min=dy / max(min_dy, 1),
-                             actual_pass=dy >= min_dy, req_mult=req_mult))
+            rows.append(dict(block=b, pool=p["pool"], symbol=p["symbol"], markets=str(p["markets"]),
+                             tvl_musd=tvl / PRECISION / 1e6, p_o=p_o, fee_bp=fee_f * 1e4, dy=dy,
+                             min_dy=min_dy, dy_over_min=dy / max(min_dy, 1), actual_pass=dy >= min_dy,
+                             req_mult=req_mult))
     return pools, rows, rpc
 
 
 def _date(rpc, block):
     ts = int(rpc.fetch("eth_getBlockByNumber", [hex(block), False])["timestamp"], 16)
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
 
 
 def report(pools, rows, rpc):
@@ -193,23 +227,23 @@ def report(pools, rows, rpc):
     over_col = f">{MULTIPLIER}x"
     print(f"\n=== conversion-discount scan  (MULTIPLIER={MULTIPLIER}x, {len(rows)} samples, "
           f"TVL>=${MIN_TVL/1e6:.0f}M -> {OUT_CSV}) ===\n")
-    print(f"{'market':>6} {'asset':6} {'dec':>3} {'n':>5} {'min_dy binds':12} "
-          f"{'actual fails':12} {'max req_mult':12} {'worst date':16} {over_col:>7}")
+    print(f"{'markets':>12} {'asset':6} {'n':>6} {'scanned range':23} {'binds':7} "
+          f"{'fails':>6} {'max req':>8} {'worst date':11} {over_col:>6}")
     for p in pools:
-        pr = [r for r in rows if r["market"] == p["market"]]
+        pr = [r for r in rows if r["pool"] == p["pool"]]
         if not pr:
             continue
         fails = sum(not r["actual_pass"] for r in pr)
         worst = max(pr, key=lambda r: r["req_mult"])
         over = sum(r["req_mult"] > MULTIPLIER for r in pr)
-        # min_dy is meaningful only if it's near dy (8-dec assets -> ~1e10x looser -> not binding).
-        binds = "yes" if sum(r["dy_over_min"] for r in pr) / len(pr) < 100 else "no (~0)"
-        print(f"{p['market']:>6} {p['symbol']:6} {p['dec']:>3} {len(pr):>5} {binds:12} "
-              f"{fails:>12} {worst['req_mult']:>11.2f}x {_date(rpc, worst['block']):16} {over:>7}")
+        binds = "yes" if sum(r["dy_over_min"] for r in pr) / len(pr) < 100 else "no(~0)"
+        rng = f"{_date(rpc, min(r['block'] for r in pr))}..{_date(rpc, max(r['block'] for r in pr))}"
+        print(f"{str(p['markets']):>12} {p['symbol']:6} {len(pr):>6} {rng:23} {binds:7} "
+              f"{fails:>6} {worst['req_mult']:>7.2f}x {_date(rpc, worst['block']):11} {over:>6}")
 
-    print("\nmax req_mult = fee-widths below the oracle the swap actually executed; MULTIPLIER covers a")
-    print(f"sample when req_mult <= MULTIPLIER. Only TVL>=${MIN_TVL/1e6:.0f}M blocks with the probe swap "
-          f"< {MAX_DX_FRAC:.1%} of the pool are counted.")
+    print("\nmax req = fee-widths below the oracle the swap actually executed; MULTIPLIER covers a")
+    print(f"sample when it stays <= MULTIPLIER. Each pool is scanned from its deploy block; only "
+          f"TVL>=${MIN_TVL/1e6:.0f}M blocks with the probe < {MAX_DX_FRAC:.1%} of the pool are counted.")
     print(f"\nMINIMUM MULTIPLIER covering every counted sample: {overall:.2f}x  "
           f"(current MULTIPLIER={MULTIPLIER}x -> {'ENOUGH' if overall <= MULTIPLIER else 'NOT enough'})")
 
@@ -219,4 +253,4 @@ if __name__ == "__main__":
     if _rows:
         report(_pools, _rows, _rpc)
     else:
-        print("no samples decoded (check the window / MIN_TVL / RPC)")
+        print("no samples decoded (check MIN_TVL / RPC)")
