@@ -27,6 +27,8 @@ from getpass import getpass
 from collections import namedtuple
 import boa
 from boa.explorer import Etherscan
+from eth_abi import encode
+from eth_utils import keccak
 from eth_account import account
 
 from networks import NETWORK
@@ -53,6 +55,14 @@ CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
 SINK_LP = "0x625E92624Bc2D88619ACCc1788365A69767f6200"     # crvUSD/pyUSD stableswap (Merkl's sink)
 SUSDS = "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD"       # Sky Savings Rate, for MarketRateGetter
+
+# Merkl crvUSD Pull-on-Claim wrapper: deployed with holder = the driver, submitted to Merkl to
+# whitelist, then set_merkl later. Exact-match ERC1967Proxy over Merkl's verified PullTokenWrapper
+# impl - same as scripts/deploy_merkl_wrapper.py.
+DISTRIBUTION_CREATOR = "0x8BB4C975Ff3c250e0ceEA271728547f3802B36Fd"   # Merkl DistributionCreator
+PULL_TOKEN_WRAPPER_IMPL = "0x979a04fd2f3a6a2b3945a715e24b974323e93567"  # Merkl's verified PullTokenWrapper impl
+WRAPPER_NAME = "Yield Basis crvUSD (Merkl wrapper)"
+WRAPPER_SYMBOL = "ybwcrvUSD"
 
 # --- deployment configuration (constants) ------------------------------------
 MARKET_IDS = [7, 8, 9, 10]       # active markets whose net pressure the driver aggregates
@@ -82,6 +92,12 @@ ERC20_ABI = json.dumps([
 FACTORY_OWNER_ABI = json.dumps([
  {"name": "ADMIN", "stateMutability": "view", "type": "function", "inputs": [], "outputs": [{"type": "address"}]},
  {"name": "set_fee_receiver", "stateMutability": "nonpayable", "type": "function", "inputs": [{"type": "address"}], "outputs": []},
+])
+WRAPPER_ABI = json.dumps([
+ {"name": "token", "stateMutability": "view", "type": "function", "inputs": [], "outputs": [{"type": "address"}]},
+ {"name": "holder", "stateMutability": "view", "type": "function", "inputs": [], "outputs": [{"type": "address"}]},
+ {"name": "distributor", "stateMutability": "view", "type": "function", "inputs": [], "outputs": [{"type": "address"}]},
+ {"name": "setFeeRecipient", "stateMutability": "nonpayable", "type": "function", "inputs": [], "outputs": []},
 ])
 
 
@@ -120,6 +136,20 @@ def _verify(contract, name, verifier):
         print(f"  WARNING: Etherscan verification of {name} ({contract.address}) failed: {e}")
 
 
+def deploy_wrapper(holder):
+    """Deploy the Merkl crvUSD Pull-on-Claim wrapper held by `holder` (the driver): an exact-match
+    ERC1967Proxy over Merkl's verified PullTokenWrapper impl (see scripts/deploy_merkl_wrapper.py)."""
+    proxy_bytecode = bytes.fromhex(json.load(open(os.path.join(HERE, "erc1967_proxy.json")))["bytecode"][2:])
+    init = keccak(text="initialize(address,address,address,string,string)")[:4] + encode(
+        ["address", "address", "address", "string", "string"],
+        [CRVUSD, DISTRIBUTION_CREATOR, holder, WRAPPER_NAME, WRAPPER_SYMBOL])
+    ctor = encode(["address", "bytes"], [PULL_TOKEN_WRAPPER_IMPL, init])
+    addr = boa.env.deploy_code(bytecode=proxy_bytecode + ctor)
+    if isinstance(addr, tuple):
+        addr = addr[0]
+    return boa.loads_abi(WRAPPER_ABI).at(addr)
+
+
 def deploy_stack(json_path, verifier=None):
     """Deploy the stack from the active eoa, configure the driver, hand ownership to the DAO, and
     write the addresses to `json_path`. With `verifier` (prod), verify each contract on Etherscan."""
@@ -148,6 +178,10 @@ def deploy_stack(json_path, verifier=None):
         driver.set_manager(MANAGER)
     driver.transfer_ownership(DAO)                     # gains/exec params keep ctor defaults; now DAO-owned
 
+    # Merkl crvUSD wrapper held by the driver (submit to Merkl to whitelist; set_merkl is a later step).
+    wrapper = deploy_wrapper(driver.address)
+    wrapper.setFeeRecipient()                          # point the fee hook at DistributionCreator.feeRecipient()
+
     cfg = {
         "network": NETWORK,
         "deployer": str(deployer),
@@ -162,6 +196,8 @@ def deploy_stack(json_path, verifier=None):
         "lt_swap_zap": zap.address,
         "merkl_pid_driver": driver.address,
         "fee_splitter": fs.address,
+        "merkl_wrapper": wrapper.address,
+        "distribution_creator": DISTRIBUTION_CREATOR,
         "split_fraction": SPLIT_FRACTION,
         "pressure_market_ids": MARKET_IDS,
         "deprecated_market_ids": DEPRECATED_MARKETS,
@@ -171,12 +207,15 @@ def deploy_stack(json_path, verifier=None):
 
     print("\n=== part 1: deployed net-pressure Merkl stack ===")
     for k in ("net_pressure_oracle", "market_rate_getter", "lt_swap_zap", "merkl_pid_driver",
-              "fee_splitter", "fee_distributor"):
+              "fee_splitter", "fee_distributor", "merkl_wrapper"):
         print(f"  {k:22s}: {cfg[k]}")
+    print(f"  wrapper holder/token   : {driver.address} (driver) / crvUSD")
+    print(f"  wrapper distributor    : {DISTRIBUTION_CREATOR} (Merkl DistributionCreator)")
     print(f"  pressure LTs           : {pressure_lts}")
     print(f"  split_fraction         : {SPLIT_FRACTION/1e18:.0%} -> PID, rest -> FeeDistributor")
     print(f"  driver/splitter owner  : {DAO} (DAO)")
     print(f"  addresses written to   : {json_path}")
+    print("  next: ask Merkl to whitelist the wrapper, then set_merkl(DistributionCreator, wrapper) on the driver")
     return cfg
 
 
