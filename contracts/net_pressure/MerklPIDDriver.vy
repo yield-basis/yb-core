@@ -544,6 +544,22 @@ def set_merkl(creator: DistributionCreator, wrapper: MerklWrapper):
 
 
 @external
+def approve_merkl(amount: uint256):
+    """
+    @notice Set the crvUSD allowance the reward wrapper may pull from this contract (at claim, and
+            the fee at creation). DAO or manager.
+    @dev set_merkl grants an infinite allowance; this lets a lower cap be set to bound the wrapper's
+         reach into the reserve (risk reduction) without re-installing the pair. `amount` == 0 halts
+         all pulls, so any in-flight claim would then revert until it is raised again.
+    @param amount New crvUSD allowance for the installed reward wrapper.
+    """
+    self._check_owner_or_manager()
+    wrapper: address = self.reward_wrapper.address
+    assert wrapper != empty(address), "No wrapper"
+    assert extcall CRVUSD.approve(wrapper, amount, default_return_value=True)
+
+
+@external
 def accept_conditions():
     """
     @notice Accept Merkl's terms on the DistributionCreator so createCampaign's `hasSigned` gate

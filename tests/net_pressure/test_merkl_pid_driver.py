@@ -417,3 +417,43 @@ def test_set_merkl_revokes_old(env):
     assert driver.reward_wrapper() == ZERO
     assert crvusd.allowance(driver.address, wrapper2.address) == 0
     assert wrapper2.allowance(driver.address, dc2.address) == 0
+
+
+def test_approve_merkl(env, accts):
+    """approve_merkl lets the DAO or manager cap (or cut to 0) the crvUSD allowance the wrapper may
+    pull, without re-installing the pair via set_merkl."""
+    driver, admin, crvusd = env["driver"], env["admin"], env["crvusd"]
+    manager, rando = accts[1], accts[2]
+    dc, wrapper = boa.loads(DC_MOCK), boa.loads(WRAPPER_MOCK)
+
+    # nothing installed yet -> reverts
+    with boa.env.prank(admin):
+        with boa.reverts("No wrapper"):
+            driver.approve_merkl(10**18)
+
+    # install Merkl (infinite allowance) and appoint a manager
+    with boa.env.prank(admin):
+        driver.set_merkl(dc.address, wrapper.address)
+        driver.set_manager(manager)
+    assert crvusd.allowance(driver.address, wrapper.address) == MAX_UINT
+
+    # DAO caps the wrapper's pull
+    with boa.env.prank(admin):
+        driver.approve_merkl(1000 * 10**18)
+    assert crvusd.allowance(driver.address, wrapper.address) == 1000 * 10**18
+
+    # the manager can also retune it
+    with boa.env.prank(manager):
+        driver.approve_merkl(500 * 10**18)
+    assert crvusd.allowance(driver.address, wrapper.address) == 500 * 10**18
+
+    # a random address cannot (allowance untouched)
+    with boa.env.prank(rando):
+        with boa.reverts():
+            driver.approve_merkl(0)
+    assert crvusd.allowance(driver.address, wrapper.address) == 500 * 10**18
+
+    # 0 halts the wrapper's pull entirely
+    with boa.env.prank(manager):
+        driver.approve_merkl(0)
+    assert crvusd.allowance(driver.address, wrapper.address) == 0
