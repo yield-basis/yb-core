@@ -41,7 +41,7 @@ VOTING = os.path.join(HERE, "voting")                  # reuse the voting ABIs +
 
 
 # --- run mode ----------------------------------------------------------------
-FORK = True
+FORK = False
 STAGE = "deploy"                 # non-fork only: run "deploy" then "vote"
 FORK_BLOCK = 25473385            # E2E_BLOCK from test_net_pressure_e2e.py (markets 0-2 have fees); prod uses head
 
