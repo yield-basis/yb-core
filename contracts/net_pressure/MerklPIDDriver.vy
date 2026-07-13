@@ -566,7 +566,7 @@ def create_campaign(amount: uint256, campaign_type: uint256, start_timestamp: ui
          (wrapper not whitelisted, amount too low for the duration, conditions not accepted, ...).
     @param amount Wrapper (== crvUSD, 1:1) cap for the campaign.
     @param campaign_type Merkl campaign type id.
-    @param start_timestamp Campaign start (unix seconds); 0 lets Merkl start it.
+    @param start_timestamp Campaign start (unix seconds); 0 defaults to block.timestamp (start now).
     @param duration Campaign duration in seconds.
     @param campaign_data Opaque Merkl campaign config.
     @return The Merkl campaign id.
@@ -576,13 +576,16 @@ def create_campaign(amount: uint256, campaign_type: uint256, start_timestamp: ui
     extcall wrapper.mint(amount)                       # PullTokenWrapper mints to the holder (us)
     ct: uint32 = convert(campaign_type, uint32)
     dur: uint32 = convert(duration, uint32)
+    # 0 -> start now. Merkl accepts a zero/stale start on-chain, but that is an already-ended window;
+    # default to block.timestamp (as Merkl's own middleman does) so a delayed tx still starts "now".
+    start: uint32 = convert(start_timestamp, uint32) if start_timestamp != 0 else convert(block.timestamp, uint32)
     camp: CampaignParameters = CampaignParameters(
         campaign_id=empty(bytes32),
         creator=self,
         reward_token=wrapper.address,
         amount=amount,
         campaign_type=ct,
-        start_timestamp=convert(start_timestamp, uint32),
+        start_timestamp=start,
         duration=dur,
         campaign_data=campaign_data,
     )
@@ -600,12 +603,13 @@ def override_campaign(campaign_id: bytes32, campaign_type: uint256, start_timest
             itself, so this is for adjusting the rules or extending, not the APR.
     @param campaign_id The campaign to override.
     @param campaign_type Merkl campaign type id.
-    @param start_timestamp New start (only effective before the campaign started).
+    @param start_timestamp New start (only effective before the campaign started); 0 defaults to block.timestamp.
     @param duration New duration in seconds.
     @param campaign_data New opaque Merkl campaign config.
     """
     self._check_owner_or_manager()
     dur: uint32 = convert(duration, uint32)
+    start: uint32 = convert(start_timestamp, uint32) if start_timestamp != 0 else convert(block.timestamp, uint32)
     # creator/reward_token/amount are overwritten by Merkl to the stored campaign's values.
     camp: CampaignParameters = CampaignParameters(
         campaign_id=campaign_id,
@@ -613,7 +617,7 @@ def override_campaign(campaign_id: bytes32, campaign_type: uint256, start_timest
         reward_token=self.reward_wrapper.address,
         amount=0,
         campaign_type=convert(campaign_type, uint32),
-        start_timestamp=convert(start_timestamp, uint32),
+        start_timestamp=start,
         duration=dur,
         campaign_data=campaign_data,
     )
