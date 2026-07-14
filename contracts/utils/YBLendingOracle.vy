@@ -90,6 +90,11 @@ asset_oracle: public(HashMap[uint256, address])
 
 @deploy
 def __init__(factory: Factory, proxy_impl: address):
+    """
+    @notice Bind the singleton to the YB factory and the price() proxy implementation.
+    @param factory YB factory, used to resolve market-id -> LT in create_oracles
+    @param proxy_impl YBPriceProxy implementation cloned per market by create_oracles
+    """
     assert factory.address != empty(address) and proxy_impl != empty(address), "Zero"
     FACTORY = factory
     PROXY_IMPL = proxy_impl
@@ -101,7 +106,8 @@ def create_oracles(market_id: uint256) -> (address, address):
     @notice Spawn the USD + asset price() proxies for a factory market. Callable by anyone;
             the LT is resolved (and existence checked) via the factory market id. Idempotent:
             returns the existing pair if already created.
-    @return (usd_oracle, asset_oracle)
+    @param market_id Index of the market in the YB factory
+    @return (usd_oracle, asset_oracle) proxy addresses
     """
     usd: address = self.usd_oracle[market_id]
     if usd != empty(address):
@@ -325,6 +331,13 @@ def _staked_scale(lt: LT) -> uint256:
 @external
 @view
 def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
+    """
+    @notice ybLT price denominated in the underlying asset (e.g. BTC), per LT token.
+    @param lt The LT (market) to price
+    @param use_balances Value from raw AMM balances instead of the manipulation-resistant
+           price-oracle path (this path is used anyway when the position is non-tradable)
+    @return Price scaled to 1e18
+    """
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
     yb_oracle, asset_price = self._price(lt, use_balances)
@@ -334,12 +347,25 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
 @external
 @view
 def price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
+    """
+    @notice ybLT price in USD, per LT token.
+    @param lt The LT (market) to price
+    @param use_balances See price_in_asset
+    @return Price scaled to 1e18
+    """
     return self._price(lt, use_balances)[0]
 
 
 @external
 @view
 def staked_price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
+    """
+    @notice Like price_in_asset, but per staked (gauge) token: scaled by the staker's LT
+            balance over the gauge supply.
+    @param lt The LT (market) to price
+    @param use_balances See price_in_asset
+    @return Price scaled to 1e18
+    """
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
     yb_oracle, asset_price = self._price(lt, use_balances)
@@ -349,4 +375,10 @@ def staked_price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
 @external
 @view
 def staked_price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
+    """
+    @notice Like price_in_usd, but per staked (gauge) token.
+    @param lt The LT (market) to price
+    @param use_balances See price_in_asset
+    @return Price scaled to 1e18
+    """
     return self._price(lt, use_balances)[0] * self._staked_scale(lt) // 10**18

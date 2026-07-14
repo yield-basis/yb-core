@@ -64,10 +64,14 @@ cached_timestamp: public(uint256)
 
 @deploy
 def __init__(lt: LT):
+    """
+    @notice Deploy the EMA-smoothed ybLT/asset oracle bound to a single LT.
+    @dev cached_price stays 0 (unseeded) until the first price_w(); until then price()
+         returns the raw price, so the LT need not already hold a position at deploy.
+    @param lt The LT (market) this oracle prices
+    """
     LT_TOKEN = lt
     self.cached_timestamp = block.timestamp
-    # cached_price stays 0 (unseeded) until the first price_w(); the EMA returns the raw
-    # price until then, so deployment does not require the LT to already hold a position.
 
 
 @internal
@@ -272,13 +276,24 @@ def _ema(raw: uint256) -> uint256:
 @external
 @view
 def price() -> uint256:
+    """
+    @notice EMA-smoothed ybLT price in the underlying asset (e.g. BTC), scaled to 1e18.
+    @dev View path: reads agg.price() without checkpointing. Smoothing weight depends on
+         the time since the last price_w() (see the EMA caveat above _ema).
+    @return Smoothed price scaled to 1e18
+    """
     agg_price: uint256 = staticcall (staticcall LT_TOKEN.agg()).price()
     return self._ema(self._raw_price_in_asset(agg_price))
 
 
 @external
 def price_w() -> uint256:
-    # State-changing path: also checkpoint the aggregator (advance its EMA) via price_w().
+    """
+    @notice Checkpoint and return the EMA-smoothed ybLT/asset price.
+    @dev Advances both this EMA and the aggregator (agg.price_w()); consumers should call
+         it regularly so the smoothing weight stays meaningful (see the EMA caveat above _ema).
+    @return Smoothed price scaled to 1e18
+    """
     agg: PriceOracle = staticcall LT_TOKEN.agg()
     agg_price: uint256 = extcall agg.price_w()
     ema: uint256 = self._ema(self._raw_price_in_asset(agg_price))

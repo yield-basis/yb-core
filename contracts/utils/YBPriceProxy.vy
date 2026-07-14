@@ -24,6 +24,9 @@ in_usd: public(bool)
 def initialize(oracle: address, lt: address, in_usd: bool):
     """
     @notice One-time bind of the clone to its singleton oracle, LT and denomination.
+    @param oracle The YBLendingOracle singleton this clone reads from
+    @param lt The LT (market) this clone prices
+    @param in_usd True to price in USD, False to price in the underlying asset
     """
     assert self.oracle == empty(address), "Initialized"
     assert oracle != empty(address) and lt != empty(address), "Zero"
@@ -35,6 +38,11 @@ def initialize(oracle: address, lt: address, in_usd: bool):
 @external
 @view
 def price() -> uint256:
+    """
+    @notice Bound ybLT price - USD if in_usd else the underlying asset - scaled to 1e18.
+    @dev Forwards to the singleton oracle's price_in_usd / price_in_asset for this LT.
+    @return Price scaled to 1e18
+    """
     if self.in_usd:
         return staticcall YBLendingOracle(self.oracle).price_in_usd(self.lt, False)
     return staticcall YBLendingOracle(self.oracle).price_in_asset(self.lt, False)
