@@ -1,0 +1,188 @@
+# Net-Pressure Incentives
+
+Adaptive incentive system that compensates for crvUSD **net pressure** in YB markets:
+it diverts a DAO-set slice of protocol fees into a reserve and uses a PID controller
+to pay a savings-rate bonus that attracts crvUSD into a "sink" pool, relieving the
+pressure.
+
+The research and calibration behind it live in
+[`REPORT_dynamic_incentives.md`](./REPORT_dynamic_incentives.md) (with figures in
+[`pics/`](./pics)). This file summarizes the on-chain design in
+`contracts/net_pressure/`.
+
+## What is "net pressure"?
+
+For a YB market the AMM holds Curve LP tokens (crvUSD/crypto) financed by `debt`
+(crvUSD). **Net pressure = debt − crvUSD sitting inside those LP tokens**:
+
+- **positive** → unwinding the position must *buy* crvUSD to repay (crvUSD buy pressure);
+- **negative** → the LP already holds more crvUSD than the debt (sell pressure).
+
+A settled 2× leveraged 50/50 LP has `debt == crvUSD-in-LP`, so net pressure is ~0 in
+equilibrium and only deviates when the pool/AMM are pushed off it — that deviation is
+the signal the controller acts on.
+
+## Architecture
+
+```
+LTs ──admin-fee LT shares──▶ FeeSplitter ──(1−frac)──▶ FeeDistributor (veYB, unchanged)
+                                  │ (frac)
+                                  ▼
+                                 PID  ──converts LT→crvUSD reserve
+                                      ──sets crvUSD/sec rate──▶ FastGauge ──streams crvUSD──▶ stakers
+                                                                   ▲
+                                              market rate ── MarketRateGetter (sUSDS)
+                                              net pressure ── YBNetPressure (oracle)
+```
+
+| Contract | Role |
+|---|---|
+| [`FeeSplitter.vy`](../../contracts/net_pressure/FeeSplitter.vy) | Installed as `Factory.fee_receiver`. Reads the LT token set from the FeeDistributor, sends `split_fraction` of each LT balance to the PID and the rest to the FeeDistributor, then pokes `PID.trigger()` and `FeeDistributor.fill_epochs()`. Entry point is `trigger()`, with `fill_epochs()` as an alias so keepers that poke the old fee_receiver's ABI keep working. |
+| [`PID.vy`](../../contracts/net_pressure/PID.vy) | Converts the LT fees it receives into a crvUSD reserve, runs the control loop on aggregate net pressure, and sets the FastGauge stream rate. Holds the reserve. |
+| [`FastGauge.vy`](../../contracts/net_pressure/FastGauge.vy) | ERC4626 staking gauge over a Curve **stableswap** LP (the sink). Streams a single reward (crvUSD) at a rate only the PID sets; pulls crvUSD from the PID at checkpoint. If the staked LP is itself a 2-coin Curve pool (auto-detected in `__init__`), also offers one-call `add_liquidity`/`remove_liquidity`/`remove_liquidity_one_coin` zaps that deposit-and-stake / unstake-and-withdraw; the pool's amounts ABI (newer NG `DynArray` vs older fixed `uint256[2]`) is detected via `POOL_IS_DYNARRAY`. |
+| [`MarketRateGetter.vy`](../../contracts/net_pressure/MarketRateGetter.vy) | Reports the "market rate" the offer is quoted against. First implementation reads the Sky Savings Rate (sUSDS). Swappable by the DAO. |
+| [`YBNetPressure.vy`](../../contracts/net_pressure/YBNetPressure.vy) | Manipulation-resistant net-pressure oracle (`net_pressure_oracle`) and the AMM's half-TVL (`half_tvl_oracle` = its equity at `price_oracle`, the normalizer); `net_pressure_and_tvl` returns both in one call (sharing the `lp_oracle_2` solve) for the controller's per-pool loop. |
+| [`LTSwapZap.vy`](../../contracts/utils/LTSwapZap.vy) | Permissionless utility: `convert(lt)` pulls a caller's shares of one LT (`transferFrom`, approve-first), withdraws them and swaps to crvUSD with the same on-chain oracle-bounded `min_dy` as `PID._convert_fees`, sending the crvUSD to the caller. Best-effort — if the swap can't meet its min the swap error is swallowed and the withdrawn asset is handed back instead. Used to seed the reserve from one-off share holdings (e.g. deprecated-market fees recovered from the FeeDistributor to the DAO). |
+
+## Manipulation resistance
+
+Every quantity the controller consumes is measured at the pool's `price_oracle`
+(EMA), never from spot balances:
+
+- **Net pressure & half-TVL** (the normalizer) come from `YBNetPressure`, both derived
+  from the AMM's **conserved invariants** (`x0` and the constant product `k`) marked at
+  `price_oracle` — *not* from the spot `collateral_amount`, which a crvUSD↔LP trade
+  against the AMM could inflate. `half_tvl` is the AMM's equity (`calc_coll_value −
+  calc_debt`, == `value_oracle` at equilibrium); both are the YB-position slice, so
+  numerator and denominator match. It prices the LP via the twocrypto LP oracle at
+  `price_oracle` and slides the AMM along its bonding curve (falling back to raw
+  collateral/debt only when the AMM is untradable — and there nothing can manipulate
+  it; the Curve pool never reverts, so the crvUSD split stays oracle-based). The AMM's
+  `x0` and the "untradable" test are reproduced **in-contract** from `AMM.get_x0`
+  (using `price_oracle`-derived reads), not read via `AMM.get_state()` — that call
+  re-enters the heavy crvUSD aggregator, and a gas-metered `raw_call` around it can't
+  robustly tell a genuine revert from a forced out-of-gas, so the branch is pure
+  arithmetic and immune to gas-schedule repricing (e.g. Glamsterdam).
+- **The crvUSD aggregator is read once per `trigger()`**, not once per market:
+  `PID` reads `FACTORY.agg().price_w()` (the Factory owns the aggregator config) and
+  passes it into every `YBNetPressure` call; the oracle reconstructs the AMM's
+  `PRICE_ORACLE_CONTRACT.price()` as `lp_price_ps * agg_price / 1e18`. The `agg_price`
+  argument is optional — single-market callers can omit it (0) and the oracle reads
+  `lt.agg().price()` itself.
+- **Sink size** is the LP staked in *our* `FastGauge` (not the whole pool), valued at
+  the stableswap `get_virtual_price()`. The staked amount is read as `FastGauge.tvl_ema()`
+  — a Curve-cryptopool-style EMA of the gauge's own `totalSupply` that folds in the
+  *previously recorded* supply and stores the current one for next time, so a stake
+  flash-deposited and withdrawn within one block never moves it (a same-block read returns
+  the pre-deposit value) — regardless of the smoothing length, which is structural, not
+  time-based. `ema_time` (DAO-settable, default 866 s ≈ 10 min half-life, matching the
+  lending-oracle EMA) only sets the multi-block manipulation cost and responsiveness. The
+  whole-pool `totalSupply` would be flash-inflatable; `vprice`
+  is not spot-manipulable. The same `tvl_ema`-based staked value scales the output stream
+  rate, so a flash deposit can't pump the rate either.
+- **Fee conversion** is bounded on *both* legs by `swap_fee_multiplier × pool.fee()`
+  (default 1.5× the live dynamic fee): the `LT.withdraw` `min_assets` is the
+  `price_oracle`-fair asset value of the shares (`half_tvl · shares/totalSupply /
+  price_oracle`, computed inline in `PID._convert_fees` from the oracle's `half_tvl` —
+  *not* the `price_scale`-based `value_oracle`, which over-values during imbalance), and
+  the asset→crvUSD swap's `min_dy` from `price_oracle`. An on-chain study over ~5
+  months (incl. `price_oracle/price_scale` down to 0.62) showed the realizable
+  withdrawal stays within ~2.7% of the `price_oracle` fair value, tracking the
+  cryptopool's dynamic fee, so `1.5× pool.fee()` covers it with margin (and reverts —
+  retry later — only under extreme transient volatility/manipulation).
+
+## Control loop (PID)
+
+`PID.trigger()` converts any held LT fees, then (at most every `min_interval`) steps
+the controller. All math is 1e18 fixed point; `dt` is in years.
+
+```
+pressure     = max(0, Σ net_pressure(lt)) / H               # via net_pressure_and_tvl(lt) per pool
+sink         = gauge_staked_TVL / H     # FastGauge.tvl_ema()·vprice; H = Σ half_tvl(lt) (AMM equity)
+error        = pressure − sink                              # coverage gap
+integral    += error · dt                  clamped to [0, max_integral]   (anti-windup)
+d_pressure   = (d_filter_time·d_pressure + Δpressure) / (d_filter_time + dt)   # filtered derivative
+target       = min(feedforward_gain·pressure + kp·error
+                   + ki·integral + kd·max(0, d_pressure), sink_cap)   # SIGNED; clamp only the top
+offer        = max(1, dead_band + target / sink_per_offer)  # APR multiple, FLOORED at 1x
+bonus_apr    = (offer − 1) · market_rate                    # 0 when offer == 1x (no sink wanted)
+rate         = bonus_apr · staked_value / seconds_per_year  # crvUSD/sec; staked_value = gauge_staked_TVL
+```
+
+`target` is kept **signed** (clamped only at the top, `sink_cap`), and the offer is floored at
+`1×`: when the controller wants no sink `target` goes negative, the offer falls to `1×` and
+`bonus_apr` is exactly `0`, so the sink drains — instead of being pinned at the dead band paying a
+perpetual `(dead_band − 1)·market_rate` on the whole stake.
+
+The derivative uses a first-order (low-pass) filter rather than a raw `Δpressure/dt`:
+because deposits are stepwise, the raw finite difference is mostly zeros with occasional
+spikes, diverges as `dt → 0`, and is huge over a single block. The filtered form
+(Åström discrete derivative, `d[k] = (Tf·d[k-1] + Δpressure)/(Tf + dt)`) converges to the
+true slope on a steady ramp, turns a step into a bounded pulse (`~Δ/Tf`) that decays over
+`Tf`, and stays finite as `dt → 0`. Only its rising part feeds the target.
+
+![control block diagram](./pics/incentive_block_diagram.png)
+
+### Default parameters
+
+Tuned offline against historical net pressure (see the report); all DAO-settable.
+
+| Param | Default | Meaning |
+|---|---|---|
+| `feedforward_gain` | 1.16 | proportional gain on raw pressure |
+| `kp`, `ki`, `kd` | 50, 1988, 0.049 | PID gains on the coverage error (time in years) |
+| `max_integral` | 2.93 | integral clamp (anti-windup) |
+| `sink_cap` | 22 | clamp on the target sink |
+| `dead_band` | 1.6 | offered APR multiple at zero target sink |
+| `sink_per_offer` | 0.5 | target sink drawn per unit offer above the dead band |
+| `d_filter_time` | 6 h | derivative low-pass filter time constant Tf (must be > 0; it is the `Tf + dt` denominator floor) |
+| `swap_fee_multiplier` | 1.5 | fee-conversion slippage buffer (× pool fee) |
+
+`kd` and `d_filter_time` are **coupled**: the 6 h filter attenuates the raw `Δpressure/dt`
+peak, so `kd` is set to ~3× the raw-derivative optimum (`0.0158`) to keep ~99% crash
+coverage. If you change `d_filter_time`, retune `kd` with it (report §9, table of spend /
+reserve tip / offered-APR jitter vs Tf — 6 h is the noise-vs-lag knee).
+
+## FastGauge reward streaming
+
+Reuses Curve's V5 extra-reward integral (`integral += pulled·1e18/totalSupply`;
+`claimable += balance·(integral − integral_for)/1e18`; checkpoint before every
+balance change), with one change: rewards are **pulled from the PID at checkpoint**,
+capped by the PID's balance/allowance. When the reserve empties, `pulled = 0` and the
+effective rate drops to zero **with no reverts** — no `period_finish` needed. Only the
+PID can call `set_reward_rate`.
+
+Shares are **1:1** with the staked LP (no virtual offset). Inflation-attack
+protection is a *seed-the-market* floor: total supply must be `0` or
+`>= MIN_TOTAL_SUPPLY` (default `10 * 1e18`, ~$10) — you can't bootstrap a 1-share
+vault, and the last withdrawal must exit fully or leave the floor. To grief a victim
+depositing `V` an attacker must donate `> V * MIN_TOTAL_SUPPLY`, so the protection
+scales with the seed (~1e19), without locking any permanent dead shares.
+
+## Market rate (sUSDS)
+
+`MarketRateGetter` reads the Sky Savings Rate: `ssr` is a per-second compounding
+factor in RAY (`1 + r_per_second`), so the simple APR is `(ssr − RAY) ·
+seconds_per_year`, rescaled to 1e18. Returns 0 for `ssr ≤ RAY`. The DAO can swap the
+getter for a different source.
+
+## Wiring / deployment
+
+1. Deploy `YBNetPressure`, `MarketRateGetter(sUSDS)`, the sink `FastGauge(lp, crvUSD, dao)`, the `PID(crvUSD, oracle, marketRate, feeDistributor, dao)`, and `FeeSplitter(feeDistributor, pid, fraction, dao)`.
+2. `PID.set_pressure_lts([...])`, `PID.set_gauge(fastGauge, sinkPool)` (approves crvUSD pulls), `FastGauge.set_pid(pid)`.
+3. Make sure the LT tokens are in the FeeDistributor token set (FeeSplitter/PID read it from there).
+4. Point `Factory.set_fee_receiver(feeSplitter)` via the FactoryOwner/DAO path. This is also
+   the **on switch**: `PID.trigger()` is a clock-keeping no-op (no integration, rate 0) until
+   the Factory routes fees through our FeeSplitter (`PID._connected` checks
+   `fee_receiver.pid() == self`), then the controller starts from a clean slate. So the pool
+   can exist days before connection without winding up the controller.
+
+## Testing
+
+- `tests/net_pressure/test_incentive_system.py` — unit tests (mocks): MarketRateGetter, FastGauge accrual/split/access/depletion plus a property-based reward-split test and a stateful invariant machine, FeeSplitter split/recover/validation, and the PID step vs a Python reference of the control law.
+- `tests/net_pressure/test_integration.py` — full stack on a real LT/AMM/cryptopool.
+- `tests/net_pressure/test_net_pressure.py` — the net-pressure oracle itself.
+- `tests_forked/test_market_rate_forked.py` — `MarketRateGetter` vs live sUSDS at the fixed fork block.
+- `tests_forked/test_net_pressure.py` — the net-pressure oracle against live pools and the real crvUSD aggregator.
+- `tests_forked/test_net_pressure_e2e.py` and `tests_forked/test_net_pressure_balanced.py` — the whole fee→reserve→stream flow, the connection gate, and the controller on live mainnet state; see [`REPORT_e2e_fork_tests.md`](./REPORT_e2e_fork_tests.md).
+- `tests_forked/test_lt_swap_zap.py` — the DAO recovering the deprecated markets' fee shares from the live FeeDistributor, approving `LTSwapZap`, and calling `convert(lt)` per token to swap to crvUSD; plus the swallowed-swap path (withdrawn asset handed back) and the withdraw-floor revert that keeps the caller's shares.

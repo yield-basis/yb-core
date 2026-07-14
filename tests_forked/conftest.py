@@ -157,6 +157,11 @@ def lending_oracle(forked_env):
 
 
 @pytest.fixture(scope="module")
+def net_pressure(forked_env):
+    return boa.load("contracts/net_pressure/YBNetPressure.vy")
+
+
+@pytest.fixture(scope="module")
 def lt_deployer(forked_env):
     return boa.load_partial("contracts/LT.vy")
 

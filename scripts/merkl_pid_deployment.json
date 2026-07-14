@@ -1,0 +1,29 @@
+{
+  "network": "http://192.168.81.5:8545",
+  "deployer": "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d",
+  "dao": "0x42F2A41A0D0e65A440813190880c8a65124895Fa",
+  "crvusd": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+  "factory": "0x370a449FeBb9411c95bf897021377fe0B7D100c0",
+  "fee_distributor": "0xD11b416573EbC59b6B2387DA0D2c0D1b3b1F7A90",
+  "sink_lp": "0x625E92624Bc2D88619ACCc1788365A69767f6200",
+  "susds": "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD",
+  "net_pressure_oracle": "0x7FBA07C40Ad1985f023e144E5732784aD6051591",
+  "market_rate_getter": "0xC5498c1Afc75ffAa2A6F14Be0F0f41feDB683B58",
+  "lt_swap_zap": "0xCd0074f0eC6319b288b76103D2ba89768a4476Fe",
+  "merkl_pid_driver": "0x5b13273F3B584fE6864A2fde89e8F90B7e790D1c",
+  "fee_splitter": "0x4B7782FD52143058E4495686EDf8917021D1c346",
+  "merkl_wrapper": "0x5D29949F8e64fA2f9cB2B1Fa190244b9413bc3Ea",
+  "distribution_creator": "0x8BB4C975Ff3c250e0ceEA271728547f3802B36Fd",
+  "split_fraction": 150000000000000000,
+  "pressure_market_ids": [
+    7,
+    8,
+    9,
+    10
+  ],
+  "deprecated_market_ids": [
+    0,
+    1,
+    2
+  ]
+}

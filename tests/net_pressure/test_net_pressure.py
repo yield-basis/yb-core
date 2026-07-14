@@ -1,5 +1,5 @@
 """
-Component tests for contracts/utils/YBNetPressure.vy.
+Component tests for contracts/net_pressure/YBNetPressure.vy.
 
 Net pressure of a YB market = AMM debt - crvUSD sitting inside the Curve LP tokens
 the AMM holds. Positive => crvUSD must be bought on unwind (buy pressure).
@@ -30,12 +30,6 @@ BALANCE_CASES = [
     (10, 5 * 10**17),   # deeper pool, smaller position
     (50, 3 * 10**18),   # deep pool, bigger position
 ]
-
-
-@pytest.fixture(scope="session")
-def net_pressure():
-    # Stateless (takes the LT as a call arg); safe to share read-only across tests.
-    return boa.load('contracts/utils/YBNetPressure.vy')
 
 
 def _settle(cryptopool):
@@ -459,6 +453,8 @@ def test_oracle_resists_amm_trade(
 
     equity = yb_amm.get_state().x0 // 3
     oracle0 = net_pressure.net_pressure_oracle(yb_lt.address)
+    half0 = net_pressure.half_tvl_oracle(yb_lt.address)
+    coll0 = yb_amm.collateral_amount()  # spot LP holdings (manipulable)
 
     attacker = accounts[1]
     # Buy some LP collateral out of the AMM with stablecoin.
@@ -475,7 +471,67 @@ def test_oracle_resists_amm_trade(
             raise
 
     oracle1 = net_pressure.net_pressure_oracle(yb_lt.address)
+    half1 = net_pressure.half_tvl_oracle(yb_lt.address)
+    coll1 = yb_amm.collateral_amount()
     print(f"\n[depth={extra_depth} dep={deposit}] equity={equity/1e18:.0f} "
           f"oracle {oracle0/1e18:.4f} -> {oracle1/1e18:.4f}")
     # x0 only grows by fees on an AMM trade, so the oracle is essentially unchanged.
     assert abs(oracle1 - oracle0) < equity // 50
+    # The trade moved the spot collateral, but half-TVL (x0-based) is unmoved -
+    # i.e. half_tvl_oracle is NOT the manipulable lp_price * collateral_amount.
+    assert abs(coll1 - coll0) > coll0 // 100, "trade should have moved spot collateral"
+    assert abs(half1 - half0) < equity // 50
+
+
+# ---------------------------------------------------------------------------
+# Internal-method sanity (boa .internal)
+# ---------------------------------------------------------------------------
+
+def test_pool_metrics_equilibrium(cryptopool, seed_cryptopool, net_pressure):
+    """At price_oracle == price_scale (p == 1): x_frac == 1/2 and the two LP prices
+    coincide (lp_price_oracle == lp_price_ps)."""
+    po, ps = cryptopool.price_oracle(), cryptopool.price_scale()
+    assert abs(po - ps) * 10**18 // ps < 10**9, "pool not at p == 1"
+
+    m = net_pressure.internal._pool_metrics(cryptopool.address)
+    assert abs(m.x_frac - 5 * 10**17) < 10**13                      # 0.5 within ~1e-5
+    assert abs(m.lp_price_oracle - m.lp_price_ps) * 10**18 // m.lp_price_ps < 10**13  # <1e-5 rel
+
+
+def test_pool_metrics_ratio_is_portfolio_value(
+    cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
+    yb_allocated, seed_cryptopool, net_pressure, lp_oracle_2,
+):
+    """Off equilibrium, lp_price_oracle / lp_price_ps == portfolio_value(A, p) and
+    x_frac == x/(x+p*y) from the solver (the internal wiring, on the struct)."""
+    # open a price gap so p != 1
+    p = _open_ema_gap(cryptopool, collateral_token, accounts[3])
+    assert abs(p - 1.0) > 0.03
+
+    m = net_pressure.internal._pool_metrics(cryptopool.address)
+    x_frac_py, lp_oracle_py, lp_ps_py = _pool_metrics_py(cryptopool, lp_oracle_2)
+    assert m.x_frac == x_frac_py
+    assert m.lp_price_oracle == lp_oracle_py
+    assert m.lp_price_ps == lp_ps_py
+    # the driving ratio is exactly the D=1 portfolio value at p
+    p18 = cryptopool.price_oracle() * 10**18 // cryptopool.price_scale()
+    pv_norm = lp_oracle_2.portfolio_value(cryptopool.A() // 2, p18)
+    assert abs(m.lp_price_oracle * 10**18 // m.lp_price_ps - pv_norm) < 10**12
+
+
+@pytest.mark.parametrize("extra_depth,deposit", BALANCE_CASES)
+def test_pressure_signals_half_tvl_is_value_oracle(
+    cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin,
+    yb_allocated, seed_cryptopool, net_pressure, mock_agg, extra_depth, deposit,
+):
+    """_pressure_signals: at equilibrium half_tvl == the AMM's value_oracle (equity),
+    and net pressure ~= 0."""
+    _setup(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin,
+           extra_depth, deposit)
+    assert abs(_ratio(cryptopool) - 1.0) < 0.02
+
+    m = net_pressure.internal._pool_metrics(cryptopool.address)
+    ps = net_pressure.internal._pressure_signals(yb_amm.address, m, mock_agg.price())
+    equity = yb_amm.value_oracle().value  # x0 / (2L-1)
+    assert abs(ps.half_tvl - equity) < equity // 50          # half-TVL == value_oracle
+    assert abs(ps.net_pressure) < equity // 50               # ~0 at equilibrium
