@@ -98,6 +98,6 @@ if __name__ == '__main__':
     print("---------------- per-market price() proxies ----------------")
     for mid, lt, usd, asset, usd_price, asset_price in created:
         print(f"market {mid}  LT {lt}")
-        print(f"    usd_oracle   : {usd}   price() = {usd_price}")
-        print(f"    asset_oracle : {asset}   price() = {asset_price}")
+        print(f"    usd_oracle   : {usd}   price() = {usd_price/1e18:.2f}")
+        print(f"    asset_oracle : {asset}   price() = {asset_price/1e18:.4f}")
     print("====================================================")
