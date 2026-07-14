@@ -308,9 +308,20 @@ def yb_staker(gauge_interface, yb_market, yb_lt, accounts, admin):
 # --- Shared deployers for the oracle test suite (compile once, not per test) ---
 
 @pytest.fixture(scope="session")
-def lending_oracle():
-    # Stateless (takes the LT as a call arg); safe to share read-only across tests.
-    return boa.load('contracts/utils/YBLendingOracle.vy')
+def price_proxy_deployer():
+    # Thin per-market price() proxy implementation (cloned via create_minimal_proxy_to).
+    return boa.load_partial('contracts/utils/YBPriceProxy.vy')
+
+
+@pytest.fixture(scope="session")
+def price_proxy_impl(price_proxy_deployer):
+    return price_proxy_deployer.deploy()
+
+
+@pytest.fixture(scope="session")
+def lending_oracle(factory, price_proxy_impl):
+    # Stateless price math (takes the LT as a call arg); also spawns per-market price() proxies.
+    return boa.load('contracts/utils/YBLendingOracle.vy', factory.address, price_proxy_impl.address)
 
 
 @pytest.fixture(scope="session")

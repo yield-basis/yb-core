@@ -4,6 +4,13 @@ from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
 
 
+interface Factory:
+    def markets(i: uint256) -> Market: view
+    def market_count() -> uint256: view
+
+interface PriceProxy:
+    def initialize(oracle: address, lt: address, in_usd: bool): nonpayable
+
 interface PriceOracle:
     def price_w() -> uint256: nonpayable
     def price() -> uint256: view
@@ -47,6 +54,21 @@ struct LiquidityValues:
     ideal_staked: uint256
     staked: uint256
 
+struct Market:
+    asset_token: address
+    cryptopool: address
+    amm: address
+    lt: address
+    price_oracle: address
+    virtual_pool: address
+    staker: address
+
+event OraclesCreated:
+    market_id: indexed(uint256)
+    lt: indexed(address)
+    usd_oracle: address
+    asset_oracle: address
+
 
 PRECISION: constant(uint256) = 10**18
 L: constant(uint256) = 2
@@ -56,6 +78,48 @@ L: constant(uint256) = 2
 LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
+
+
+FACTORY: public(immutable(Factory))
+PROXY_IMPL: public(immutable(address))
+
+# market_id -> spawned price() proxy (0 until created)
+usd_oracle: public(HashMap[uint256, address])
+asset_oracle: public(HashMap[uint256, address])
+
+
+@deploy
+def __init__(factory: Factory, proxy_impl: address):
+    assert factory.address != empty(address) and proxy_impl != empty(address), "Zero"
+    FACTORY = factory
+    PROXY_IMPL = proxy_impl
+
+
+@external
+def create_oracles(market_id: uint256) -> (address, address):
+    """
+    @notice Spawn the USD + asset price() proxies for a factory market. Callable by anyone;
+            the LT is resolved (and existence checked) via the factory market id. Idempotent:
+            returns the existing pair if already created.
+    @return (usd_oracle, asset_oracle)
+    """
+    usd: address = self.usd_oracle[market_id]
+    if usd != empty(address):
+        return (usd, self.asset_oracle[market_id])
+
+    assert market_id < staticcall FACTORY.market_count(), "No market"
+    lt: address = (staticcall FACTORY.markets(market_id)).lt
+    assert lt != empty(address), "No market"
+
+    usd = create_minimal_proxy_to(PROXY_IMPL)
+    asset: address = create_minimal_proxy_to(PROXY_IMPL)
+    extcall PriceProxy(usd).initialize(self, lt, True)
+    extcall PriceProxy(asset).initialize(self, lt, False)
+
+    self.usd_oracle[market_id] = usd
+    self.asset_oracle[market_id] = asset
+    log OraclesCreated(market_id=market_id, lt=lt, usd_oracle=usd, asset_oracle=asset)
+    return (usd, asset)
 
 
 @internal
