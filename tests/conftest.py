@@ -337,5 +337,18 @@ def lp_oracle_2():
 
 @pytest.fixture(scope="session")
 def ll_deployer():
-    # Needs the LT as a constructor arg -> load_partial once, deploy per test.
+    # EIP-1167 implementation, cloned per (market, denomination); load_partial so tests can
+    # both .deploy() the impl and .at() a clone address created by the factory.
     return boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
+
+
+@pytest.fixture(scope="session")
+def ll_impl(ll_deployer):
+    # The YBLendingOracleLL implementation (no constructor); clones are initialize()d.
+    return ll_deployer.deploy()
+
+
+@pytest.fixture(scope="session")
+def ll_factory(factory, ll_impl, admin):
+    # Spawns per-market EMA oracle clones; 866s default EMA (~10 min half-life); admin is the DAO.
+    return boa.load('contracts/utils/YBLendingOracleLLFactory.vy', factory.address, ll_impl.address, 866, admin)

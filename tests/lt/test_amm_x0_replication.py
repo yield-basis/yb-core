@@ -123,7 +123,7 @@ def test_get_x0_internal_matches_amm(
     # proves it: if it were != 1 the AMM's get_x0 would diverge from the oracle copy.
     oracles = [
         ("YBLendingOracle", lending_oracle),
-        ("YBLendingOracleLL", ll_deployer.deploy(yb_lt.address)),
+        ("YBLendingOracleLL", ll_deployer.deploy()),   # _get_x0 is @pure; no initialize needed
         ("YBNetPressure", boa.load('contracts/net_pressure/YBNetPressure.vy')),
     ]
 
