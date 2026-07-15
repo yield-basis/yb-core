@@ -1,5 +1,11 @@
 # @version 0.4.3
-
+"""
+@title YBLendingOracle
+@author Yield Basis
+@license GNU Affero General Public License v3.0
+@notice Stateless ybLT price oracle (USD or asset per LT); reproduces the LP-oracle + LT
+        liquidity math in-contract and spawns the per-market YBPriceProxy price() clones.
+"""
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
 

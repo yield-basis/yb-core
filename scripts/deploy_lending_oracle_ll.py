@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Deploy a YBLendingOracleLL (EMA-smoothed ybLT/asset oracle) for a single LT.
+Deploy the YBLendingOracleLL implementation + YBLendingOracleLLFactory, then spawn the
+per-market EMA-smoothed price oracles (USD + asset) for each market in MARKET_IDS.
 
-One LL is deployed per market. The LT is resolved from the factory market id (or set
-LT_ADDRESS to override). cached_price is unseeded until the first price_w().
+The implementation is deployed first (no constructor args) and passed into the factory, which
+clones it per (market, denomination) via create_oracles(market_id). Each clone is an
+EIP-1167 proxy holding its own (LT, in_usd, ema_time) + virtual_price EMA state. The EMA is
+unseeded until the first price_w(); the YB Factory admin (DAO) can retune any clone's ema_time
+via the factory.
 
-    FORK = True   -> deploy on a fork and sanity-check price() / price_w().
-    FORK = False  -> broadcast on mainnet and verify on Etherscan.
+    FORK = True   -> deploy on a fork, create the oracles and sanity-check price() / price_w().
+    FORK = False  -> broadcast on mainnet, verify impl + factory on Etherscan, create oracles.
 
     python scripts/deploy_lending_oracle_ll.py
 """
@@ -27,8 +31,9 @@ FORK = False
 EXTRA_TIMEOUT = 10
 DEPLOYER = "0xa39E4d6bb25A8E55552D6D9ab1f5f8889DDdC80d"  # YB Deployer
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"   # YB Factory (market-id -> LT lookup)
-MARKET_ID = 7                                            # market whose LT this LL prices
-LT_ADDRESS = ""                                          # override: use this LT directly if set
+DAO = "0x42F2A41A0D0e65A440813190880c8a65124895Fa"       # Aragon DAO: may retune ema_time
+MARKET_IDS = [7, 8, 9, 10]                               # markets to create EMA oracles for
+EMA_TIME = 866                                           # default EMA time (s): ~10 min half-life
 
 
 def account_load(fname):
@@ -60,23 +65,50 @@ if __name__ == '__main__':
         admin = account_load('yb-deployer')
         boa.env.add_account(admin)
 
-    lt = LT_ADDRESS
-    if not lt:
-        lt = boa.load_partial('contracts/Factory.vy').at(FACTORY).markets(MARKET_ID).lt
-    print(f"LT (market {MARKET_ID}): {lt}")
-
-    ll = boa.load('contracts/utils/YBLendingOracleLL.vy', lt)
+    impl = boa.load('contracts/utils/YBLendingOracleLL.vy')
     if not FORK:
-        verify(ll, etherscan, wait=True)
-    print(f"YBLendingOracleLL: {ll.address}")
-    print(f"  LT_TOKEN: {ll.LT_TOKEN()}")
+        verify(impl, etherscan, wait=True)
+    print(f"YBLendingOracleLL impl: {impl.address}")
 
-    if FORK:
-        raw = ll.price()          # unseeded EMA returns the raw price
-        seeded = ll.price_w()     # seeds + checkpoints the EMA
-        assert raw > 0 and seeded > 0, "zero price"
-        assert ll.cached_price() == seeded, "EMA not seeded"
-        assert ll.price() == seeded, "settled EMA of a constant != the constant"
-        print(f"  price():   {raw}")
-        print(f"  price_w(): {seeded}")
-        print("price() / price_w() seed and match - OK")
+    ll_factory = boa.load('contracts/utils/YBLendingOracleLLFactory.vy', FACTORY, impl.address, EMA_TIME, DAO)
+    if not FORK:
+        verify(ll_factory, etherscan, wait=True)
+    print(f"YBLendingOracleLLFactory: {ll_factory.address}")
+
+    factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
+    ll = boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
+
+    created = []
+    for mid in MARKET_IDS:
+        lt = factory.markets(mid).lt
+        assert lt != "0x0000000000000000000000000000000000000000", f"market {mid} has no LT"
+        usd, asset = ll_factory.create_oracles(mid)
+        usd_o = ll.at(usd)
+        asset_o = ll.at(asset)
+        usd_price = usd_o.price()
+        asset_price = asset_o.price()
+        if FORK:
+            # Clones must be wired correctly and creation is idempotent.
+            assert usd_o.lt_token() == lt and asset_o.lt_token() == lt, f"market {mid} wrong LT"
+            assert usd_o.in_usd() and not asset_o.in_usd(), f"market {mid} denom"
+            assert usd_o.factory() == ll_factory.address, f"market {mid} factory"
+            assert usd_o.ema_time() == EMA_TIME and asset_o.ema_time() == EMA_TIME, f"market {mid} ema"
+            assert ll_factory.create_oracles(mid) == (usd, asset), f"market {mid} not idempotent"
+            # price_w seeds the EMA; a constant settles to itself.
+            assert usd_o.price_w() > 0 and asset_o.price_w() > 0, f"market {mid} zero price"
+        created.append((mid, lt, usd, asset, usd_price, asset_price))
+        print(f"market {mid}: created EMA oracles")
+
+    print("\n==================== deployment ====================")
+    print(f"YBLendingOracleLL impl   : {impl.address}")
+    print(f"YBLendingOracleLLFactory : {ll_factory.address}")
+    print(f"  FACTORY                : {ll_factory.FACTORY()}")
+    print(f"  LL_IMPL                : {ll_factory.LL_IMPL()}")
+    print(f"  dao                    : {ll_factory.dao()}")
+    print(f"  default_ema_time       : {ll_factory.default_ema_time()} s")
+    print("---------------- per-market EMA oracles ----------------")
+    for mid, lt, usd, asset, usd_price, asset_price in created:
+        print(f"market {mid}  LT {lt}")
+        print(f"    usd_oracle   : {usd}   price() = {usd_price/1e18:.2f}")
+        print(f"    asset_oracle : {asset}   price() = {asset_price/1e18:.4f}")
+    print("====================================================")

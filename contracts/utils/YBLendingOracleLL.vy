@@ -1,5 +1,13 @@
 # @version 0.4.3
-
+"""
+@title YBLendingOracleLL
+@author Yield Basis
+@license GNU Affero General Public License v3.0
+@notice EMA-smoothed ybLT price (USD or asset), cloned per market+denomination by
+        YBLendingOracleLLFactory. The LP-oracle math is reproduced in-contract so the fee level
+        (pool virtual_price) gets a flash-proof, cryptopool-style EMA while the price frame
+        stays instantaneous. ema_time is factory-settable.
+"""
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
 
@@ -43,6 +51,10 @@ struct LiquidityValues:
     staked: uint256
 
 
+event SetEmaTime:
+    ema_time: uint256
+
+
 PRECISION: constant(uint256) = 10**18
 L: constant(uint256) = 2
 # AMM.get_x0 leverage constant, identical to AMM.__init__ for leverage == L*PRECISION:
@@ -51,27 +63,65 @@ L: constant(uint256) = 2
 LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
-# EMA smoothing time constant for price_in_asset (ybBTC/BTC). Half-life = EMA_TIME * ln(2)
-# ~= 600s (10 min). This is the manipulation-resistance vs liquidation-lag dial.
-EMA_TIME: constant(uint256) = 866
+# Sane upper bound on the EMA time constant (~31.7 yr); guards a fat-finger set_ema_time.
+MAX_EMA_TIME: constant(uint256) = 10**9
 
 
-LT_TOKEN: public(immutable(LT))
+# Per-clone binding (set once by initialize()); storage, not immutable, so each EIP-1167 clone
+# carries its own values rather than sharing the implementation's.
+lt_token: public(LT)                # the LT (market) this clone prices
+in_usd: public(bool)                # True: price in USD; False: price in the underlying asset
+factory: public(address)            # the YBLendingOracleLLFactory allowed to set_ema_time
+# EMA smoothing time constant (s) for the price. Half-life = ema_time * ln(2). This is the
+# manipulation-resistance vs liquidation-lag dial; the FACTORY can retune it (set_ema_time).
+ema_time: public(uint256)
 
-cached_price: public(uint256)       # EMA of price_in_asset; 0 until first price_w() seeds it
-cached_timestamp: public(uint256)
+# Honest EMA of the pool virtual_price (cryptopool/FastGauge style): each price_w() folds the
+# PREVIOUSLY recorded vprice (vp_last) into the average and records the current one for next
+# time, so a virtual_price flash-inflated and reverted within one block never enters the EMA.
+# The fee level enters the price ONLY through virtual_price (D/supply == 2*vp*sqrt(ps)/1e18,
+# an on-chain identity), so smoothing it smooths the whole price level; the price *frame*
+# (price_oracle/price_scale) stays instantaneous and is itself the cryptopool's own EMA.
+vp_ema: public(uint256)             # smoothed virtual_price; 0 until first price_w() seeds it
+vp_last: public(uint256)            # virtual_price recorded last checkpoint (fed into next EMA)
+vp_ema_ts: public(uint256)          # last EMA checkpoint timestamp
 
 
-@deploy
-def __init__(lt: LT):
+@external
+def initialize(lt: LT, in_usd: bool, ema_time: uint256, factory: address):
     """
-    @notice Deploy the EMA-smoothed ybLT/asset oracle bound to a single LT.
-    @dev cached_price stays 0 (unseeded) until the first price_w(); until then price()
-         returns the raw price, so the LT need not already hold a position at deploy.
-    @param lt The LT (market) this oracle prices
+    @notice One-time bind of the clone to its LT, denomination, EMA time and factory.
+    @dev vp_ema stays 0 (unseeded) until the first price_w(); until then price() prices off
+         the raw virtual_price, so the LT need not already hold a position at deploy.
+    @param lt The LT (market) this clone prices
+    @param in_usd True to price in USD, False to price in the underlying asset (e.g. BTC)
+    @param ema_time EMA smoothing time constant in seconds (0 < ema_time <= MAX_EMA_TIME)
+    @param factory The YBLendingOracleLLFactory permitted to retune ema_time later
     """
-    LT_TOKEN = lt
-    self.cached_timestamp = block.timestamp
+    assert self.lt_token.address == empty(address), "Initialized"
+    assert lt.address != empty(address) and factory != empty(address), "Zero"
+    assert ema_time > 0 and ema_time <= MAX_EMA_TIME, "ema_time"
+    self.lt_token = lt
+    self.in_usd = in_usd
+    self.ema_time = ema_time
+    self.factory = factory
+    # vp_ema stays 0 (unseeded) until the first price_w(); until then price() returns the raw
+    # price, so the LT need not already hold a position at deploy.
+
+
+@external
+def set_ema_time(ema_time: uint256):
+    """
+    @notice Retune the EMA smoothing time constant. FACTORY only (which itself gates on the
+            YB Factory admin / DAO), so the dial can be adjusted whenever necessary.
+    @dev Does not re-seed: the next price_w() blends virtual_price under the new alpha.
+         0 < ema_time <= MAX_EMA_TIME.
+    @param ema_time New EMA time constant in seconds
+    """
+    assert msg.sender == self.factory, "Only factory"
+    assert ema_time > 0 and ema_time <= MAX_EMA_TIME, "ema_time"
+    self.ema_time = ema_time
+    log SetEmaTime(ema_time=ema_time)
 
 
 @internal
@@ -175,37 +225,46 @@ def _calculate_fresh_lv(lt: LT, p_o: uint256, amm_value: uint256) -> (uint256, i
 
 @internal
 @view
-def _raw_price_in_asset(agg_price: uint256) -> uint256:
-    """
-    @notice Uncapped price_in_asset (ybBTC/BTC), computed like YBLendingOracle (real
-            pool.virtual_price() and D/totalSupply). The EMA is applied on top of this.
-    @dev agg_price is supplied by the caller so the view path can read agg.price() while
-         the state-changing path can checkpoint it via agg.price_w().
-    """
-    lt: LT = LT_TOKEN
-    pool: IFXSwap = staticcall lt.CRYPTOPOOL()
-    amm: LevAMM = staticcall lt.amm()
-
-    # Read-only reentrancy guard: probe the AMM's @nonreentrant lock; the cryptopool reads
-    # below self-guard (price_oracle()/price_scale() are @nonreentrant).
-    reentrancy_ok: bool = raw_call(
+def _assert_not_reentrant(amm: LevAMM):
+    """Read-only reentrancy guard: probe the AMM's @nonreentrant lock; the cryptopool reads
+    self-guard (price_oracle()/price_scale() are @nonreentrant)."""
+    ok: bool = raw_call(
         amm.address, method_id("check_nonreentrant()"),
         max_outsize=0, is_static_call=True, revert_on_failure=False)
-    assert reentrancy_ok, "AMM reentrancy"
+    assert ok, "AMM reentrancy"
 
+
+@internal
+@view
+def _price_with_vp(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256, vprice: uint256) -> uint256:
+    """
+    @notice ybLT price for this clone's denomination (in_usd ? USD : asset), using the supplied
+            (already-smoothed) virtual_price for the fee level.
+    @dev The LP-oracle math is reproduced in-contract (as in YBNetPressure), so the fee level
+         and the price frame are separable: pv_norm (from price_oracle/price_scale) is the
+         manipulation-resistant price frame, and the level comes solely from `vprice`. Uses the
+         identity D/totalSupply == 2*vprice*sqrt(price_scale)/1e18, so no pool D()/totalSupply()
+         read is needed - the level is whatever smoothed vprice the caller passes in.
+    @param vprice The (EMA-smoothed) pool virtual_price to price against.
+    """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
-    vprice: uint256 = staticcall pool.virtual_price()
-    D: uint256 = staticcall pool.D()
-    pool_supply: uint256 = staticcall pool.totalSupply()
 
+    # pv_norm: D=1 portfolio value at price_oracle - depends only on A and the price ratio, not
+    # on the fee level (mirrors YBNetPressure._pool_metrics).
+    A_raw: uint256 = LPOracle._scaled_A_raw_from_A(
+        LPOracle._A_at_last_timestamp(LPOracle.IFXSwap(pool.address)))
+    p: uint256 = price_oracle * PRECISION // price_scale
+    x: uint256 = 0
+    y: uint256 = 0
+    x, y = LPOracle.lp_oracle_2._get_x_y(A_raw, p)
+    pv_norm: uint256 = x + p * y // PRECISION
+
+    # Both LP prices carry the fee level via the SAME (smoothed) vprice, so smoothing vprice
+    # smooths the whole price level consistently. lp_price_oracle == pv_norm * D/supply, with
+    # D/supply == lp_price_ps/1e18 by the identity above.
     lp_price_ps: uint256 = 2 * vprice * isqrt(price_scale * 10**18) // 10**18
-
-    portfolio_value: uint256 = LPOracle.lp_oracle_2._portfolio_value(
-        LPOracle._scaled_A_raw_from_A(LPOracle._A_at_last_timestamp(LPOracle.IFXSwap(pool.address))),
-        price_oracle * PRECISION // price_scale,
-    )
-    lp_price_oracle: uint256 = portfolio_value * D // pool_supply
+    lp_price_oracle: uint256 = pv_norm * lp_price_ps // PRECISION
 
     # x0 == AMM.get_x0(): reproduced in-contract (see _get_x0) for gas and to avoid the
     # OOG-vs-revert ambiguity of get_state() re-entering the crvUSD aggregator. p_o_amm ==
@@ -240,63 +299,76 @@ def _raw_price_in_asset(agg_price: uint256) -> uint256:
         lv_admin = lv.admin
         lt_supply = staticcall lt.totalSupply()
 
+    # yb_oracle is now the USD price per LT token.
     yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
+    if self.in_usd:
+        return yb_oracle
     asset_price: uint256 = price_oracle * agg_price // 10**18
-
     return yb_oracle * 10**18 // asset_price
 
 
-# Smoothing model & caveat (read before integrating).
-# This is the standard discrete EMA (same form as Curve's price_oracle): it blends the
-# *current* raw price with the stored value at weight alpha = exp(-dt/EMA_TIME), where dt is
-# the time since the last price_w() checkpoint. It is symmetric (sharp moves in either
-# direction decay in over ~EMA_TIME) but it is NOT a true continuous EMA -- the smoothing
-# strength depends on dt, so consumers must checkpoint regularly (a lending market calls
-# price_w() on each borrow/liquidate, keeping dt small). After a long idle gap (dt >>
-# EMA_TIME), alpha -> 0: the FIRST interaction snaps to the current raw price (no smoothing)
-# and re-anchors, and only the SECOND interaction is smoothed again.
-# Idle-gap first-touch exposure differs by manipulation vector:
-#   - price divergence (price_oracle/price_scale): bounded -- the raw reads the cryptopool's
-#     own price_oracle EMA, so a flash spot move barely shifts it within a block;
-#   - fee/wash (virtual_price): not magnitude-bounded by this EMA in the gap, but unprofitable
-#     -- lifting virtual_price by a fraction costs that fraction of the WHOLE pool in fees
-#     while only the LT's slice feeds an over-borrow, so it loses money unless the LT is
-#     essentially the whole pool.
+# Honest virtual_price EMA (cryptopool / FastGauge style). The reported value blends the
+# PREVIOUSLY recorded vprice (vp_last, which survived into a later block) with the stored EMA,
+# NEVER the current-block virtual_price - so a vprice flash-inflated and reverted within one
+# block cannot move the price. dt is the time since the last price_w() checkpoint, so consumers
+# should checkpoint regularly (a lending market calls price_w() on each borrow/liquidate). The
+# price *frame* (price_oracle/price_scale) is read live but is itself the cryptopool's EMA.
 @internal
 @view
-def _ema(raw: uint256) -> uint256:
-    cached: uint256 = self.cached_price
-    if cached == 0:
-        return raw   # unseeded: first price_w() seeds the EMA
-    dt: uint256 = block.timestamp - self.cached_timestamp
-    alpha: uint256 = convert(math._wad_exp(-convert(dt * 10**18 // EMA_TIME, int256)), uint256)
-    return (raw * (10**18 - alpha) + cached * alpha) // 10**18
+def _vp_ema() -> uint256:
+    """The smoothed virtual_price from committed state (no current-block vprice read)."""
+    ema: uint256 = self.vp_ema
+    dt: uint256 = block.timestamp - self.vp_ema_ts
+    if dt == 0:
+        return ema
+    alpha: uint256 = convert(math._wad_exp(-convert(dt * 10**18 // self.ema_time, int256)), uint256)
+    return (self.vp_last * (10**18 - alpha) + ema * alpha) // 10**18
 
 
 @external
 @view
 def price() -> uint256:
     """
-    @notice EMA-smoothed ybLT price in the underlying asset (e.g. BTC), scaled to 1e18.
-    @dev View path: reads agg.price() without checkpointing. Smoothing weight depends on
-         the time since the last price_w() (see the EMA caveat above _ema).
+    @notice EMA-smoothed ybLT price - USD if in_usd else the underlying asset - scaled to 1e18.
+    @dev View path: reads agg.price() without checkpointing. The fee level uses the smoothed
+         virtual_price from committed state (flash-proof); the price frame is read live.
     @return Smoothed price scaled to 1e18
     """
-    agg_price: uint256 = staticcall (staticcall LT_TOKEN.agg()).price()
-    return self._ema(self._raw_price_in_asset(agg_price))
+    lt: LT = self.lt_token
+    pool: IFXSwap = staticcall lt.CRYPTOPOOL()
+    amm: LevAMM = staticcall lt.amm()
+    self._assert_not_reentrant(amm)
+    # Unseeded (before the first price_w()): fall back to the raw virtual_price.
+    vprice: uint256 = self._vp_ema() if self.vp_ema != 0 else staticcall pool.virtual_price()
+    agg_price: uint256 = staticcall (staticcall lt.agg()).price()
+    return self._price_with_vp(lt, pool, amm, agg_price, vprice)
 
 
 @external
 def price_w() -> uint256:
     """
-    @notice Checkpoint and return the EMA-smoothed ybLT/asset price.
-    @dev Advances both this EMA and the aggregator (agg.price_w()); consumers should call
-         it regularly so the smoothing weight stays meaningful (see the EMA caveat above _ema).
+    @notice Checkpoint and return the EMA-smoothed ybLT price (USD or asset per in_usd).
+    @dev Advances the virtual_price EMA using the PREVIOUS checkpoint's vprice, records the
+         current vprice for next time, and checkpoints the aggregator (agg.price_w()). The
+         returned price uses the advanced EMA, so this call is unaffected by a same-tx vprice
+         flash-manipulation. Consumers should call it regularly (see the EMA note above _vp_ema).
     @return Smoothed price scaled to 1e18
     """
-    agg: PriceOracle = staticcall LT_TOKEN.agg()
-    agg_price: uint256 = extcall agg.price_w()
-    ema: uint256 = self._ema(self._raw_price_in_asset(agg_price))
-    self.cached_price = ema
-    self.cached_timestamp = block.timestamp
-    return ema
+    lt: LT = self.lt_token
+    pool: IFXSwap = staticcall lt.CRYPTOPOOL()
+    amm: LevAMM = staticcall lt.amm()
+    self._assert_not_reentrant(amm)
+
+    vprice_now: uint256 = staticcall pool.virtual_price()
+    vp_used: uint256 = 0
+    if self.vp_ema == 0:
+        vp_used = vprice_now                      # seed the EMA at the first checkpoint
+        self.vp_ema = vprice_now
+    else:
+        vp_used = self._vp_ema()                  # advance using the OLD vp_last (committed)
+        self.vp_ema = vp_used
+    self.vp_ema_ts = block.timestamp
+    self.vp_last = vprice_now                      # record current vprice for the NEXT advance
+
+    agg_price: uint256 = extcall (staticcall lt.agg()).price_w()
+    return self._price_with_vp(lt, pool, amm, agg_price, vp_used)

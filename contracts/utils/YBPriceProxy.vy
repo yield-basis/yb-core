@@ -1,13 +1,13 @@
 # @version 0.4.3
 """
 @title YBPriceProxy
+@author Yield Basis
+@license GNU Affero General Public License v3.0
 @notice Thin per-market price() forwarder. Each EIP-1167 clone binds one LT and one
         denomination (USD or asset) and re-exposes YBLendingOracle's view as price().
 @dev Deployed once as the implementation; YBLendingOracle.create_oracles() clones it per
      market via create_minimal_proxy_to and calls initialize(). All math lives in the
      singleton oracle; a clone only holds (oracle, lt, in_usd) and staticcalls back.
-@author Yield Basis
-@license Copyright (c) 2025
 """
 
 interface YBLendingOracle:
