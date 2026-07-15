@@ -17,6 +17,7 @@ via the factory.
 import boa
 import os
 import json
+import warnings
 from time import sleep
 from eth_account import account
 from getpass import getpass
@@ -24,6 +25,10 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 from networks import NETWORK
+
+# Reading a clone via the impl ABI makes boa compare clone vs impl bytecode; harmless.
+warnings.filterwarnings("ignore", message="casted bytecode does not match compiled bytecode",
+                        category=UserWarning)
 from networks import ETHERSCAN_API_KEY
 
 
@@ -77,6 +82,7 @@ if __name__ == '__main__':
 
     factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
     ll = boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
+    lt_d = boa.load_partial('contracts/LT.vy')
 
     created = []
     for mid in MARKET_IDS:
@@ -87,6 +93,7 @@ if __name__ == '__main__':
         asset_o = ll.at(asset)
         usd_price = usd_o.price()
         asset_price = asset_o.price()
+        pps = lt_d.at(lt).pricePerShare()          # redemption coefficient (fair value/share)
         if FORK:
             # Clones must be wired correctly and creation is idempotent.
             assert usd_o.lt_token() == lt and asset_o.lt_token() == lt, f"market {mid} wrong LT"
@@ -96,7 +103,7 @@ if __name__ == '__main__':
             assert ll_factory.create_oracles(mid) == (usd, asset), f"market {mid} not idempotent"
             # price_w seeds the EMA; a constant settles to itself.
             assert usd_o.price_w() > 0 and asset_o.price_w() > 0, f"market {mid} zero price"
-        created.append((mid, lt, usd, asset, usd_price, asset_price))
+        created.append((mid, lt, usd, asset, usd_price, asset_price, pps))
         print(f"market {mid}: created EMA oracles")
 
     print("\n==================== deployment ====================")
@@ -107,8 +114,9 @@ if __name__ == '__main__':
     print(f"  dao                    : {ll_factory.dao()}")
     print(f"  default_ema_time       : {ll_factory.default_ema_time()} s")
     print("---------------- per-market EMA oracles ----------------")
-    for mid, lt, usd, asset, usd_price, asset_price in created:
+    for mid, lt, usd, asset, usd_price, asset_price, pps in created:
         print(f"market {mid}  LT {lt}")
-        print(f"    usd_oracle   : {usd}   price() = {usd_price/1e18:.2f}")
-        print(f"    asset_oracle : {asset}   price() = {asset_price/1e18:.4f}")
+        print(f"    usd_oracle    : {usd}   price() = {usd_price/1e18:.2f}")
+        print(f"    asset_oracle  : {asset}   price() = {asset_price/1e18:.4f}")
+        print(f"    pricePerShare : {pps/1e18:.6f}")
     print("====================================================")
