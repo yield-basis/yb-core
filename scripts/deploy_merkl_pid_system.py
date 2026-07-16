@@ -13,7 +13,9 @@ forward). Seed flow mirrors test_net_pressure_e2e.py::test_pid_reserve_seeded_fr
 Merkl wiring (set_merkl / create_campaign) is a later step; this only routes fees and seeds.
 
 Run modes:
-    FORK = True                  -> both parts on one fork via a temp JSON, then assert.
+    FORK = True,  STAGE="deploy" -> deploy + vote on one fork via a temp JSON, then assert.
+    FORK = True,  STAGE="vote"   -> fork at head, read DEPLOY_JSON and simulate the vote against
+                                    the already-deployed contracts, then assert (no deploy).
     FORK = False, STAGE="deploy" -> broadcast part 1, verify on Etherscan, write DEPLOY_JSON.
     FORK = False, STAGE="vote"   -> read DEPLOY_JSON, size the seed on a fork, create the proposal.
 
@@ -41,9 +43,9 @@ VOTING = os.path.join(HERE, "voting")                  # reuse the voting ABIs +
 
 
 # --- run mode ----------------------------------------------------------------
-FORK = False
-STAGE = "deploy"                 # non-fork only: run "deploy" then "vote"
-FORK_BLOCK = 25473385            # E2E_BLOCK from test_net_pressure_e2e.py (markets 0-2 have fees); prod uses head
+FORK = True
+STAGE = "vote"                 # non-fork only: run "deploy" then "vote"
+FORK_BLOCK = 25544842  # E2E_BLOCK from test_net_pressure_e2e.py (markets 0-2 have fees); prod uses head
 
 # --- fixed mainnet addresses -------------------------------------------------
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -339,6 +341,19 @@ def run_fork_e2e():
         simulate_vote(c, calls, seed)
 
 
+def run_fork_vote():
+    """Fork at head and simulate the vote against the ALREADY-DEPLOYED contracts (read from
+    DEPLOY_JSON) - no deploy. Enacts the vote as the DAO and asserts, like run_fork_e2e's tail."""
+    cfg = json.load(open(DEPLOY_JSON))
+    with boa.fork(NETWORK, block_identifier="latest"):
+        c = load_contracts(cfg)
+        assert c.factory_owner.ADMIN() == DAO, "expected the DAO to control the Factory owner proxy"
+        seed = simulate_seed(c)
+        calls = build_vote_calls(c, seed)
+        print_actions(calls)
+        simulate_vote(c, calls, seed)
+
+
 def run_prod_deploy():
     boa.set_network_env(NETWORK)
     boa.env.add_account(load_deployer())
@@ -364,7 +379,7 @@ def run_prod_vote():
 
 if __name__ == '__main__':
     if FORK:
-        run_fork_e2e()
+        run_fork_vote() if STAGE == "vote" else run_fork_e2e()
     elif STAGE == "deploy":
         run_prod_deploy()
     elif STAGE == "vote":
