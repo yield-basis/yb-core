@@ -138,6 +138,38 @@ def test_ll_flash_resistant(
     assert (y1 - y0) > 5 * abs(p1 - p0), "LL should be far less reactive than the reference"
 
 
+def test_ll_price_w_return_flash_resistant(
+    cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
+    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+):
+    """price_w() records the current vprice as vp_last BEFORE it prices, so it MUST price off the
+    smoothed (old) vp_ema it just computed - never the freshly-stored vp_last. A same-block
+    virtual_price pump that precedes price_w() must not move its RETURN value; the pump is only
+    recorded for the NEXT advance. Guards the save-before-price ordering in price_w()."""
+    _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
+    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
+    yb = lending_oracle
+
+    seeded = ll.price_w()                                # seed: vp_ema = vp_last = vp0
+    vp0 = cryptopool.virtual_price()
+    y0 = yb.price_in_asset(yb_lt.address)
+
+    # Same block (no time travel): pump virtual_price, THEN checkpoint.
+    _bump_vprice(cryptopool, collateral_token, stablecoin, accounts)
+    vp1 = cryptopool.virtual_price()
+    assert vp1 > vp0, "wash did not raise virtual_price"
+
+    ret = ll.price_w()                                  # stores vp_last = vp1, prices off old vp_ema
+    y1 = yb.price_in_asset(yb_lt.address)
+
+    assert y1 > y0, "reference did not react to the vprice pump"
+    assert ll.vp_last() == vp1, "pump not recorded as vp_last for the next advance"
+    assert ll.vp_ema() == vp0, "pump entered the EMA in the same checkpoint"
+    # The returned price must be flat (well within 0.1%) despite vp_last now holding the pump.
+    assert abs(ret - seeded) <= seeded // 1000, "price_w() return moved with the same-block pump"
+    assert (y1 - y0) > 5 * abs(ret - seeded), "price_w() should be far less reactive than the reference"
+
+
 def test_ll_usd_denomination(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,

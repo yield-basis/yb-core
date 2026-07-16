@@ -315,9 +315,9 @@ def _price_with_vp(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256, vpric
 # price *frame* (price_oracle/price_scale) is read live but is itself the cryptopool's EMA.
 @internal
 @view
-def _vp_ema() -> uint256:
-    """The smoothed virtual_price from committed state (no current-block vprice read)."""
-    ema: uint256 = self.vp_ema
+def _vp_ema(ema: uint256) -> uint256:
+    """The smoothed virtual_price from committed state (no current-block vprice read).
+    `ema` is the caller's already-read self.vp_ema (nonzero), passed in to save a re-read."""
     dt: uint256 = block.timestamp - self.vp_ema_ts
     if dt == 0:
         return ema
@@ -339,7 +339,8 @@ def price() -> uint256:
     amm: LevAMM = staticcall lt.amm()
     self._assert_not_reentrant(amm)
     # Unseeded (before the first price_w()): fall back to the raw virtual_price.
-    vprice: uint256 = self._vp_ema() if self.vp_ema != 0 else staticcall pool.virtual_price()
+    vp_ema: uint256 = self.vp_ema
+    vprice: uint256 = self._vp_ema(vp_ema) if vp_ema != 0 else staticcall pool.virtual_price()
     agg_price: uint256 = staticcall (staticcall lt.agg()).price()
     return self._price_with_vp(lt, pool, amm, agg_price, vprice)
 
@@ -360,15 +361,14 @@ def price_w() -> uint256:
     self._assert_not_reentrant(amm)
 
     vprice_now: uint256 = staticcall pool.virtual_price()
-    vp_used: uint256 = 0
-    if self.vp_ema == 0:
-        vp_used = vprice_now                      # seed the EMA at the first checkpoint
-        self.vp_ema = vprice_now
+    vp_ema: uint256 = self.vp_ema
+    if vp_ema == 0:
+        vp_ema = vprice_now                       # seed the EMA at the first checkpoint
     else:
-        vp_used = self._vp_ema()                  # advance using the OLD vp_last (committed)
-        self.vp_ema = vp_used
+        vp_ema = self._vp_ema(vp_ema)             # advance using the OLD vp_last (committed)
+    self.vp_ema = vp_ema
     self.vp_ema_ts = block.timestamp
     self.vp_last = vprice_now                      # record current vprice for the NEXT advance
 
     agg_price: uint256 = extcall (staticcall lt.agg()).price_w()
-    return self._price_with_vp(lt, pool, amm, agg_price, vp_used)
+    return self._price_with_vp(lt, pool, amm, agg_price, vp_ema)
