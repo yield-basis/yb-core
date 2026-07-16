@@ -25,12 +25,11 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 from networks import NETWORK
+from networks import ETHERSCAN_API_KEY
 
 # Reading a clone via the impl ABI makes boa compare clone vs impl bytecode; harmless.
 warnings.filterwarnings("ignore", message="casted bytecode does not match compiled bytecode",
                         category=UserWarning)
-from networks import ETHERSCAN_API_KEY
-
 
 FORK = False
 EXTRA_TIMEOUT = 10

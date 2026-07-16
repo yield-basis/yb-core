@@ -23,3 +23,33 @@ market 10  LT 0x2B9c9f3BdcEb5d8E36a4704F08a78Fca53343cEa
     asset_oracle : 0x056f706d81Ee801DB2611c719861eBfe70c80147   price() = 1.0130
 ====================================================
 ```
+
+## LlamaLend variant where virtual_price is EMA-smoothened
+
+```
+==================== deployment ====================
+YBLendingOracleLL impl   : 0x90E6F03E7F64dCba91A649C3AA170517d9efCA46
+YBLendingOracleLLFactory : 0xFC04D5958050b8355Ad6E8DDBB6099409c44c21a
+  FACTORY                : 0x370a449FeBb9411c95bf897021377fe0B7D100c0
+  LL_IMPL                : 0x90E6F03E7F64dCba91A649C3AA170517d9efCA46
+  dao                    : 0x42F2A41A0D0e65A440813190880c8a65124895Fa
+  default_ema_time       : 866 s
+---------------- per-market EMA oracles ----------------
+market 7  LT 0x651D4b8168488FA163D85304662E8278d4c55BAa
+    usd_oracle    : 0xe196992a4163f702b85BBEA2F8031c773f5d893c   price() = 65219.38
+    asset_oracle  : 0xf51982c7BF9C0d908692d1bB3a5627C917D6a4E2   price() = 1.0075
+    pricePerShare : 1.007508
+market 8  LT 0x722FC3640BA007C3E9867CCdB0dCa59F2e2F29F9
+    usd_oracle    : 0x42bF7C518b74417D7A4251BE6C91bC9a0FBe94B5   price() = 65096.66
+    asset_oracle  : 0x5933e970A4FD346b195797b669950978cCeaa093   price() = 1.0054
+    pricePerShare : 1.005456
+market 9  LT 0x771F7290428d830ECd41E980745c327e507823Ec
+    usd_oracle    : 0xB148f19b5b522Cd3D54a199a93d307F3c79AA8Bc   price() = 64945.55
+    asset_oracle  : 0xaAF4D3AE1aDC9D4b7b1c87d3129355d37F59d32c   price() = 1.0052
+    pricePerShare : 1.005223
+market 10  LT 0x2B9c9f3BdcEb5d8E36a4704F08a78Fca53343cEa
+    usd_oracle    : 0xD2d878499d3640a43366d384b6B98951F7c1021B   price() = 1918.56
+    asset_oracle  : 0x07b173E54dF168AB2450B72FFb09aaA1E086357e   price() = 1.0134
+    pricePerShare : 1.013518
+====================================================
+```
