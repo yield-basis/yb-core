@@ -43,7 +43,7 @@ VOTING = os.path.join(HERE, "voting")                  # reuse the voting ABIs +
 
 
 # --- run mode ----------------------------------------------------------------
-FORK = True
+FORK = False
 STAGE = "vote"                 # non-fork only: run "deploy" then "vote"
 FORK_BLOCK = 25544842  # E2E_BLOCK from test_net_pressure_e2e.py (markets 0-2 have fees); prod uses head
 
@@ -314,7 +314,7 @@ def create_proposal(c, calls):
     metadata = pin_to_ipfs({
         "title": "Enable net-pressure Merkl incentives",
         "summary": "Install the FeeSplitter as the Factory fee_receiver (connecting the "
-                   "MerklPIDDriver) and seed the driver's crvUSD reserve from the deprecated "
+                   "MerklPIDDriver) and seed the driver's crvUSD reserve from admin fees in the deprecated "
                    "markets 0-2 (recover their LT fees and convert via LTSwapZap).",
         "resources": []})
     proposal_id = voting.createProposal(*Proposal(
