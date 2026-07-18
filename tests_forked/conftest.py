@@ -153,7 +153,11 @@ def setup_approvals(vault, funded_account, wbtc, weth, crvusd):
 
 @pytest.fixture(scope="module")
 def lending_oracle(forked_env):
-    return boa.load("contracts/utils/YBLendingOracle.vy")
+    # YBLendingOracle is now the singleton behind per-market YBPriceProxy clones, so its
+    # constructor takes (factory, proxy_impl). price_in_asset/usd don't touch either, but the
+    # deploy still needs them non-zero.
+    proxy_impl = boa.load("contracts/utils/YBPriceProxy.vy")
+    return boa.load("contracts/utils/YBLendingOracle.vy", FACTORY_ADDRESS, proxy_impl.address)
 
 
 @pytest.fixture(scope="module")
