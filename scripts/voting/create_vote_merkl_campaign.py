@@ -130,7 +130,7 @@ def fetch_campaign_data(cfg, driver, wrapper, sink, amount, start, duration):
     args = p0["args"]
     assert int(args["startTimestamp"]) == start and int(args["duration"]) == duration, args
     assert args["creator"].lower() == driver.lower() and args["rewardToken"].lower() == wrapper.lower(), args
-    return bytes.fromhex(args["campaignData"][2:])
+    return bytes.fromhex(args["campaignData"].removeprefix("0x"))
 
 
 if __name__ == '__main__':
