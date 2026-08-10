@@ -42,7 +42,7 @@ from boa.explorer import Etherscan
 from boa.verifiers import verify as boa_verify
 
 
-FORK = True
+FORK = False
 EXTRA_TIMEOUT = 10
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -139,7 +139,7 @@ if __name__ == '__main__':
         boa.env.eoa = USER
     else:
         boa.set_network_env(NETWORK)
-        USER = account_load('yb-deployer')
+        USER = account_load('yb-deployer-2')
         boa.env.add_account(USER)
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
 
@@ -185,11 +185,12 @@ if __name__ == '__main__':
     if not FORK:
         proposal_id = voting.createProposal(*Proposal(
             metadata=pin_to_ipfs({
-                'title': 'Launch Merkl PID dynamic crvUSD incentives (start now, 1 year)',
+                'title': 'Launch Merkl PID dynamic crvUSD incentives (start now, up to 1 year)',
                 'summary': 'Wire the MerklPIDDriver to Merkl (set_merkl + accept_conditions) and open a 1-year dynamic '
                            'FIX_APR crvUSD campaign on the YB sink pool, driven by the on-chain net-pressure PID. Reward '
                            'token is the whitelisted crvUSD PullTokenWrapper; crvUSD leaves the driver reserve only as '
-                           'users claim, so the 1B wrapper cap is a ceiling, not a lockup. Starts the moment this executes.',
+                           'users claim, so the 1B wrapper cap is a ceiling, not a lockup. Starts the moment this executes.'
+                           'The campaign can be modified or stopped at any time.',
                 'resources': []}).encode(),
             actions=actions,
             allowFailureMap=0,
