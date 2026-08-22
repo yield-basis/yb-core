@@ -44,7 +44,7 @@ MARKET_SYMBOLS = ['yb-cbBTC', 'yb-tBTC']
 RATE = int(2 * 0.0132 * 10**18) // (365 * 86400)    # 2 * 1.32% per year on crvUSD
 FEE = int(0.0182 * 10**18)                          # 1.82%
 
-FORK = True
+FORK = False
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 VOTING_PLUGIN = "0x2be6670DE1cCEC715bDBBa2e3A6C1A05E496ec78"
