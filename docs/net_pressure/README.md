@@ -90,6 +90,14 @@ Every quantity the controller consumes is measured at the pool's `price_oracle`
   withdrawal stays within ~2.7% of the `price_oracle` fair value, tracking the
   cryptopool's dynamic fee, so `1.5× pool.fee()` covers it with margin (and reverts —
   retry later — only under extreme transient volatility/manipulation).
+  **Decimal fix (2026-09):** `min_dy` was built from `asset_out` in the asset's own
+  decimals against the 18-decimal `price_oracle`, so on the 8-decimal markets (WBTC,
+  cbBTC) it came out `10**(18-decimals)` too small — no swap floor at all. The withdraw
+  floor is not a substitute: dumping the asset into the pool *raises* `asset_out`, so
+  `min_assets` only gets looser as the manipulation grows. Fixed here in `LTSwapZap.vy`,
+  `MerklPIDDriver.vy` and `PID.vy`; the **deployed** driver (`0x5b13273F…`) still runs
+  the pre-fix code deliberately and ships the fix on its next redeploy — see the
+  `git log` entry for the sizing and the Merkl migration cost that decision rests on.
 
 ## Control loop (PID)
 

@@ -133,7 +133,7 @@ def convert(lt_addr: address) -> uint256:
 
     # 2) Swap asset -> crvUSD, bounded by the EMA price minus the same discount. Swallow a
     #    slippage revert (min_dy not met): hand the withdrawn asset to the caller and return 0.
-    min_dy: uint256 = asset_out * p_o // PRECISION * (PRECISION - discount) // PRECISION
+    min_dy: uint256 = asset_out * precision1 * p_o // PRECISION * (PRECISION - discount) // PRECISION
     self._ensure_pool_approval(pool, asset)
     success: bool = False
     response: Bytes[32] = b""

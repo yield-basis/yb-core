@@ -340,7 +340,7 @@ def _convert_fees(agg_price: uint256):
         #    a pool that can't meet min_dy (EMA gap wider than the discount) is skipped instead of
         #    reverting the trigger, so one stuck pool can't block the rest. The withdrawn asset then
         #    stays in the reserve (recoverable) until it can be converted.
-        min_dy: uint256 = asset_out * p_o // PRECISION * (PRECISION - discount) // PRECISION
+        min_dy: uint256 = asset_out * precision1 * p_o // PRECISION * (PRECISION - discount) // PRECISION
         self._ensure_pool_approval(pool, asset)
         swapped: bool = raw_call(
             pool.address,

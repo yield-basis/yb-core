@@ -80,34 +80,30 @@ def test_zap_converts_to_caller():
 
 
 def test_zap_returns_asset_when_swap_cannot_meet_min():
-    """At 0.5x the thin yb-tBTC pool can't meet its swap min_dy: the exchange error is swallowed
-    and the withdrawn pool asset is handed to the caller (convert returns 0), while the deeper
-    pools still convert to crvUSD. The zap keeps neither shares, asset, nor crvUSD."""
+    """At 0.5x the discount (half of the pools' 1% fee) is narrower than the fee the swap itself
+    pays, so no pool can meet its min_dy: every exchange error is swallowed and the withdrawn pool
+    asset is handed to the caller (convert returns 0). The zap keeps neither shares, asset, nor
+    crvUSD. This is also the decimal regression guard - with min_dy missing the 10**(18-decimals)
+    rescale, the 8-decimal markets (WBTC, cbBTC) had an effectively-zero floor and converted here
+    instead of swallowing."""
     dao = boa.env.generate_address()
     crvusd = _at(CRVUSD)
 
     zap, lts, _ = _setup(5 * 10**17, dao)              # 0.5x
-    swallowed = converted = 0
     for lt in lts:
         asset = _at(_at(lt).CRYPTOPOOL()).coins(1)
         dao_asset_before = _at(asset).balanceOf(dao)
         crv_before = crvusd.balanceOf(dao)
         with boa.env.prank(dao):
             out = zap.convert(lt)
-        if out == 0:
-            swallowed += 1
-            # swap swallowed: the withdrawn asset came back to the caller, and no crvUSD.
-            assert _at(asset).balanceOf(dao) - dao_asset_before > 0, "asset not returned to caller"
-            assert crvusd.balanceOf(dao) == crv_before, "caller got crvUSD despite a swallowed swap"
-        else:
-            converted += 1
-            assert crvusd.balanceOf(dao) - crv_before == out, "crvUSD not delivered to caller"
+        # swap swallowed: the withdrawn asset came back to the caller, and no crvUSD.
+        assert out == 0, f"{lt}: swap met a floor it should not have (min_dy not decimal-correct?)"
+        assert _at(asset).balanceOf(dao) - dao_asset_before > 0, "asset not returned to caller"
+        assert crvusd.balanceOf(dao) == crv_before, "caller got crvUSD despite a swallowed swap"
         # The zap holds nothing after each call.
         assert _at(lt).balanceOf(zap.address) == 0
         assert _at(asset).balanceOf(zap.address) == 0
         assert crvusd.balanceOf(zap.address) == 0
-
-    assert swallowed >= 1 and converted >= 1, f"expected a mix; {converted} converted, {swallowed} swallowed"
 
 
 def test_zap_withdraw_floor_reverts_keeping_caller_shares():
