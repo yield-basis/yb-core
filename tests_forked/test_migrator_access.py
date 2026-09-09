@@ -33,6 +33,7 @@ LT_FROM = "0xfBF3C16676055776Ab9B286492D8f13e30e2E763"
 LT_TO = "0x651D4b8168488FA163D85304662E8278d4c55BAa"
 USER = "0xD24C29f58fA7F57fb70EBb059B1ffd795E23800e"
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
+CRVUSD = "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
 
 STALE_OWNER = "0x0f4e1a1BcDe549653E9302Ba1cAaB403373f1048"  # old migrator's owner
 CURRENT_OWNER = "0xb8BA33CD1Ccb091a8468572950bD3669723FA5C6"  # live Factory.admin()
@@ -150,3 +151,122 @@ def test_new_migrator_succeeds(owner, migrator_deployer, lt_deployer):
     assert lt_from.balanceOf(USER) == 0
     assert minted > 0
     print("preview:", preview, "minted:", minted)
+
+
+# --- same-LT migration guard ------------------------------------------------
+#
+# Reported separately: _migrate_plain never required lt_from != lt_to. With the
+# two aliased, the lt_from deallocation (LTMigrator.vy, the disabled_lts branch)
+# is read back as lt_to's "previous" allocation and restored as such at the end,
+# so a dust migration permanently cuts a LIVE market's crvUSD allocation down to
+# HybridFactoryOwner's 95%-of-collateral bound -- which also pulls that crvUSD
+# out of the market's AMM, since LT.allocate_stablecoins() transfers the
+# difference back to the Factory. LT.deposit() then fails its
+# `amm.max_debt() // 2 >= v.value` cap check ("Debt too high") until the DAO
+# re-allocates, and the attack is repeatable.
+#
+# LIVE_LT is market 7 (yb-WBTC, == LT_TO above), live and not disabled at
+# FORK_BLOCK. DEPRECATED_LT is market 3, the DAO-disabled source LT_FROM
+# migrates from -- the ordinary forward migration, which must keep working.
+
+LIVE_LT = LT_TO            # market 7 (yb-WBTC): disabled_lts == False
+DEPRECATED_LT = LT_FROM    # market 3 (yb-WBTC v2): disabled_lts == True
+DUST = 10**14              # 0.0001 LT is enough; the cut does not scale with size
+
+
+GAUGE_ABI = """[
+ {"name":"deposit","outputs":[{"type":"uint256"}],"inputs":[{"type":"uint256","name":"assets"},{"type":"address","name":"receiver"}],"stateMutability":"nonpayable","type":"function"},
+ {"name":"approve","outputs":[{"type":"bool"}],"inputs":[{"type":"address","name":"s"},{"type":"uint256","name":"v"}],"stateMutability":"nonpayable","type":"function"},
+ {"name":"balanceOf","outputs":[{"type":"uint256"}],"inputs":[{"type":"address","name":"a"}],"stateMutability":"view","type":"function"}
+]"""
+
+
+def _fund(lt, to, amount):
+    """Source shares from the LT's gauge -- independent of any other test's state."""
+    with boa.env.prank(lt.staker()):
+        lt.transfer(to, amount)
+
+
+def _stake(lt, user, amount):
+    """Stake `amount` of already-held LT into its gauge; returns the gauge shares."""
+    gauge = boa.loads_abi(GAUGE_ABI).at(lt.staker())
+    with boa.env.prank(user):
+        lt.approve(gauge.address, 2**256 - 1)
+        return gauge.deposit(amount, user)
+
+
+@pytest.fixture(scope="module")
+def fixed_migrator(owner):
+    """The patched migrator, registered as a limit setter the way the vote will."""
+    migrator = boa.load("contracts/LTMigrator.vy", CRVUSD, owner.address)
+    with boa.env.prank(owner.ADMIN()):
+        owner.set_limit_setter(migrator.address, True)
+    return migrator
+
+
+def test_deployed_migrator_allows_same_lt_migration(migrator_deployer, lt_deployer):
+    """Documents the defect in the DEPLOYED migrator, so the guard below has teeth."""
+    deployed = migrator_deployer.at(NEW_MIGRATOR)
+    lt = lt_deployer.at(LIVE_LT)
+    attacker = boa.env.generate_address()
+    _fund(lt, attacker, DUST)
+
+    before = lt.stablecoin_allocation()
+    with boa.env.prank(attacker):
+        lt.approve(NEW_MIGRATOR, 2**256 - 1)
+        deployed.migrate_plain(LIVE_LT, LIVE_LT, DUST, 0)   # same LT both sides
+
+    assert lt.stablecoin_allocation() < before, "expected the aliased restore to cut the allocation"
+
+
+def test_fixed_migrator_rejects_same_lt(fixed_migrator, lt_deployer):
+    """The guard refuses before any external call, so no allocation is touched."""
+    lt = lt_deployer.at(LIVE_LT)
+    attacker = boa.env.generate_address()
+    _fund(lt, attacker, DUST)
+
+    # migrate_staked redeems from the gauge before reaching the guard, so give the
+    # attacker real gauge shares -- otherwise it would revert for the wrong reason.
+    gauge_shares = _stake(lt, attacker, DUST // 2)
+
+    before = lt.stablecoin_allocation()
+    gauge = boa.loads_abi(GAUGE_ABI).at(lt.staker())
+    with boa.env.prank(attacker):
+        lt.approve(fixed_migrator.address, 2**256 - 1)
+        gauge.approve(fixed_migrator.address, 2**256 - 1)   # migrate_staked redeems as owner
+        with boa.reverts("same LT"):
+            fixed_migrator.migrate_plain(LIVE_LT, LIVE_LT, DUST // 2, 0)
+        with boa.reverts("same LT"):
+            fixed_migrator.migrate_staked(LIVE_LT, LIVE_LT, gauge_shares, 0)
+    assert lt.stablecoin_allocation() == before, "allocation moved despite the guard"
+
+
+def test_fixed_migrator_previews_reject_same_lt(fixed_migrator):
+    """The views mirror the guard so the UI fails early instead of at send time."""
+    with boa.reverts("same LT"):
+        fixed_migrator.preview_migrate_plain(LIVE_LT, LIVE_LT, DUST)
+    with boa.reverts("same LT"):
+        fixed_migrator.preview_migrate_staked(LIVE_LT, LIVE_LT, DUST)
+
+
+def test_fixed_migrator_still_migrates_forward(fixed_migrator, lt_deployer):
+    """The ordinary deprecated -> live migration is unaffected, and neither
+    market's allocation is left changed by it."""
+    lt_from = lt_deployer.at(DEPRECATED_LT)
+    lt_to = lt_deployer.at(LIVE_LT)
+    user = boa.env.generate_address()
+    _fund(lt_from, user, DUST)
+
+    from_alloc, to_alloc = lt_from.stablecoin_allocation(), lt_to.stablecoin_allocation()
+    assert fixed_migrator.preview_migrate_plain(DEPRECATED_LT, LIVE_LT, DUST) > 0
+    with boa.env.prank(user):
+        lt_from.approve(fixed_migrator.address, 2**256 - 1)
+        fixed_migrator.migrate_plain(DEPRECATED_LT, LIVE_LT, DUST, 0)
+
+    assert lt_to.balanceOf(user) > 0, "migration produced no destination shares"
+    # The destination must come back to exactly where it started -- that is the
+    # invariant the aliasing bug broke.
+    assert lt_to.stablecoin_allocation() == to_alloc, "destination allocation not restored"
+    # The DAO-disabled source is deliberately harvested down to its safe bound by the
+    # limit=0 deallocation, so it may only ever fall, never rise.
+    assert lt_from.stablecoin_allocation() <= from_alloc, "source allocation rose"

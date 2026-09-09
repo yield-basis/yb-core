@@ -87,6 +87,7 @@ def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coef
     # The second check guards against the soft-deprecated case: a previous
     # _migrate_plain may have left this LT at the sentinel allocation=1
     # (see the lt_from deallocation step below) without setting disabled_lts.
+    assert lt_from.address != lt_to.address, "same LT"
     assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
     assert (staticcall lt_to.stablecoin_allocation()) > 1, "lt_to deprecated"
 
@@ -149,6 +150,7 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     # DAO has deprecated (disabled_lts is the same flag the factory owner
     # uses to gate non-admin deallocation calls). The allocation>1 check
     # also rejects soft-deprecated markets — see _preview_migrate_plain.
+    assert lt_from.address != lt_to.address, "same LT"
     assert staticcall FACTORY_OWNER.lt_in_factory(lt_from)
     assert staticcall FACTORY_OWNER.lt_in_factory(lt_to)
     assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
@@ -185,6 +187,9 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     additional_crvusd: uint256 = 0
     pool_value, additional_crvusd = self._required_crvusd_for(lt_to, staticcall lt_to.amm(), assets, debt)
 
+    # Save previous allocation
+    previous_allocation: uint256 = staticcall lt_to.stablecoin_allocation()
+
     # Now we freed up some stablecoins in the AMM. The natural path is the
     # public limit=0 deallocator, which only HFO accepts while
     # disabled_lts[lt_from] is still True. But anyone holding lt_from in a
@@ -199,8 +204,7 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     else:
         extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_from, 1)
 
-    # Save previous allocation and allocate more
-    previous_allocation: uint256 = staticcall lt_to.stablecoin_allocation()
+    # Allocate more
     extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_to, max((pool_value + additional_crvusd) * 22 // 10, previous_allocation))
 
     debt = debt * debt_coefficient // 10**18
