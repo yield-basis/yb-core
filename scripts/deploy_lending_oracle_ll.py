@@ -48,7 +48,7 @@ SEED_WAIT = 15                                           # seconds between retri
 # died mid-way (e.g. a flaky-RPC crash) without deploying another throwaway factory. "" = deploy.
 # 0x3e6B4795bd173Dd5c700cA8Cfd3f247BFcDC9D43 is the pre-#002 factory (separate USD/asset EMAs),
 # superseded by the shared-EMA version: redeploy fresh.
-EXISTING_FACTORY = ""
+EXISTING_FACTORY = "0x150dD481D306A3a8577cfc8fAC195720AA3Ee7Bc"   # shared-EMA deploy; resume ENS
 
 # --- ENS (optional) ----------------------------------------------------------
 # When SET_ENS, after deploying + seeding the oracles, (re)write the oracles-ll.yieldbasis.eth
@@ -249,6 +249,8 @@ if __name__ == '__main__':
         boa.env.eoa = DEPLOYER
     else:
         boa.set_network_env(NETWORK)
+        # A tx priced near the base fee can take > boa's default 240s to land; don't abort mid-run.
+        boa.env.tx_settings.poll_timeout = 900
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
         admin = account_load('yb-deployer')
         boa.env.add_account(admin)
