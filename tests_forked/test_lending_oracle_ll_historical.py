@@ -12,6 +12,7 @@ fresh LL + the reference YBLendingOracle, and check:
                      (unseeded) LL prices off the raw fundamental * live shift, i.e. the
                      resistant reference price by construction; this pins the decomposition
                      against real (pool, AMM, agg) states incl. the deeply divergent ones.
+                     Likewise LL.price_usd() == YBLendingOracle.price_in_usd(lt).
   2. vs redemption - LL.price() within 1% of lt.preview_withdraw(1e18) (the redemption
                      coefficient). The oracle marks at price_oracle while redemption is the live
                      withdraw, so they part in the divergent regions but stay close.
@@ -99,10 +100,11 @@ def test_ll_matches_reference_and_redemption(deployers, block, approx_div_pct):
         proxy = deployers["proxy"].deploy()
         ref = deployers["ref"].deploy(FACTORY, proxy.address)
         ll = deployers["ll"].deploy()
-        ll.initialize(lt_addr, False, EMA_TIME, FACTORY)
+        ll.initialize(lt_addr, EMA_TIME, FACTORY)
 
         ll_price = ll.price()
         ref_price = ref.price_in_asset(lt_addr)
+        twin_usd = _rel(ll.price_usd(), ref.price_in_usd(lt_addr))
         redeem = lt.preview_withdraw(10**18) * 10 ** (18 - decimals)
 
         twin = _rel(ll_price, ref_price)
@@ -112,5 +114,6 @@ def test_ll_matches_reference_and_redemption(deployers, block, approx_div_pct):
 
         assert twin <= TWIN_TOL, \
             f"blk {block}: LL {ll_price} vs ref {ref_price} twin {twin:.2e} (div {div * 100:.3f}%)"
+        assert twin_usd <= TWIN_TOL, f"blk {block}: LL usd vs ref twin {twin_usd:.2e} (div {div * 100:.3f}%)"
         assert redeem_diff <= REDEEM_TOL, \
             f"blk {block}: LL {ll_price} vs redemption {redeem} {redeem_diff:.2%} (div {div * 100:.3f}%)"

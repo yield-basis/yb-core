@@ -3,9 +3,10 @@
 @title YBLendingOracleLLFactory
 @author Yield Basis
 @license GNU Affero General Public License v3.0
-@notice Deploys per-market YBLendingOracleLL clones (a USD one and an asset one) and lets the
-        DAO (set at deploy, transferable via set_dao) retune any clone's EMA time. create_oracles
-        is permissionless; the LT is resolved from the YB Factory market id.
+@notice Deploys per market a YBLendingOracleLL clone (asset-denominated, owns the EMA) plus a
+        YBLendingOracleLLUSD forwarder to it (USD-denominated, same EMA), and lets the DAO (set
+        at deploy, transferable via set_dao) retune a market's EMA time. create_oracles is
+        permissionless; the LT is resolved from the YB Factory market id.
 """
 
 interface Factory:
@@ -13,7 +14,7 @@ interface Factory:
     def market_count() -> uint256: view
 
 interface LendingOracleLL:
-    def initialize(lt: address, in_usd: bool, ema_time: uint256, factory: address): nonpayable
+    def initialize(lt: address, ema_time: uint256, factory: address): nonpayable
     def set_ema_time(ema_time: uint256): nonpayable
 
 
@@ -38,6 +39,7 @@ event SetDefaultEmaTime:
     ema_time: uint256
 
 event SetEmaTime:
+    market_id: indexed(uint256)
     oracle: indexed(address)
     ema_time: uint256
 
@@ -50,29 +52,33 @@ MAX_EMA_TIME: constant(uint256) = 10**9
 
 FACTORY: public(immutable(Factory))       # YB Factory: market-id -> LT
 LL_IMPL: public(immutable(address))       # YBLendingOracleLL implementation cloned per market
+USD_BLUEPRINT: public(immutable(address)) # YBLendingOracleLLUSD blueprint deployed per market
 
 dao: public(address)                      # may retune ema_time; the YB Factory admin (DAO)
 default_ema_time: public(uint256)         # EMA time (s) stamped on newly created clones
 
-# market_id -> spawned EMA oracle clone (0 until created)
+# market_id -> spawned oracle (0 until created). asset_oracle is the YBLendingOracleLL clone
+# holding the EMA; usd_oracle is the YBLendingOracleLLUSD forwarder to it.
 usd_oracle: public(HashMap[uint256, address])
 asset_oracle: public(HashMap[uint256, address])
 
 
 @deploy
-def __init__(factory: Factory, ll_impl: address, default_ema_time: uint256, dao: address):
+def __init__(factory: Factory, ll_impl: address, usd_blueprint: address, default_ema_time: uint256, dao: address):
     """
-    @notice Bind the factory to the YB factory, the YBLendingOracleLL implementation and the DAO.
+    @notice Bind the factory to the YB factory, the oracle implementations and the DAO.
     @param factory YB factory, used to resolve market-id -> LT
-    @param ll_impl YBLendingOracleLL implementation cloned per (market, denomination)
+    @param ll_impl YBLendingOracleLL implementation cloned per market
+    @param usd_blueprint YBLendingOracleLLUSD blueprint (EIP-5202) deployed per market
     @param default_ema_time EMA time constant (s) stamped on new clones (0 < t <= MAX_EMA_TIME)
     @param dao Address allowed to retune ema_time (the YB Factory admin); transferable via set_dao
     """
     assert factory.address != empty(address) and ll_impl != empty(address), "Zero"
-    assert dao != empty(address), "Zero"
+    assert usd_blueprint != empty(address) and dao != empty(address), "Zero"
     assert default_ema_time > 0 and default_ema_time <= MAX_EMA_TIME, "ema_time"
     FACTORY = factory
     LL_IMPL = ll_impl
+    USD_BLUEPRINT = usd_blueprint
     self.dao = dao
     self.default_ema_time = default_ema_time
 
@@ -80,11 +86,11 @@ def __init__(factory: Factory, ll_impl: address, default_ema_time: uint256, dao:
 @external
 def create_oracles(market_id: uint256) -> (address, address):
     """
-    @notice Spawn the USD + asset EMA oracle clones for a YB Factory market. Callable by
-            anyone; the LT is resolved (and existence checked) via the market id. Idempotent:
-            returns the existing pair if already created.
+    @notice Spawn the USD + asset EMA oracles for a YB Factory market. Callable by anyone; the
+            LT is resolved (and existence checked) via the market id. Idempotent: returns the
+            existing pair if already created.
     @param market_id Index of the market in the YB factory
-    @return (usd_oracle, asset_oracle) clone addresses
+    @return (usd_oracle, asset_oracle) addresses
     """
     usd: address = self.usd_oracle[market_id]
     if usd != empty(address):
@@ -95,10 +101,9 @@ def create_oracles(market_id: uint256) -> (address, address):
     assert lt != empty(address), "No market"
 
     ema_time: uint256 = self.default_ema_time
-    usd = create_minimal_proxy_to(LL_IMPL)
     asset: address = create_minimal_proxy_to(LL_IMPL)
-    extcall LendingOracleLL(usd).initialize(lt, True, ema_time, self)
-    extcall LendingOracleLL(asset).initialize(lt, False, ema_time, self)
+    extcall LendingOracleLL(asset).initialize(lt, ema_time, self)
+    usd = create_from_blueprint(USD_BLUEPRINT, asset)
 
     self.usd_oracle[market_id] = usd
     self.asset_oracle[market_id] = asset
@@ -107,31 +112,18 @@ def create_oracles(market_id: uint256) -> (address, address):
 
 
 @external
-def set_ema_time(oracle: address, ema_time: uint256):
+def set_ema_time(market_id: uint256, ema_time: uint256):
     """
-    @notice Retune the EMA time of a single clone. YB Factory admin (DAO) only.
-    @param oracle A YBLendingOracleLL clone created by this factory
+    @notice Retune the EMA time of a market's oracle - shared by its USD and asset prices.
+            YB Factory admin (DAO) only.
+    @param market_id Index of the market whose oracle to retune
     @param ema_time New EMA time constant in seconds (0 < t <= MAX_EMA_TIME)
     """
     assert msg.sender == self.dao, "Not DAO"
+    oracle: address = self.asset_oracle[market_id]
+    assert oracle != empty(address), "No oracles"
     extcall LendingOracleLL(oracle).set_ema_time(ema_time)
-    log SetEmaTime(oracle=oracle, ema_time=ema_time)
-
-
-@external
-def set_ema_time_market(market_id: uint256, ema_time: uint256):
-    """
-    @notice Retune the EMA time of BOTH clones (USD + asset) of a market. DAO only.
-    @param market_id Index of the market whose oracle pair to retune
-    @param ema_time New EMA time constant in seconds (0 < t <= MAX_EMA_TIME)
-    """
-    assert msg.sender == self.dao, "Not DAO"
-    usd: address = self.usd_oracle[market_id]
-    assert usd != empty(address), "No oracles"
-    extcall LendingOracleLL(usd).set_ema_time(ema_time)
-    extcall LendingOracleLL(self.asset_oracle[market_id]).set_ema_time(ema_time)
-    log SetEmaTime(oracle=usd, ema_time=ema_time)
-    log SetEmaTime(oracle=self.asset_oracle[market_id], ema_time=ema_time)
+    log SetEmaTime(market_id=market_id, oracle=oracle, ema_time=ema_time)
 
 
 @external

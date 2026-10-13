@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Deploy the YBLendingOracleLL implementation + YBLendingOracleLLFactory, then spawn the
-per-market EMA-smoothed price oracles (USD + asset) for each market in MARKET_IDS.
+Deploy the YBLendingOracleLL implementation + YBLendingOracleLLUSD blueprint +
+YBLendingOracleLLFactory, then spawn the per-market EMA-smoothed price oracles (USD + asset) for
+each market in MARKET_IDS.
 
-The implementation is deployed first (no constructor args) and passed into the factory, which
-clones it per (market, denomination) via create_oracles(market_id). Each clone is an
-EIP-1167 proxy holding its own (LT, in_usd, ema_time) + virtual_price EMA state. The EMA is
-unseeded until the first price_w(); the YB Factory admin (DAO) can retune any clone's ema_time
-via the factory.
+The implementation (no constructor args) and the blueprint are deployed first and passed into the
+factory. Per market, create_oracles(market_id) clones the implementation as the asset oracle - an
+EIP-1167 proxy holding (LT, ema_time) and the market's ONE fundamental EMA - and deploys a
+YBLendingOracleLLUSD forwarder onto it from the blueprint, so USD and asset checkpoints advance
+the same EMA. The EMA is unseeded until the first price_w() (via either side); the YB Factory
+admin (DAO) can retune a market's ema_time via the factory.
 
     FORK = True   -> deploy on a fork, create the oracles and sanity-check price() / price_w().
     FORK = False  -> broadcast on mainnet, verify impl + factory on Etherscan, create oracles.
@@ -44,7 +46,9 @@ SEED_WAIT = 15                                           # seconds between retri
 # Set to an already-deployed YBLendingOracleLLFactory to RESUME against it (skip deploying a new
 # impl+factory): re-runs create_oracles (idempotent) + seeding + ENS. Use to finish a run that
 # died mid-way (e.g. a flaky-RPC crash) without deploying another throwaway factory. "" = deploy.
-EXISTING_FACTORY = "0x3e6B4795bd173Dd5c700cA8Cfd3f247BFcDC9D43"
+# 0x3e6B4795bd173Dd5c700cA8Cfd3f247BFcDC9D43 is the pre-#002 factory (separate USD/asset EMAs),
+# superseded by the shared-EMA version: redeploy fresh.
+EXISTING_FACTORY = ""
 
 # --- ENS (optional) ----------------------------------------------------------
 # When SET_ENS, after deploying + seeding the oracles, (re)write the oracles-ll.yieldbasis.eth
@@ -141,24 +145,30 @@ def validate_existing():
     of problem strings (empty == safe to resume). Runs before the real env is set up, so it opens
     its own fork with no nesting.
 
-    Bytecode: the impl has no immutables so it compares directly to a fresh reference; the factory
-    embeds (FACTORY, LL_IMPL) as immutables so we deploy a reference with the SAME LL_IMPL and
-    compare; each clone must be exactly the EIP-1167 proxy for LL_IMPL.
+    Bytecode: the impl and the USD blueprint have no immutables so they compare directly to fresh
+    references; the factory embeds (FACTORY, LL_IMPL, USD_BLUEPRINT) as immutables so we deploy a
+    reference with the SAME addresses and compare; each asset clone must be exactly the EIP-1167
+    proxy for LL_IMPL, and each USD forwarder must match a reference forwarder onto that clone.
     """
     problems = []
     zero = "0x0000000000000000000000000000000000000000"
     with boa.fork(NETWORK, block_identifier="latest"):
         exf = boa.load_partial('contracts/utils/YBLendingOracleLLFactory.vy').at(EXISTING_FACTORY)
         exist_impl = exf.LL_IMPL()
+        exist_bp = exf.USD_BLUEPRINT()
         yb_factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
         ll = boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
+        ll_usd_d = boa.load_partial('contracts/utils/YBLendingOracleLLUSD.vy')
 
         # --- bytecode ---
         ref_impl = boa.load('contracts/utils/YBLendingOracleLL.vy')
         if boa.env.get_code(exist_impl) != boa.env.get_code(ref_impl.address):
             problems.append(f"impl {exist_impl} bytecode != source")
+        ref_bp = ll_usd_d.deploy_as_blueprint()
+        if boa.env.get_code(exist_bp) != boa.env.get_code(ref_bp.address):
+            problems.append(f"usd blueprint {exist_bp} bytecode != source")
         ref_factory = boa.load('contracts/utils/YBLendingOracleLLFactory.vy',
-                               FACTORY, exist_impl, EMA_TIME, DAO)
+                               FACTORY, exist_impl, exist_bp, EMA_TIME, DAO)
         if boa.env.get_code(EXISTING_FACTORY) != boa.env.get_code(ref_factory.address):
             problems.append(f"factory {EXISTING_FACTORY} bytecode != source")
         proxy = (bytes.fromhex("363d3d373d3d3d363d73") + bytes.fromhex(exist_impl[2:])
@@ -172,24 +182,24 @@ def validate_existing():
         if exf.default_ema_time() != EMA_TIME:
             problems.append(f"factory.default_ema_time {exf.default_ema_time()} != {EMA_TIME}")
 
-        # --- clone bytecode + params (skip markets not created yet; the run creates those) ---
+        # --- oracle bytecode + params (skip markets not created yet; the run creates those) ---
         for mid in MARKET_IDS:
             lt = yb_factory.markets(mid).lt
-            for addr, in_usd, tag in ((exf.asset_oracle(mid), False, "asset"),
-                                      (exf.usd_oracle(mid), True, "usd")):
-                if addr == zero:
-                    continue
-                if boa.env.get_code(addr) != proxy:
-                    problems.append(f"market {mid} {tag} clone {addr} is not the impl EIP-1167 proxy")
-                o = ll.at(addr)
-                if o.lt_token() != lt:
-                    problems.append(f"market {mid} {tag} lt_token {o.lt_token()} != {lt}")
-                if o.in_usd() != in_usd:
-                    problems.append(f"market {mid} {tag} in_usd {o.in_usd()} != {in_usd}")
-                if o.factory() != EXISTING_FACTORY:
-                    problems.append(f"market {mid} {tag} factory {o.factory()} != {EXISTING_FACTORY}")
-                if o.ema_time() != EMA_TIME:
-                    problems.append(f"market {mid} {tag} ema_time {o.ema_time()} != {EMA_TIME}")
+            asset, usd = exf.asset_oracle(mid), exf.usd_oracle(mid)
+            if asset == zero:
+                continue
+            if boa.env.get_code(asset) != proxy:
+                problems.append(f"market {mid} asset clone {asset} is not the impl EIP-1167 proxy")
+            o = ll.at(asset)
+            if o.lt_token() != lt:
+                problems.append(f"market {mid} lt_token {o.lt_token()} != {lt}")
+            if o.factory() != EXISTING_FACTORY:
+                problems.append(f"market {mid} factory {o.factory()} != {EXISTING_FACTORY}")
+            if o.ema_time() != EMA_TIME:
+                problems.append(f"market {mid} ema_time {o.ema_time()} != {EMA_TIME}")
+            ref_usd = ll_usd_d.deploy(asset)
+            if boa.env.get_code(usd) != boa.env.get_code(ref_usd.address):
+                problems.append(f"market {mid} usd forwarder {usd} bytecode != source onto {asset}")
     return problems
 
 
@@ -254,13 +264,20 @@ if __name__ == '__main__':
             verify(impl, etherscan, wait=True)
         print(f"YBLendingOracleLL impl: {impl.address}")
 
-        ll_factory = boa.load('contracts/utils/YBLendingOracleLLFactory.vy', FACTORY, impl.address, EMA_TIME, DAO)
+        usd_bp = boa.load_partial('contracts/utils/YBLendingOracleLLUSD.vy').deploy_as_blueprint()
+        if not FORK:
+            verify(usd_bp, etherscan, wait=True)
+        print(f"YBLendingOracleLLUSD blueprint: {usd_bp.address}")
+
+        ll_factory = boa.load('contracts/utils/YBLendingOracleLLFactory.vy', FACTORY, impl.address,
+                              usd_bp.address, EMA_TIME, DAO)
         if not FORK:
             verify(ll_factory, etherscan, wait=True)
         print(f"YBLendingOracleLLFactory: {ll_factory.address}")
 
     factory = boa.load_partial('contracts/Factory.vy').at(FACTORY)
     ll = boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
+    ll_usd = boa.load_partial('contracts/utils/YBLendingOracleLLUSD.vy')
     lt_d = boa.load_partial('contracts/LT.vy')
 
     created = []
@@ -272,31 +289,34 @@ if __name__ == '__main__':
         usd, asset = ll_factory.usd_oracle(mid), ll_factory.asset_oracle(mid)
         if usd == "0x0000000000000000000000000000000000000000":
             usd, asset = ll_factory.create_oracles(mid)
-        usd_o = ll.at(usd)
+        usd_o = ll_usd.at(usd)
         asset_o = ll.at(asset)
-        # Checkpoint each clone's fundamental EMA via price_w() - always, on every run (harmless
-        # if already seeded; a live prod check). price_w() must succeed, so _seed retries through
-        # transient node desyncs rather than skipping.
+        # Checkpoint the market's (shared) fundamental EMA via price_w() on both sides - always,
+        # on every run (harmless if already seeded; a live prod check of both paths). price_w()
+        # must succeed, so _seed retries through transient node desyncs rather than skipping.
         usd_price = _seed(usd_o)
         asset_price = _seed(asset_o)
         pps = lt_d.at(lt).pricePerShare()          # redemption coefficient (fair value/share)
         if FORK:
-            # Clones must be wired correctly, seeded, and creation is idempotent.
-            assert usd_o.lt_token() == lt and asset_o.lt_token() == lt, f"market {mid} wrong LT"
-            assert usd_o.in_usd() and not asset_o.in_usd(), f"market {mid} denom"
-            assert usd_o.factory() == ll_factory.address, f"market {mid} factory"
-            assert usd_o.ema_time() == EMA_TIME and asset_o.ema_time() == EMA_TIME, f"market {mid} ema"
+            # Oracles must be wired correctly, seeded, and creation is idempotent.
+            assert asset_o.lt_token() == lt, f"market {mid} wrong LT"
+            assert usd_o.ORACLE() == asset, f"market {mid} usd forwarder not onto the asset oracle"
+            assert asset_o.factory() == ll_factory.address, f"market {mid} factory"
+            assert asset_o.ema_time() == EMA_TIME, f"market {mid} ema"
             assert usd_price > 0 and asset_price > 0, f"market {mid} zero price"
-            assert usd_o.fundamental_ema() > 0 and asset_o.fundamental_ema() > 0, f"market {mid} unseeded"
+            assert usd_o.price() == asset_o.price_usd(), f"market {mid} usd forwarder mismatch"
+            assert asset_o.fundamental_ema() > 0, f"market {mid} unseeded"
             assert ll_factory.create_oracles(mid) == (usd, asset), f"market {mid} not idempotent"
         created.append((mid, lt, usd, asset, usd_price, asset_price, pps))
         print(f"market {mid}: created + seeded EMA oracles")
 
     print("\n==================== deployment ====================")
     print(f"YBLendingOracleLL impl   : {ll_factory.LL_IMPL()}")
+    print(f"YBLendingOracleLLUSD bp  : {ll_factory.USD_BLUEPRINT()}")
     print(f"YBLendingOracleLLFactory : {ll_factory.address}")
     print(f"  FACTORY                : {ll_factory.FACTORY()}")
     print(f"  LL_IMPL                : {ll_factory.LL_IMPL()}")
+    print(f"  USD_BLUEPRINT          : {ll_factory.USD_BLUEPRINT()}")
     print(f"  dao                    : {ll_factory.dao()}")
     print(f"  default_ema_time       : {ll_factory.default_ema_time()} s")
     print("---------------- per-market EMA oracles ----------------")

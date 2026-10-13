@@ -4,12 +4,14 @@
 @author Yield Basis
 @license GNU Affero General Public License v3.0
 @notice ybLT price oracle suitable for Curve LlamaLend
-@dev EMA-smoothed ybLT price (USD or asset), cloned per market+denomination by
-     YBLendingOracleLLFactory. A flash-proof, cryptopool-style EMA is applied to the
-     FUNDAMENTAL rate (the LT->asset conversion at price == price_scale, which absorbs
-     wash-trade pumping of both AMM.vy equity and pool virtual_price); the shift to
-     price_oracle is a pure (A, price ratio) function applied live. ema_time is
-     factory-settable.
+@dev EMA-smoothed ybLT price, cloned once per market by YBLendingOracleLLFactory. Prices in
+     the underlying asset (price / price_w) and in USD (price_usd / price_usd_w) off ONE shared
+     EMA; USD consumers reach it via the YBLendingOracleLLUSD forwarder, so a checkpoint from
+     either denomination advances the same state (more checkpoints -> a tighter EMA).
+     A flash-proof, cryptopool-style EMA is applied to the FUNDAMENTAL rate (the LT->asset
+     conversion at price == price_scale, which absorbs wash-trade pumping of both AMM.vy
+     equity and pool virtual_price); the shift to price_oracle is a pure (A, price ratio)
+     function applied live. ema_time is factory-settable.
 """
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
@@ -73,7 +75,6 @@ MAX_EMA_TIME: constant(uint256) = 10**9
 # Per-clone binding (set once by initialize()); storage, not immutable, so each EIP-1167 clone
 # carries its own values rather than sharing the implementation's.
 lt_token: public(LT)                # the LT (market) this clone prices
-in_usd: public(bool)                # True: price in USD; False: price in the underlying asset
 factory: public(address)            # the YBLendingOracleLLFactory allowed to set_ema_time
 # EMA smoothing time constant (s) for the price. Half-life = ema_time * ln(2). This is the
 # manipulation-resistance vs liquidation-lag dial; the FACTORY can retune it (set_ema_time).
@@ -85,13 +86,12 @@ ema_ts: public(uint256)             # last EMA checkpoint timestamp
 
 
 @external
-def initialize(lt: LT, in_usd: bool, ema_time: uint256, factory: address):
+def initialize(lt: LT, ema_time: uint256, factory: address):
     """
-    @notice One-time bind of the clone to its LT, denomination, EMA time and factory.
+    @notice One-time bind of the clone to its LT, EMA time and factory.
     @dev fundamental_ema stays 0 (unseeded) until the first price_w(); until then price()
          prices off the raw fundamental, so the LT need not already hold a position at deploy.
     @param lt The LT (market) this clone prices
-    @param in_usd True to price in USD, False to price in the underlying asset (e.g. BTC)
     @param ema_time EMA smoothing time constant in seconds (0 < ema_time <= MAX_EMA_TIME)
     @param factory The YBLendingOracleLLFactory permitted to retune ema_time later
     """
@@ -99,7 +99,6 @@ def initialize(lt: LT, in_usd: bool, ema_time: uint256, factory: address):
     assert lt.address != empty(address) and factory != empty(address), "Zero"
     assert ema_time > 0 and ema_time <= MAX_EMA_TIME, "ema_time"
     self.lt_token = lt
-    self.in_usd = in_usd
     self.ema_time = ema_time
     self.factory = factory
 
@@ -340,24 +339,18 @@ def _fundamental_ema(ema: uint256) -> uint256:
 
 
 @internal
-@view
-def _price_from(fundamental: uint256, snap: Snapshot) -> uint256:
-    """Price for this clone's denomination from a (possibly smoothed) fundamental + live shift."""
+@pure
+def _price_from(fundamental: uint256, snap: Snapshot, usd: bool) -> uint256:
+    """Price in the requested denomination from a (possibly smoothed) fundamental + live shift."""
     price_asset: uint256 = fundamental * snap.po_shift // PRECISION
-    if self.in_usd:
+    if usd:
         return price_asset * snap.asset_price // PRECISION
     return price_asset
 
 
-@external
+@internal
 @view
-def price() -> uint256:
-    """
-    @notice EMA-smoothed ybLT price - USD if in_usd else the underlying asset - scaled to 1e18.
-    @dev View path: reads agg.price() without checkpointing. The fundamental comes from the
-         committed EMA state (flash-proof); the price_oracle shift is applied live.
-    @return Smoothed price scaled to 1e18
-    """
+def _price(usd: bool) -> uint256:
     lt: LT = self.lt_token
     pool: IFXSwap = staticcall lt.CRYPTOPOOL()
     amm: LevAMM = staticcall lt.amm()
@@ -369,19 +362,11 @@ def price() -> uint256:
     ema: uint256 = self.fundamental_ema
     if ema != 0:
         fundamental = self._fundamental_ema(ema)
-    return self._price_from(fundamental, snap)
+    return self._price_from(fundamental, snap, usd)
 
 
-@external
-def price_w() -> uint256:
-    """
-    @notice Checkpoint and return the EMA-smoothed ybLT price (USD or asset per in_usd).
-    @dev Advances the fundamental EMA using the PREVIOUS checkpoint's value, records the
-         current one for next time, and checkpoints the aggregator (agg.price_w()). The
-         returned price uses the advanced EMA, so this call is unaffected by same-tx wash
-         trades against the AMM or the pool. Call regularly (see the EMA note above).
-    @return Smoothed price scaled to 1e18
-    """
+@internal
+def _price_w(usd: bool) -> uint256:
     lt: LT = self.lt_token
     pool: IFXSwap = staticcall lt.CRYPTOPOOL()
     amm: LevAMM = staticcall lt.amm()
@@ -398,4 +383,51 @@ def price_w() -> uint256:
     self.ema_ts = block.timestamp
     self.fundamental_last = snap.fundamental       # record current value for the NEXT advance
 
-    return self._price_from(ema, snap)
+    return self._price_from(ema, snap, usd)
+
+
+@external
+@view
+def price() -> uint256:
+    """
+    @notice EMA-smoothed ybLT price in the underlying asset, scaled to 1e18.
+    @dev View path: reads agg.price() without checkpointing. The fundamental comes from the
+         committed EMA state (flash-proof); the price_oracle shift is applied live.
+    @return Smoothed price scaled to 1e18
+    """
+    return self._price(False)
+
+
+@external
+@view
+def price_usd() -> uint256:
+    """
+    @notice EMA-smoothed ybLT price in USD, scaled to 1e18. Same EMA as price().
+    @dev View path, as price(); additionally multiplied by the live asset price
+         (price_oracle * agg.price()).
+    @return Smoothed price scaled to 1e18
+    """
+    return self._price(True)
+
+
+@external
+def price_w() -> uint256:
+    """
+    @notice Checkpoint and return the EMA-smoothed ybLT price in the underlying asset.
+    @dev Advances the fundamental EMA using the PREVIOUS checkpoint's value, records the
+         current one for next time, and checkpoints the aggregator (agg.price_w()). The
+         returned price uses the advanced EMA, so this call is unaffected by same-tx wash
+         trades against the AMM or the pool. Call regularly (see the EMA note above).
+    @return Smoothed price scaled to 1e18
+    """
+    return self._price_w(False)
+
+
+@external
+def price_usd_w() -> uint256:
+    """
+    @notice Checkpoint and return the EMA-smoothed ybLT price in USD.
+    @dev Same checkpoint as price_w() - both advance the one shared EMA - priced in USD.
+    @return Smoothed price scaled to 1e18
+    """
+    return self._price_w(True)

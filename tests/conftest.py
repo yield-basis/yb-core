@@ -337,8 +337,8 @@ def lp_oracle_2():
 
 @pytest.fixture(scope="session")
 def ll_deployer():
-    # EIP-1167 implementation, cloned per (market, denomination); load_partial so tests can
-    # both .deploy() the impl and .at() a clone address created by the factory.
+    # EIP-1167 implementation, cloned per market; load_partial so tests can both .deploy() the
+    # impl and .at() a clone address created by the factory.
     return boa.load_partial('contracts/utils/YBLendingOracleLL.vy')
 
 
@@ -349,6 +349,18 @@ def ll_impl(ll_deployer):
 
 
 @pytest.fixture(scope="session")
-def ll_factory(factory, ll_impl, admin):
-    # Spawns per-market EMA oracle clones; 866s default EMA (~10 min half-life); admin is the DAO.
-    return boa.load('contracts/utils/YBLendingOracleLLFactory.vy', factory.address, ll_impl.address, 866, admin)
+def ll_usd_deployer():
+    # USD forwarder onto a YBLendingOracleLL (shares its EMA).
+    return boa.load_partial('contracts/utils/YBLendingOracleLLUSD.vy')
+
+
+@pytest.fixture(scope="session")
+def ll_usd_blueprint(ll_usd_deployer):
+    return ll_usd_deployer.deploy_as_blueprint()
+
+
+@pytest.fixture(scope="session")
+def ll_factory(factory, ll_impl, ll_usd_blueprint, admin):
+    # Spawns per-market EMA oracles; 866s default EMA (~10 min half-life); admin is the DAO.
+    return boa.load('contracts/utils/YBLendingOracleLLFactory.vy', factory.address, ll_impl.address,
+                    ll_usd_blueprint.address, 866, admin)
