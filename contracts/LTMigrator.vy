@@ -28,7 +28,22 @@ struct LiquidityValues:
     staked: uint256
 
 
+struct Market:
+    asset_token: ERC20
+    cryptopool: Cryptopool
+    amm: AMM
+    lt: LT
+    price_oracle: address
+    virtual_pool: address
+    staker: Gauge
+
+
+interface Factory:
+    def markets(i: uint256) -> Market: view
+    def market_count() -> uint256: view
+
 interface MFOwner:
+    def FACTORY() -> Factory: view
     def lt_allocate_stablecoins(lt: LT, limit: uint256): nonpayable
     def lt_in_factory(lt: LT) -> bool: view
     def disabled_lts(lt: address) -> bool: view
@@ -67,6 +82,8 @@ interface LT:
     def stablecoin_allocation() -> uint256: view
 
 
+MAX_MARKETS: constant(uint256) = 50000  # Same as in Factory
+
 STABLECOIN: public(immutable(ERC20))
 FACTORY_OWNER: public(immutable(MFOwner))
 
@@ -79,17 +96,30 @@ def __init__(stablecoin: ERC20, factory_owner: MFOwner):
 
 @internal
 @view
-def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coefficient: uint256) -> uint256:
-    # Forward-only: refuse to migrate INTO a market the DAO has deprecated.
-    # disabled_lts is flipped by HybridFactoryOwner when admin disables a
-    # market via lt_allocate_stablecoins(lt, 0); deploying a fresh market
-    # via add_market leaves the flag at its default False.
-    # The second check guards against the soft-deprecated case: a previous
-    # _migrate_plain may have left this LT at the sentinel allocation=1
-    # (see the lt_from deallocation step below) without setting disabled_lts.
+def _check_direction(lt_from: LT, lt_to: LT):
+    # Forward-only: a newer market supersedes the older markets of the same
+    # asset, so lt_to must be the newest market for lt_from's asset (and hence
+    # newer than lt_from). Scanning from the newest market down stops at the
+    # first one with that asset, so only markets newer than lt_to are read.
+    # lt_from can be any factory market, including v1.
     assert lt_from.address != lt_to.address, "same LT"
+    assert staticcall FACTORY_OWNER.lt_in_factory(lt_from), "lt_from not in factory"
     assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
-    assert (staticcall lt_to.stablecoin_allocation()) > 1, "lt_to deprecated"
+    asset: ERC20 = staticcall lt_from.ASSET_TOKEN()
+    factory: Factory = staticcall FACTORY_OWNER.FACTORY()
+    n: uint256 = staticcall factory.market_count()
+    for k: uint256 in range(n, bound=MAX_MARKETS):
+        market: Market = staticcall factory.markets(n - 1 - k)
+        if market.asset_token == asset:
+            assert market.lt == lt_to, "lt_to superseded"
+            return
+    raise "lt_to superseded"
+
+
+@internal
+@view
+def _preview_migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, debt_coefficient: uint256) -> uint256:
+    self._check_direction(lt_from, lt_to)
 
     cpool_from: Cryptopool = staticcall lt_from.CRYPTOPOOL()
     cpool_to: Cryptopool = staticcall lt_to.CRYPTOPOOL()
@@ -140,21 +170,18 @@ def _required_crvusd_for(lt: LT, amm: AMM, assets: uint256, debt: uint256) -> (u
     lt_supply: uint256 = staticcall lt.totalSupply()
     liquidity: LiquidityValues = staticcall lt.liquidity()
     value_in_amm: uint256 = (staticcall amm.value_oracle()).value
-    return value_in_amm, value_in_amm * (liquidity.total - convert(max(liquidity.admin, 0), uint256)) // liquidity.total * lt_shares // lt_supply
+    if lt_supply == 0 or liquidity.total == 0:
+        return value_in_amm, 0
+    # Holders own total / (total + admin) of the value: admin is accrued on top of total
+    admin_balance: uint256 = convert(max(liquidity.admin, 0), uint256)
+    return value_in_amm, value_in_amm * liquidity.total // (liquidity.total + admin_balance) * lt_shares // lt_supply
 
 
 @internal
 def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256, debt_coefficient: uint256,
                    _for: address) -> uint256:
-    # Check that LTs are in the factory; refuse to migrate INTO a market the
-    # DAO has deprecated (disabled_lts is the same flag the factory owner
-    # uses to gate non-admin deallocation calls). The allocation>1 check
-    # also rejects soft-deprecated markets — see _preview_migrate_plain.
-    assert lt_from.address != lt_to.address, "same LT"
-    assert staticcall FACTORY_OWNER.lt_in_factory(lt_from)
-    assert staticcall FACTORY_OWNER.lt_in_factory(lt_to)
-    assert not (staticcall FACTORY_OWNER.disabled_lts(lt_to.address)), "lt_to deprecated"
-    assert (staticcall lt_to.stablecoin_allocation()) > 1, "lt_to deprecated"
+    # Check that both LTs are in the factory and lt_to supersedes lt_from
+    self._check_direction(lt_from, lt_to)
 
     # Prepare asset approvals (e.g. WBTC etc)
     asset: ERC20 = staticcall lt_from.ASSET_TOKEN()
@@ -179,9 +206,11 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
         # the deposit lands at the AMM's notion of equilibrium (the AMM's
         # coll_value derives from the same oracle), regardless of old-pool
         # drift / interest. The freed crvUSD stays in the old AMM and is
-        # harvested by the subsequent lt_allocate_stablecoins(lt_from, 0).
+        # harvested by the subsequent deallocation if lt_from is disabled.
         asset_decimals: uint256 = convert(staticcall asset.decimals(), uint256)
         debt = assets * (staticcall cpool_to.price_oracle()) // (10**asset_decimals)
+
+    debt = debt * debt_coefficient // 10**18
 
     pool_value: uint256 = 0
     additional_crvusd: uint256 = 0
@@ -190,24 +219,17 @@ def _migrate_plain(lt_from: LT, lt_to: LT, shares_in: uint256, min_out: uint256,
     # Save previous allocation
     previous_allocation: uint256 = staticcall lt_to.stablecoin_allocation()
 
-    # Now we freed up some stablecoins in the AMM. The natural path is the
-    # public limit=0 deallocator, which only HFO accepts while
-    # disabled_lts[lt_from] is still True. But anyone holding lt_from in a
-    # HybridVault can flip disabled_lts back to False by triggering a
-    # non-zero re-allocation on withdrawal — in that case fall back to
-    # limit=1: allowed for LTMigrator as a registered limit setter, still
-    # triggers deallocation down to the LT's safe lower bound, and leaves
-    # lt_from at the sentinel allocation=1 so the guard in
-    # _preview_migrate_plain refuses to migrate back into it.
+    # Now we freed up some stablecoins in the AMM. Harvest them from a disabled
+    # lt_from (best-effort: anyone can retry on HybridFactoryOwner).
     if staticcall FACTORY_OWNER.disabled_lts(lt_from.address):
-        extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_from, 0)
-    else:
-        extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_from, 1)
+        success: bool = raw_call(
+            FACTORY_OWNER.address,
+            abi_encode(lt_from.address, empty(uint256), method_id=method_id("lt_allocate_stablecoins(address,uint256)")),
+            revert_on_failure=False)
 
     # Allocate more
     extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_to, max((pool_value + additional_crvusd) * 22 // 10, previous_allocation))
 
-    debt = debt * debt_coefficient // 10**18
     shares: uint256 = extcall lt_to.deposit(assets, debt, min_out, _for)
 
     extcall FACTORY_OWNER.lt_allocate_stablecoins(lt_to, previous_allocation)
