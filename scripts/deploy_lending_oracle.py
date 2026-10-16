@@ -58,6 +58,8 @@ if __name__ == '__main__':
         boa.env.eoa = DEPLOYER
     else:
         boa.set_network_env(NETWORK)
+        # A tx priced near the base fee can take > boa's default 240s to land; don't abort mid-run.
+        boa.env.tx_settings.poll_timeout = 900
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
         admin = account_load('yb-deployer')
         boa.env.add_account(admin)
