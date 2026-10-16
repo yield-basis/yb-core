@@ -43,7 +43,6 @@ interface LT:
     def staker() -> address: view
     def balanceOf(addr: address) -> uint256: view
     def min_admin_fee() -> uint256: view
-    def updated_balances() -> (uint256, uint256): view
 
 interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
@@ -175,13 +174,13 @@ def _get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> (bool, uin
 
 @internal
 @view
-def _calculate_fresh_lv(lt: LT, p_o: uint256, amm_value: uint256) -> (uint256, int256, uint256):
+def _calculate_fresh_lv(lt: LT, p_o: uint256, amm_value: uint256) -> (uint256, int256, uint256, uint256):
     """
     @notice Replicates LT._calculate_values to compute up-to-date liquidity values
     @param lt The LT contract
     @param p_o Price oracle value (price_scale * agg_price / 10**18)
     @param amm_value AMM value (x0 / (2*L - 1))
-    @return (total, admin, supply_tokens)
+    @return (total, admin, supply_tokens, staked_tokens)
     """
     prev: LiquidityValues = staticcall lt.liquidity()
     staker: address = staticcall lt.staker()
@@ -239,15 +238,17 @@ def _calculate_fresh_lv(lt: LT, p_o: uint256, amm_value: uint256) -> (uint256, i
 
     total: uint256 = convert(new_total_value_36 // 10**18, uint256)
     supply_tokens: uint256 = convert(supply - token_reduction, uint256)
+    staked_tokens: uint256 = convert(staked - token_reduction, uint256)
 
-    return (total, admin, supply_tokens)
+    return (total, admin, supply_tokens, staked_tokens)
 
 
 @internal
 @view
-def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
+def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256):
     """
-    @return (yb_oracle_usd, asset_price_usd)
+    @return (yb_oracle_usd, asset_price_usd, staked_tokens): staked_tokens is the staker's
+            fresh LT balance on the price-oracle path, 0 with use_balances
     """
     pool: IFXSwap = staticcall lt.CRYPTOPOOL()
     amm: LevAMM = staticcall lt.amm()
@@ -300,6 +301,7 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
             balance_value = (coll_value - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // staticcall lt.totalSupply()
 
     yb_oracle: uint256 = 0
+    staked_tokens: uint256 = 0
     if use_balances:
         yb_oracle = balance_value
     else:
@@ -317,7 +319,7 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
         lv_total: uint256 = 0
         lv_admin: int256 = 0
         lt_supply: uint256 = 0
-        lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o, amm_value)
+        lv_total, lv_admin, lt_supply, staked_tokens = self._calculate_fresh_lv(lt, p_o, amm_value)
 
         # Make it per LT token
         yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
@@ -329,16 +331,27 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
             # which it exceeds as the position worsens.
             yb_oracle = min(yb_oracle, balance_value)
 
-    return (yb_oracle, price_oracle * agg_price // 10**18)
+    return (yb_oracle, price_oracle * agg_price // 10**18, staked_tokens)
 
 
 @internal
 @view
-def _staked_scale(lt: LT) -> uint256:
+def _staked_scale(lt: LT, use_balances: bool, staked_tokens: uint256) -> uint256:
+    """
+    @notice Gauge share -> LT: the staker's LT balance over the gauge supply (1.0 without a
+            staker). The balance is staked_tokens from _price - what LT.updated_balances()
+            returns, but also defined while the AMM is untradable, where that reverts - or
+            the stored balance with use_balances.
+    """
+    scale: uint256 = 10**18
     staker: address = staticcall lt.staker()
-    staker_balance: uint256 = (staticcall lt.updated_balances())[1]
-    gauge_supply: uint256 = staticcall ILiquidityGauge(staker).totalSupply()
-    return (staker_balance + 1) * 10**18 // (gauge_supply + 1)
+    if staker != empty(address):
+        staker_balance: uint256 = staked_tokens
+        if use_balances:
+            staker_balance = staticcall lt.balanceOf(staker)
+        gauge_supply: uint256 = staticcall ILiquidityGauge(staker).totalSupply()
+        scale = (staker_balance + 1) * 10**18 // (gauge_supply + 1)
+    return scale
 
 
 @external
@@ -353,7 +366,8 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     """
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
-    yb_oracle, asset_price = self._price(lt, use_balances)
+    staked_tokens: uint256 = 0
+    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
     return yb_oracle * 10**18 // asset_price
 
 
@@ -381,8 +395,9 @@ def staked_price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     """
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
-    yb_oracle, asset_price = self._price(lt, use_balances)
-    return yb_oracle * self._staked_scale(lt) // asset_price
+    staked_tokens: uint256 = 0
+    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
+    return yb_oracle * self._staked_scale(lt, use_balances, staked_tokens) // asset_price
 
 
 @external
@@ -394,4 +409,8 @@ def staked_price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
     @param use_balances See price_in_asset
     @return Price scaled to 1e18
     """
-    return self._price(lt, use_balances)[0] * self._staked_scale(lt) // 10**18
+    yb_oracle: uint256 = 0
+    asset_price: uint256 = 0
+    staked_tokens: uint256 = 0
+    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
+    return yb_oracle * self._staked_scale(lt, use_balances, staked_tokens) // 10**18

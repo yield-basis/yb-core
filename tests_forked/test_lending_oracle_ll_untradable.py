@@ -7,7 +7,8 @@ A fresh LL is seeded on the healthy market first, as a deployed one would be. Ch
   - LL and YBLendingOracle never above the balance value, positive while it is,
     including as cv_ps -> debt (where the old seeded LL blew up),
   - both continuous across the boundary (the LL once its EMA has settled),
-  - after a shock: at or below the balance value through checkpoints and a long idle gap.
+  - after a shock: at or below the balance value through checkpoints and a long idle gap,
+  - YBLendingOracle's staked prices work there (F-07) and are continuous too.
 """
 from fractions import Fraction
 
@@ -44,6 +45,7 @@ def deployers():
         "amm": boa.load_partial("contracts/AMM.vy"),
         "lp_oracle": boa.load_partial("contracts/CryptopoolLPOracle.vy"),
         "ll": boa.load_partial("contracts/utils/YBLendingOracleLL.vy"),
+        "gauge": boa.load_partial("contracts/dao/LiquidityGauge.vy"),
     }
 
 
@@ -144,3 +146,32 @@ def test_untradable_shock(market, ref, k):
         price = ll.price_w()
         assert price <= _rounded_up(ref.price_in_asset(lt.address, True)), f"k={k} after {dt}s"
         _check_capped(lt, ll, ref, f"k={k} after {dt}s")
+
+
+def test_untradable_staked_price(market, ref, deployers):
+    """F-07: staked prices no longer revert while the AMM is untradable, are continuous across
+    the boundary, and use the stored staker balance with use_balances."""
+    lt, amm, ll, lp_oracle = market
+    gauge = deployers["gauge"].at(lt.staker())
+
+    _set_k(amm, lp_oracle, "1.00000000000001")
+    assert _tradable(amm)
+    staked_t = ref.staked_price_in_asset(lt.address)
+    _set_k(amm, lp_oracle, "0.99999999999999")
+    assert not _tradable(amm)
+    staked_u = ref.staked_price_in_asset(lt.address)
+    print(f"staked {staked_t / 1e18:.6f} -> {staked_u / 1e18:.6f}")
+    assert abs(staked_u - staked_t) <= staked_t // 10**6, "staked price jumped at the boundary"
+
+    scale = (lt.balanceOf(gauge.address) + 1) * 10**18 // (gauge.totalSupply() + 1)
+    for k in GRID:
+        with boa.env.anchor():
+            _set_k(amm, lp_oracle, k)
+            for use_balances in (False, True):
+                price = ref.price_in_asset(lt.address, use_balances)
+                staked = ref.staked_price_in_asset(lt.address, use_balances)
+                assert (staked > 0) == (price > 0), f"k={k} use_balances={use_balances}"
+                ref.staked_price_in_usd(lt.address, use_balances)
+            staked_b = ref.staked_price_in_asset(lt.address, True)
+            expected = ref.price_in_asset(lt.address, True) * scale // 10**18
+            assert abs(staked_b - expected) <= 2 + expected // 10**12, f"k={k}: {staked_b} vs {expected}"
