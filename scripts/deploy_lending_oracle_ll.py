@@ -47,8 +47,9 @@ SEED_WAIT = 15                                           # seconds between retri
 # impl+factory): re-runs create_oracles (idempotent) + seeding + ENS. Use to finish a run that
 # died mid-way (e.g. a flaky-RPC crash) without deploying another throwaway factory. "" = deploy.
 # 0x3e6B4795bd173Dd5c700cA8Cfd3f247BFcDC9D43 is the pre-#002 factory (separate USD/asset EMAs),
-# superseded by the shared-EMA version: redeploy fresh.
-EXISTING_FACTORY = "0x150dD481D306A3a8577cfc8fAC195720AA3Ee7Bc"   # shared-EMA deploy; resume ENS
+# superseded by the shared-EMA version; 0x150dD481D306A3a8577cfc8fAC195720AA3Ee7Bc is the
+# shared-EMA factory, superseded by the untradable-region cap: redeploy fresh.
+EXISTING_FACTORY = ""
 
 # --- ENS (optional) ----------------------------------------------------------
 # When SET_ENS, after deploying + seeding the oracles, (re)write the oracles-ll.yieldbasis.eth
