@@ -13,8 +13,8 @@ flash-proof against both wash paths. Checks:
   - USD vs asset denomination: the USD forwarder shares the asset oracle's ONE EMA, so a
     checkpoint from either side advances it (ChainSecurity #002),
   - factory-settable ema_time,
-  - untradable AMM (x0 unsolvable): the smoothed price is capped at the balance value,
-    continuous across the boundary, and checkpoints there record no fundamental.
+  - untradable AMM (x0 unsolvable): the smoothed price is capped at the balance value and
+    continuous across the boundary, as is the reference's (staked prices included).
 """
 import os
 from types import SimpleNamespace
@@ -481,6 +481,47 @@ def test_ll_untradable_checkpoints(
     print(f"\nfundamental {f_t} -> {f_u}")
     assert abs(f_u - f_t) <= f_t // 10**6, "fundamental jumped at the boundary"
     assert ll.ema_ts() == boa.env.evm.patch.timestamp
+
+
+def test_ref_staked_price_untradable(
+    cryptopool, yb_lt, yb_amm, yb_staker, collateral_token, stablecoin,
+    accounts, admin, yb_allocated, seed_cryptopool, lending_oracle, mock_agg,
+):
+    """F-07: the reference's staked prices no longer go through LT.updated_balances(), which
+    reverts while the AMM is untradable. They match the gauge's own conversion while tradable,
+    are continuous across the boundary, and use the stored staker balance with use_balances."""
+    _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
+    with boa.env.prank(admin):
+        yb_staker.deposit(yb_lt.balanceOf(admin) // 2, admin)
+    lt = yb_lt.address
+    lo, hi = _agg_boundary(yb_amm, mock_agg, admin)
+
+    def scaled(price, staker_balance):
+        return price * ((staker_balance + 1) * 10**18 // (yb_staker.totalSupply() + 1)) // 10**18
+
+    _set_agg(mock_agg, admin, hi)
+    staked_t = lending_oracle.staked_price_in_asset(lt)
+    _approx(staked_t, scaled(lending_oracle.price_in_asset(lt), yb_lt.updated_balances()[1]))
+
+    _set_agg(mock_agg, admin, lo)
+    with boa.reverts():
+        yb_lt.updated_balances()
+    staked_u = lending_oracle.staked_price_in_asset(lt)
+    print(f"\nstaked price {staked_t} -> {staked_u}")
+    assert abs(staked_u - staked_t) <= staked_t // 10**6, "staked price jumped at the boundary"
+
+    for agg_pct in (100, 90, 80, 70, 60, 50, 40, 30):
+        agg = lo * agg_pct // 100
+        _set_agg(mock_agg, admin, agg)
+        assert not _tradable(yb_amm)
+        for use_balances in (False, True):
+            price = lending_oracle.price_in_asset(lt, use_balances)
+            staked = lending_oracle.staked_price_in_asset(lt, use_balances)
+            assert (staked > 0) == (price > 0), (agg, use_balances)
+            _approx(lending_oracle.staked_price_in_usd(lt, use_balances),
+                    staked * (cryptopool.price_oracle() * agg // 10**18) // 10**18, rel=10**-6)
+        _approx(lending_oracle.staked_price_in_asset(lt, True),
+                scaled(lending_oracle.price_in_asset(lt, True), yb_lt.balanceOf(yb_staker.address)))
 
 
 # --- equivalence fuzzing: unseeded LL must equal YBLendingOracle in ALL states ---------------
