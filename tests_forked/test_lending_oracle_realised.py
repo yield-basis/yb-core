@@ -11,9 +11,11 @@ with emergency_withdraw. Compared in USD with the oracle readings taken before t
 the oracles count crvUSD debt at $1 while the exit is marked at agg, hence the slack above.
 """
 from fractions import Fraction
+from types import SimpleNamespace
 
 import boa
 import pytest
+from tests.lt.test_lending_oracle_realised import _arbitrage, _tradable
 from tests_forked.networks import NETWORK
 
 FACTORY = "0x370a449FeBb9411c95bf897021377fe0B7D100c0"
@@ -57,52 +59,37 @@ def deployers():
     }
 
 
-def _tradable(amm):
-    try:
-        amm.value_oracle()
-        return True
-    except Exception:
-        return False
+@pytest.fixture(scope="module")
+def probe(deployers):
+    return deployers["probe"].deploy()
 
 
-def _buy_lp(amm, target, arb):
-    """Rational arbitrage buying LP from an AMM priced below the market LP price `target`:
-    the largest trade AMM.exchange accepts while its marginal price plus fee stays below target
-    and the trade makes money. Returns the crvUSD spent."""
-    fee = amm.fee()
-    lo, hi = 0, amm.get_debt()
-    for _ in range(64):
-        mid = (lo + hi) // 2
-        with boa.env.anchor():
-            try:
-                with boa.env.prank(arb):
-                    out = amm.exchange(0, 1, mid, 0)
-                ok = amm.get_p() * 10**18 <= target * (10**18 - fee) and out * target >= mid * 10**18
-            except Exception:
-                ok = False
-        if ok:
-            lo = mid
-        else:
-            hi = mid
-    if lo > 0:
-        with boa.env.prank(arb):
-            amm.exchange(0, 1, lo, 0)
-    return lo
+@pytest.fixture(scope="module")
+def abis():
+    return {"price": boa.loads_abi(PRICE_ABI), "crvusd": boa.loads_abi(CRVUSD_ABI),
+            "decimals": boa.loads_abi(DECIMALS_ABI)}
 
 
-@pytest.mark.parametrize("market_id", MARKETS, ids=[f"m{i}" for i in MARKETS])
-def test_oracles_match_realised_value(ref, deployers, market_id):
-    m = deployers["factory"].at(FACTORY).markets(market_id)
+@pytest.fixture(params=MARKETS, ids=[f"m{i}" for i in MARKETS])
+def market(request, deployers, abis):
+    """Market contracts plus a fresh, unseeded LL (raw fundamental, directly comparable)."""
+    m = deployers["factory"].at(FACTORY).markets(request.param)
     lt = deployers["lt"].at(m.lt)
     amm = deployers["amm"].at(m.amm)
-    pool = deployers["pool"].at(m.cryptopool)
-    probe = deployers["probe"].deploy()
-    lp_oracle = boa.loads_abi(PRICE_ABI).at(amm.PRICE_ORACLE_CONTRACT())
-    agg = boa.loads_abi(PRICE_ABI).at(lt.agg())
     ll = deployers["ll"].deploy()
-    ll.initialize(lt.address, EMA_TIME, FACTORY)                     # unseeded: raw fundamental
-    crvusd = boa.loads_abi(CRVUSD_ABI).at(CRVUSD)
-    asset_scale = 10**(18 - boa.loads_abi(DECIMALS_ABI).at(m.asset_token).decimals())   # WBTC, cbBTC: 8
+    ll.initialize(lt.address, EMA_TIME, FACTORY)
+    return SimpleNamespace(
+        id=request.param, m=m, lt=lt, amm=amm, ll=ll,
+        pool=deployers["pool"].at(m.cryptopool),
+        lp_oracle=abis["price"].at(amm.PRICE_ORACLE_CONTRACT()),
+        agg=abis["price"].at(lt.agg()),
+        asset_scale=10**(18 - abis["decimals"].at(m.asset_token).decimals()))    # WBTC, cbBTC: 8
+
+
+def test_oracles_match_realised_value(ref, probe, abis, market):
+    m, lt, amm, pool, ll = market.m, market.lt, market.amm, market.pool, market.ll
+    lp_oracle, agg, asset_scale = market.lp_oracle, market.agg, market.asset_scale
+    crvusd = abis["crvusd"].at(CRVUSD)
 
     user, arb = boa.env.generate_address(), boa.env.generate_address()
     shares = lt.balanceOf(m.staker) // 1000
@@ -115,11 +102,14 @@ def test_oracles_match_realised_value(ref, deployers, market_id):
         crvusd.approve(lt.address, 2**256 - 1)                       # emergency_withdraw may need crvUSD
     with boa.env.prank(arb):
         crvusd.approve(amm.address, 2**256 - 1)
+        crvusd.approve(pool.address, 2**256 - 1)
+        for _ in range(2):          # last_prices = the actual spot (see tests/lt/..._realised._settle)
+            pool.exchange(0, 1, 10**15, 0)
     boa.env.time_travel(86400)                                       # price_oracle settles to spot
     spot = pool.last_prices()
     assert abs(spot - pool.price_oracle()) <= spot // 10**5
 
-    print(f"\nm{market_id}: po/ps {pool.price_oracle() / pool.price_scale():.4f}, agg {agg.price() / 1e18:.5f}")
+    print(f"\nm{market.id}: po/ps {pool.price_oracle() / pool.price_scale():.4f}, agg {agg.price() / 1e18:.5f}")
     failures, checked = [], 0
     for k in K_GRID:
         with boa.env.anchor():
@@ -133,7 +123,7 @@ def test_oracles_match_realised_value(ref, deployers, market_id):
                 if amm.get_p() > target:
                     print(f"  k={k:>6s}  AMM above the market: arbitrage would sell it LP, which we don't hold here")
                     continue
-                _buy_lp(amm, target, arb)
+                _arbitrage(amm, target, arb)
             exit_shares = shares // 10
             with boa.env.prank(user):
                 assets, stables = lt.emergency_withdraw(exit_shares)

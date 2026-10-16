@@ -63,20 +63,27 @@ def _bump_vprice(cryptopool, collateral_token, stablecoin, accounts):
             cryptopool.exchange(1, 0, got, 0)
 
 
-def _deploy_asset_ll(ll_deployer, yb_lt, admin):
+@pytest.fixture
+def ll(ll_deployer, yb_lt, admin):
+    """A fresh, unseeded asset LL on the test market (factory role: admin)."""
     ll = ll_deployer.deploy()
-    ll.initialize(yb_lt.address, EMA_TIME, admin)          # factory=admin
+    ll.initialize(yb_lt.address, EMA_TIME, admin)
     return ll
+
+
+@pytest.fixture
+def ll_usd(ll_usd_deployer, ll):
+    """The USD forwarder onto `ll`, sharing its EMA."""
+    return ll_usd_deployer.deploy(ll.address)
 
 
 def test_ll_equivalence_to_reference(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle,
 ):
     """Unseeded and freshly-seeded (fundamental_ema == current fundamental), the LL equals
     YBLendingOracle to rounding - the decomposed math must reproduce the reference."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     yb = lending_oracle
 
     ref = yb.price_in_asset(yb_lt.address)
@@ -88,13 +95,12 @@ def test_ll_equivalence_to_reference(
 
 def test_ll_fundamental_ema_smoothing(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle,
 ):
     """A fundamental bump (pool-fee wash raises virtual_price -> x0) is folded into the EMA
     only after it survives a checkpoint, then converges over ~ema_time - the honest 'value
     must survive a later block' property."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
 
     ll.price_w()                                        # seed: ema = last = f0
     f0 = ll.fundamental_ema()
@@ -125,12 +131,11 @@ def test_ll_fundamental_ema_smoothing(
 
 def test_ll_flash_resistant(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle,
 ):
     """A virtual_price pump within a single block moves YBLendingOracle (reads current vprice)
     but NOT the LL, which prices off the committed EMA."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     yb = lending_oracle
 
     ll.price_w()                                        # seed at t0
@@ -151,14 +156,13 @@ def test_ll_flash_resistant(
 
 def test_ll_price_w_return_flash_resistant(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle,
 ):
     """price_w() records the current fundamental as fundamental_last BEFORE it prices, so it
     MUST price off the smoothed (old) EMA it just computed - never the freshly-stored last. A
     same-block pump that precedes price_w() must not move its RETURN value; the pump is only
     recorded for the NEXT advance. Guards the save-before-price ordering in price_w()."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     yb = lending_oracle
 
     seeded = ll.price_w()                                # seed: ema = last = f0
@@ -181,14 +185,13 @@ def test_ll_price_w_return_flash_resistant(
 
 def test_ll_amm_wash_flash_resistant(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle,
 ):
     """Wash-trading against AMM.vy itself (crvUSD <-> LP round trips) pumps the AMM's
     fee-inflated equity (x0) and with it YBLendingOracle - but NOT the LL: the pump lives
     entirely in the EMA'd fundamental, and the live shift carries no AMM state. This is the
     vector the fundamental-rate EMA exists for."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     yb = lending_oracle
 
     ll.price_w()                                        # seed at t0
@@ -219,13 +222,11 @@ def test_ll_amm_wash_flash_resistant(
 
 def test_ll_usd_denomination(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin, yb_allocated,
-    seed_cryptopool, ll_deployer, ll_usd_deployer, lending_oracle, mock_agg,
+    seed_cryptopool, ll, ll_usd, lending_oracle, mock_agg,
 ):
     """The USD forwarder (== price_usd()) tracks the reference's price_in_usd to rounding, and is
     exactly the asset price times the live asset price (price_oracle * agg)."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
-    ll_usd = ll_usd_deployer.deploy(ll.address)
     assert ll_usd.ORACLE() == ll.address
 
     _approx(ll_usd.price(), lending_oracle.price_in_usd(yb_lt.address))
@@ -243,14 +244,12 @@ def test_ll_usd_denomination(
 
 def test_ll_usd_shares_ema(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin, accounts, admin, yb_allocated,
-    seed_cryptopool, ll_deployer, ll_usd_deployer, mock_agg,
+    seed_cryptopool, ll, ll_usd, mock_agg,
 ):
     """USD and asset consumers checkpoint ONE EMA: a fundamental bump recorded by an asset-side
     price_w() is folded in by a later USD-side price_w(), and both denominations then price off
     the same advanced EMA (ChainSecurity #002)."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
-    ll_usd = ll_usd_deployer.deploy(ll.address)
 
     ll_usd.price_w()                                    # seed via the USD side
     f0 = ll.fundamental_ema()
@@ -276,11 +275,10 @@ def test_ll_usd_shares_ema(
 
 def test_ll_set_ema_time_access(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer,
+    accounts, admin, yb_allocated, seed_cryptopool, ll,
 ):
     """Only the bound factory can retune ema_time, and it is bounds-checked."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)   # factory == admin here
     assert ll.ema_time() == EMA_TIME
 
     with boa.env.prank(accounts[1]):
@@ -386,14 +384,13 @@ def _near(price, balance):
 
 def test_ll_untradable_boundary(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle, mock_agg,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle, mock_agg,
 ):
     """Crossing into the untradable region both oracles move to the balance value, what
     LT.emergency_withdraw pays once the AMM can't trade. That is a real jump up: just above
     the boundary arbitrage would still rebalance the AMM at LT holders' cost (realised values on
     both sides: test_lending_oracle_realised). A settled LL takes the same jump."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     lt = yb_lt.address
 
     lo, hi = _agg_boundary(yb_amm, mock_agg, admin)
@@ -417,15 +414,13 @@ def test_ll_untradable_boundary(
 
 def test_ll_untradable_balance_value(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, ll_usd_deployer,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, ll_usd,
     lending_oracle, mock_agg,
 ):
     """F-01: seeded on a healthy market, once the AMM is untradable the LL prices exactly the
     balance value, as the reference does - in either denomination, on price_w(), and without
     checkpoints (no blow-up as cv_ps -> debt, no drop to 0 while there is equity)."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
-    ll_usd = ll_usd_deployer.deploy(ll.address)
     lt = yb_lt.address
     ll.price_w()
     boa.env.time_travel(60)
@@ -453,12 +448,11 @@ def test_ll_untradable_balance_value(
 
 def test_ll_untradable_checkpoints(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
-    accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle, mock_agg,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle, mock_agg,
 ):
     """Untradable checkpoints record no fundamental: an unseeded LL stays unseeded and prices
     at the balance value; a seeded one keeps its last tradable fundamental."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
-    ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     lt = yb_lt.address
     lo, _ = _agg_boundary(yb_amm, mock_agg, admin)
 
