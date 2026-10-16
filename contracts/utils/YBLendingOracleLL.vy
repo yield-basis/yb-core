@@ -12,6 +12,10 @@
      conversion at price == price_scale, which absorbs wash-trade pumping of both AMM.vy
      equity and pool virtual_price); the shift to price_oracle is a pure (A, price ratio)
      function applied live. ema_time is factory-settable.
+     When the AMM is untradable (x0 unsolvable) there is no fundamental to record: the same
+     smoothed formula carries on, capped at the balance value at price_oracle (what
+     LT.emergency_withdraw pays). The price is continuous into that region and never above
+     the realisable value.
 """
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
@@ -230,9 +234,11 @@ def _assert_not_reentrant(amm: LevAMM):
 
 # The controller's per-call state: the EMA-able fundamental plus the live multipliers.
 struct Snapshot:
-    fundamental: uint256   # asset-denominated LT rate at price == price_scale (1e18/share)
+    fundamental: uint256   # asset-denominated LT rate at price == price_scale (1e18/share); 0 if untradable
     po_shift: uint256      # live multiplier fundamental -> price at price_oracle, asset denom (1e18)
     asset_price: uint256   # USD per asset at price_oracle (1e18), for the USD denomination
+    tradable: bool         # x0 solvable; otherwise the price is capped at balance_price
+    balance_price: uint256 # untradable only: balance value at price_oracle, asset denom (1e18/share)
 
 
 @internal
@@ -250,9 +256,11 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
          is a pure function of (A, price_oracle/price_scale) - no vprice, no AMM state - so it
          is safe to apply live (price_oracle is the pool's own EMA). It hits 0 exactly at the
          ratio-9/16 insolvency boundary (the same boundary where get_x0 reverts).
-         In the x0-unsolvable fallback the AMM is untradable; the fundamental is the
-         balance-based equity at price_scale and the shift is the equity ratio oracle/scale.
-         algebraically identical to YBLendingOracle's price (up to rounding).
+         fundamental * po_shift is algebraically YBLendingOracle's price (up to rounding).
+         In the x0-unsolvable region the AMM is untradable and there is no fundamental; the
+         snapshot carries the balance value at price_oracle instead, which is
+         YBLendingOracle's price there. It is above the x0-based value at the boundary (7/16
+         vs 6/16 of collateral value at price_oracle == price_scale).
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
@@ -281,42 +289,38 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
 
-    p_o_ps: uint256 = price_scale * agg_price // PRECISION   # USD per asset at price_scale
-    value_ps: uint256 = 0    # USD equity at price_scale
+    # Leverage shift to price_oracle: 2L*sqrt(pv_norm) - (2L-1), floored at 0 once the
+    # leveraged equity is wiped (pv_norm < (9/16 at L=2)) instead of underflowing.
     po_shift: uint256 = 0
-    lv_total: uint256 = 0
-    lv_admin: int256 = 0
-    lt_supply: uint256 = 0
+    s: uint256 = 2 * L * isqrt(pv_norm * PRECISION)
+    if s > (2 * L - 1) * PRECISION:
+        po_shift = (s - (2 * L - 1) * PRECISION) * price_scale // price_oracle
+    asset_price: uint256 = price_oracle * agg_price // PRECISION
 
+    fundamental: uint256 = 0
+    balance_price: uint256 = 0
     if x0_ok:
         # Equity at price_scale: x0/(2L-1) (== the AMM value the LT itself accounts with).
-        value_ps = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        p_o_ps: uint256 = price_scale * agg_price // PRECISION   # USD per asset at price_scale
+        value_ps: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        lv_total: uint256 = 0
+        lv_admin: int256 = 0
+        lt_supply: uint256 = 0
         lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o_ps, value_ps)
-        # Leverage shift to price_oracle: 2L*sqrt(pv_norm) - (2L-1), floored at 0 once the
-        # leveraged equity is wiped (pv_norm < (9/16 at L=2)) instead of underflowing.
-        s: uint256 = 2 * L * isqrt(pv_norm * PRECISION)
-        if s > (2 * L - 1) * PRECISION:
-            po_shift = (s - (2 * L - 1) * PRECISION) * price_scale // price_oracle
+        # Per-share, admin-fee-adjusted, converted USD -> asset at the price_scale marking.
+        fundamental = (value_ps * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total)
+                       * PRECISION // lt_supply) * PRECISION // p_o_ps
     else:
-        # AMM untradable (get_x0 would revert): balance-based equity, collateral at lp_price_ps.
-        # value 0 for an insolvent position instead of underflowing; then price is 0.
-        cv_ps: uint256 = collateral * lp_price_ps // PRECISION * agg_price // PRECISION
-        if cv_ps > debt:
-            value_ps = cv_ps - debt
-            # Shift = equity(price_oracle)/equity(price_scale); cv_po = cv_ps * pv_norm.
-            cv_po: uint256 = cv_ps * pv_norm // PRECISION
-            if cv_po > debt:
-                po_shift = (cv_po - debt) * PRECISION // value_ps * price_scale // price_oracle
-        lv: LiquidityValues = staticcall lt.liquidity()
-        lv_total = lv.total
-        lv_admin = lv.admin
-        lt_supply = staticcall lt.totalSupply()
+        # AMM untradable (get_x0 would revert): collateral at price_oracle (cv_po = cv_ps * pv_norm)
+        # minus debt; 0 for an insolvent position instead of underflowing.
+        cv_po: uint256 = collateral * lp_price_ps // PRECISION * agg_price // PRECISION * pv_norm // PRECISION
+        if cv_po > debt:
+            lv: LiquidityValues = staticcall lt.liquidity()
+            balance_price = ((cv_po - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+                             * PRECISION // staticcall lt.totalSupply()) * PRECISION // asset_price
 
-    # Per-share, admin-fee-adjusted, converted USD -> asset at the price_scale marking.
-    fundamental: uint256 = (value_ps * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total)
-                            * PRECISION // lt_supply) * PRECISION // p_o_ps
-    return Snapshot(fundamental=fundamental, po_shift=po_shift,
-                    asset_price=price_oracle * agg_price // PRECISION)
+    return Snapshot(fundamental=fundamental, po_shift=po_shift, asset_price=asset_price,
+                    tradable=x0_ok, balance_price=balance_price)
 
 
 # Honest fundamental-rate EMA (cryptopool / FastGauge style). The reported value blends the
@@ -341,8 +345,15 @@ def _fundamental_ema(ema: uint256) -> uint256:
 @internal
 @pure
 def _price_from(fundamental: uint256, snap: Snapshot, usd: bool) -> uint256:
-    """Price in the requested denomination from a (possibly smoothed) fundamental + live shift."""
+    """Price in the requested denomination from a (possibly smoothed) fundamental + live shift.
+    Untradable: capped at the balance value, which is the price itself if there is no
+    fundamental to smooth (unseeded)."""
     price_asset: uint256 = fundamental * snap.po_shift // PRECISION
+    if not snap.tradable:
+        if fundamental == 0:
+            price_asset = snap.balance_price
+        else:
+            price_asset = min(price_asset, snap.balance_price)
     if usd:
         return price_asset * snap.asset_price // PRECISION
     return price_asset
@@ -375,13 +386,15 @@ def _price_w(usd: bool) -> uint256:
     snap: Snapshot = self._snapshot(lt, pool, amm, agg_price)
 
     ema: uint256 = self.fundamental_ema
-    if ema == 0:
-        ema = snap.fundamental                    # seed the EMA at the first checkpoint
-    else:
+    if ema != 0:
         ema = self._fundamental_ema(ema)          # advance using the OLD fundamental_last
+    if snap.tradable:
+        if ema == 0:
+            ema = snap.fundamental                # seed the EMA at the first checkpoint
+        self.fundamental_last = snap.fundamental  # record current value for the NEXT advance
+    # Untradable: nothing to record, the EMA keeps converging to the last tradable fundamental
     self.fundamental_ema = ema
     self.ema_ts = block.timestamp
-    self.fundamental_last = snap.fundamental       # record current value for the NEXT advance
 
     return self._price_from(ema, snap, usd)
 
@@ -415,9 +428,10 @@ def price_w() -> uint256:
     """
     @notice Checkpoint and return the EMA-smoothed ybLT price in the underlying asset.
     @dev Advances the fundamental EMA using the PREVIOUS checkpoint's value, records the
-         current one for next time, and checkpoints the aggregator (agg.price_w()). The
-         returned price uses the advanced EMA, so this call is unaffected by same-tx wash
-         trades against the AMM or the pool. Call regularly (see the EMA note above).
+         current one for next time (if tradable), and checkpoints the aggregator
+         (agg.price_w()). The returned price uses the advanced EMA, so this call is
+         unaffected by same-tx wash trades against the AMM or the pool. Call regularly (see
+         the EMA note above).
     @return Smoothed price scaled to 1e18
     """
     return self._price_w(False)
