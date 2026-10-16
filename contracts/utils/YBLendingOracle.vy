@@ -156,18 +156,21 @@ def _mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
 def _get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> (bool, uint256):
     """
     @notice AMM.get_x0(p_oracle, collateral, debt, safe_limits=False) reproduced in-contract:
-            bit-for-bit identical, but returns (solvable, x0) rather than reverting on the
-            discriminant underflow. Done here for gas and to avoid the OOG-vs-revert
-            ambiguity of AMM.get_state() re-entering the crvUSD aggregator.
+            bit-for-bit identical where it succeeds. Where it would revert on the discriminant
+            underflow, returns solvable == False and x0 with the discriminant floored at 0 (its
+            value at the boundary). Done here for gas and to avoid the OOG-vs-revert ambiguity
+            of AMM.get_state() re-entering the crvUSD aggregator.
     @dev COLLATERAL_PRECISION == 1 (the cryptopool LP is 18-dec). solvable is False exactly
          when AMM.get_x0 would revert (position too imbalanced: ratio < 9/16 at L=2).
     @return (solvable, x0)
     """
     coll_value: uint256 = p_oracle * collateral // PRECISION
     d_sub: uint256 = 4 * coll_value * LEV_RATIO // PRECISION * debt
-    if coll_value * coll_value < d_sub:
-        return (False, 0)
-    return (True, (coll_value + isqrt(coll_value * coll_value - d_sub)) * PRECISION // (2 * LEV_RATIO))
+    solvable: bool = coll_value * coll_value >= d_sub
+    disc: uint256 = 0
+    if solvable:
+        disc = coll_value * coll_value - d_sub
+    return (solvable, (coll_value + isqrt(disc)) * PRECISION // (2 * LEV_RATIO))
 
 
 @internal
@@ -285,17 +288,25 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
 
-    yb_oracle: uint256 = 0
-    lv_total: uint256 = 0
-    lv_admin: int256 = 0
-    lt_supply: uint256 = 0
+    # Balance value per LT token (what LT.emergency_withdraw pays), with the cached liquidity
+    # values: balances can't change in the non-tradable state. 0 for an insolvent position
+    # (collateral value below debt) instead of underflowing, so a lending integrator can
+    # still liquidate it rather than being bricked by a reverting price.
+    balance_value: uint256 = 0
+    if use_balances or not x0_ok:
+        coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
+        if coll_value > debt:
+            lv: LiquidityValues = staticcall lt.liquidity()
+            balance_value = (coll_value - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // staticcall lt.totalSupply()
 
-    if x0_ok and (not use_balances):
+    yb_oracle: uint256 = 0
+    if use_balances:
+        yb_oracle = balance_value
+    else:
         # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
         # yb_oracle_value *= f_lp / lt_supply / price_oracle
         # The factor goes <= 10**18 once the leveraged equity has been wiped out (ratio < 9/16);
-        # return 0 instead of underflowing so a lending integrator can still liquidate the
-        # (insolvent) position rather than being bricked by a reverting price.
+        # return 0 instead of underflowing, for the same liquidation-availability reason.
         factor: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1)
         if factor > 10**18:
             yb_oracle = x0 * (factor - 10**18) // 10**18
@@ -303,24 +314,20 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256):
         # Compute fresh liquidity values (replicates LT._calculate_values)
         p_o: uint256 = price_scale * agg_price // PRECISION
         amm_value: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        lv_total: uint256 = 0
+        lv_admin: int256 = 0
+        lt_supply: uint256 = 0
         lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o, amm_value)
-    else:
-        # AMM too imbalanced for x0 (or use_balances requested). Balances can't change
-        # in the non-tradable state, so compute value from balances directly.
-        # Return 0 for an insolvent position (collateral value below debt) instead of
-        # underflowing, for the same liquidation-availability reason as above.
-        coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
-        if coll_value > debt:
-            yb_oracle = coll_value - debt
 
-        # Fall back to cached liquidity values
-        lv: LiquidityValues = staticcall lt.liquidity()
-        lv_total = lv.total
-        lv_admin = lv.admin
-        lt_supply = staticcall lt.totalSupply()
+        # Make it per LT token
+        yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
 
-    # Make it per LT token
-    yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
+        if not x0_ok:
+            # AMM untradable: x0 is floored at its boundary value (see _get_x0), so the price is
+            # continuous across the boundary, where it is below the balance value (6/16 vs 7/16
+            # of collateral value at price_oracle == price_scale). Capped at the balance value,
+            # which it exceeds as the position worsens.
+            yb_oracle = min(yb_oracle, balance_value)
 
     return (yb_oracle, price_oracle * agg_price // 10**18)
 
@@ -341,7 +348,7 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     @notice ybLT price denominated in the underlying asset (e.g. BTC), per LT token.
     @param lt The LT (market) to price
     @param use_balances Value from raw AMM balances instead of the manipulation-resistant
-           price-oracle path (this path is used anyway when the position is non-tradable)
+           price-oracle path (which is capped at it when the position is non-tradable)
     @return Price scaled to 1e18
     """
     yb_oracle: uint256 = 0

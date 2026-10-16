@@ -4,9 +4,9 @@ YBLendingOracleLL on real markets pushed into the untradable region (x0 unsolvab
 The AMM position is moved by overwriting AMM.collateral_amount on a head fork, with
 k = cv_ps / (16/9 * debt): x0 is unsolvable when k < 1, and cv_ps == debt at k = 0.5625.
 A fresh LL is seeded on the healthy market first, as a deployed one would be. Checks:
-  - never above the balance value (YBLendingOracle's price there), positive while it is,
+  - LL and YBLendingOracle never above the balance value, positive while it is,
     including as cv_ps -> debt (where the old seeded LL blew up),
-  - continuous across the boundary once the EMA has settled, while the reference jumps,
+  - both continuous across the boundary (the LL once its EMA has settled),
   - after a shock: at or below the balance value through checkpoints and a long idle gap.
 """
 from fractions import Fraction
@@ -90,6 +90,9 @@ def _check_capped(lt, ll, ref, ctx):
     assert price <= _rounded_up(balance), f"{ctx}: LL {price} above balance {balance}"
     assert (price > 0) == (balance > 0), f"{ctx}: LL {price} balance {balance}"
     assert ll.price_usd() <= _rounded_up(ref.price_in_usd(lt.address, True)), ctx
+    ref_price = ref.price_in_asset(lt.address)
+    assert ref_price <= balance, f"{ctx}: reference {ref_price} above balance {balance}"
+    assert (ref_price > 0) == (balance > 0), f"{ctx}: reference {ref_price} balance {balance}"
     return price, balance
 
 
@@ -114,17 +117,19 @@ def test_untradable_continuous(market, ref):
         ll.price_w()
         boa.env.time_travel(EMA_TIME)
 
-    _set_k(amm, lp_oracle, "1.0005")
+    _set_k(amm, lp_oracle, "1.00000000000001")
     assert _tradable(amm)
     ll_t, ref_t = ll.price(), ref.price_in_asset(lt.address)
-    _set_k(amm, lp_oracle, "0.9995")
+    _set_k(amm, lp_oracle, "0.99999999999999")
     assert not _tradable(amm)
     ll_u, ref_u = ll.price(), ref.price_in_asset(lt.address)
     print(f"LL {ll_t / 1e18:.6f} -> {ll_u / 1e18:.6f}, reference {ref_t / 1e18:.6f} -> {ref_u / 1e18:.6f}")
 
+    balance = ref.price_in_asset(lt.address, True)
     assert ll_u == ll_t
-    assert ll_u < ref.price_in_asset(lt.address, True)
-    assert ref_u > ref_t * 105 // 100, "reference did not jump at the boundary"
+    assert ll_u < balance
+    assert abs(ref_u - ref_t) <= ref_t // 10**6, "reference jumped at the boundary"
+    assert ref_u < balance
 
 
 @pytest.mark.parametrize("k", ["0.9", "0.6"])
