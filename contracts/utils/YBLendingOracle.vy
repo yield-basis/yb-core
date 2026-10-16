@@ -83,6 +83,11 @@ L: constant(uint256) = 2
 LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
+# sqrt(AMM price / its price oracle) where debt / collateral value reaches AMM.MAX_SAFE_DEBT (17/32)
+# and AMM.MIN_SAFE_DEBT (1/16): along the AMM curve (fixed x0 and price oracle) that ratio is
+# 3/2 * s - s**2 at L=2, so s = 3/4 + sqrt(9/16 - limit).
+SQRT_P_MAX_DEBT: constant(uint256) = 926776695296636881     # 3/4 + sqrt(2)/8
+SQRT_P_MIN_DEBT: constant(uint256) = 1457106781186547524    # 3/4 + sqrt(2)/2
 
 
 FACTORY: public(immutable(Factory))
@@ -155,21 +160,44 @@ def _mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
 def _get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> (bool, uint256):
     """
     @notice AMM.get_x0(p_oracle, collateral, debt, safe_limits=False) reproduced in-contract:
-            bit-for-bit identical where it succeeds. Where it would revert on the discriminant
-            underflow, returns solvable == False and x0 with the discriminant floored at 0 (its
-            value at the boundary). Done here for gas and to avoid the OOG-vs-revert ambiguity
-            of AMM.get_state() re-entering the crvUSD aggregator.
+            bit-for-bit identical, but returns (solvable, x0) rather than reverting on the
+            discriminant underflow. Done here for gas and to avoid the OOG-vs-revert
+            ambiguity of AMM.get_state() re-entering the crvUSD aggregator.
     @dev COLLATERAL_PRECISION == 1 (the cryptopool LP is 18-dec). solvable is False exactly
          when AMM.get_x0 would revert (position too imbalanced: ratio < 9/16 at L=2).
     @return (solvable, x0)
     """
     coll_value: uint256 = p_oracle * collateral // PRECISION
     d_sub: uint256 = 4 * coll_value * LEV_RATIO // PRECISION * debt
-    solvable: bool = coll_value * coll_value >= d_sub
-    disc: uint256 = 0
-    if solvable:
-        disc = coll_value * coll_value - d_sub
-    return (solvable, (coll_value + isqrt(disc)) * PRECISION // (2 * LEV_RATIO))
+    if coll_value * coll_value < d_sub:
+        return (False, 0)
+    return (True, (coll_value + isqrt(coll_value * coll_value - d_sub)) * PRECISION // (2 * LEV_RATIO))
+
+
+@internal
+@pure
+def _sqrt_arb_endpoint(sqrt_r: uint256, x0: uint256, debt: uint256, coll_value: uint256) -> uint256:
+    """
+    @notice sqrt(e): where arbitrage leaves the AMM's price, relative to its price oracle, when
+            the LP market price is r times that oracle (sqrt_r = sqrt(r), 1e18).
+    @dev Arbitrage moves the AMM along its curve towards r, but AMM.exchange only accepts a
+         final state with debt / coll_value inside [MIN_SAFE_DEBT, MAX_SAFE_DEBT], unless the
+         trade moves towards the equilibrium (coll_value == 2 * debt) without crossing it. So it
+         stops at the safe limit, or doesn't move at all if the AMM is already past it.
+    @param sqrt_r sqrt(LP market price / AMM price oracle), 1e18
+    @param x0 The AMM's (solvable) x0 at its price oracle
+    @param debt The AMM's debt
+    @param coll_value The AMM's collateral value at its price oracle
+    @return sqrt(e), 1e18
+    """
+    sqrt_e: uint256 = sqrt_r
+    if coll_value > 0:
+        sqrt_c: uint256 = isqrt((x0 - debt) * 10**36 // coll_value)   # the AMM's price now
+        if sqrt_r < sqrt_c:     # AMM above the market: arbitrage sells it LP, adding debt
+            sqrt_e = max(sqrt_r, min(sqrt_c, SQRT_P_MAX_DEBT))
+        else:                   # AMM below the market: arbitrage buys LP, repaying debt
+            sqrt_e = min(sqrt_r, max(sqrt_c, SQRT_P_MIN_DEBT))
+    return sqrt_e
 
 
 @internal
@@ -245,10 +273,10 @@ def _calculate_fresh_lv(lt: LT, p_o: uint256, amm_value: uint256) -> (uint256, i
 
 @internal
 @view
-def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256):
+def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256, bool):
     """
-    @return (yb_oracle_usd, asset_price_usd, staked_tokens): staked_tokens is the staker's
-            fresh LT balance on the price-oracle path, 0 with use_balances
+    @return (yb_oracle_usd, asset_price_usd, staked_tokens, fresh): fresh is True on the
+            price-oracle path, where staked_tokens is the staker's fresh LT balance (0 otherwise)
     """
     pool: IFXSwap = staticcall lt.CRYPTOPOOL()
     amm: LevAMM = staticcall lt.amm()
@@ -289,27 +317,22 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256):
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
 
-    # Balance value per LT token (what LT.emergency_withdraw pays), with the cached liquidity
-    # values: balances can't change in the non-tradable state. 0 for an insolvent position
-    # (collateral value below debt) instead of underflowing, so a lending integrator can
-    # still liquidate it rather than being bricked by a reverting price.
-    balance_value: uint256 = 0
-    if use_balances or not x0_ok:
-        coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
-        if coll_value > debt:
-            lv: LiquidityValues = staticcall lt.liquidity()
-            balance_value = (coll_value - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // staticcall lt.totalSupply()
-
     yb_oracle: uint256 = 0
     staked_tokens: uint256 = 0
-    if use_balances:
-        yb_oracle = balance_value
-    else:
-        # yb_oracle_value = x0 * (2 * L / (2*L - 1) * (lp_price_oracle / lp_price_ps)**0.5 - 1) <- agg price cancels out
+    fresh: bool = x0_ok and not use_balances
+    if fresh:
+        # yb_oracle_value = x0 * (2/3 * (r / sqrt(e) + sqrt(e)) - 1) <- agg price cancels out, with
+        #   r = lp_price_oracle / lp_price_ps: the LP market price over the AMM's price oracle,
+        #   e: the AMM's price over its oracle once arbitraged towards r (_sqrt_arb_endpoint).
+        # Normally e == r: x0 * (2 * L / (2*L - 1) * r**0.5 - 1). The AMM's safe-debt limits can
+        # stop the arbitrage short, which leaves LT holders more.
         # yb_oracle_value *= f_lp / lt_supply / price_oracle
-        # The factor goes <= 10**18 once the leveraged equity has been wiped out (ratio < 9/16);
-        # return 0 instead of underflowing, for the same liquidation-availability reason.
-        factor: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps) * (2 * L) // (2 * L - 1)
+        # The factor goes <= 10**18 once the leveraged equity has been wiped out at the market
+        # price; return 0 instead of underflowing so a lending integrator can still liquidate the
+        # (insolvent) position rather than being bricked by a reverting price.
+        sqrt_r: uint256 = isqrt(10**36 * lp_price_oracle // lp_price_ps)
+        sqrt_e: uint256 = self._sqrt_arb_endpoint(sqrt_r, x0, debt, p_o_amm * collateral // PRECISION)
+        factor: uint256 = L * (sqrt_r * sqrt_r // sqrt_e + sqrt_e) // (2 * L - 1)
         if factor > 10**18:
             yb_oracle = x0 * (factor - 10**18) // 10**18
 
@@ -323,31 +346,34 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256):
 
         # Make it per LT token
         yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
+    else:
+        # AMM untradable (get_x0 would revert, so it can't trade and there is nothing to arbitrage)
+        # or use_balances requested: value from balances, what LT.emergency_withdraw pays, with the
+        # cached liquidity values as balances can't change in the non-tradable state.
+        # 0 for an insolvent position (collateral value below debt) instead of underflowing, for
+        # the same liquidation-availability reason as above.
+        coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
+        if coll_value > debt:
+            lv: LiquidityValues = staticcall lt.liquidity()
+            yb_oracle = (coll_value - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // staticcall lt.totalSupply()
 
-        if not x0_ok:
-            # AMM untradable: x0 is floored at its boundary value (see _get_x0), so the price is
-            # continuous across the boundary, where it is below the balance value (6/16 vs 7/16
-            # of collateral value at price_oracle == price_scale). Capped at the balance value,
-            # which it exceeds as the position worsens.
-            yb_oracle = min(yb_oracle, balance_value)
-
-    return (yb_oracle, price_oracle * agg_price // 10**18, staked_tokens)
+    return (yb_oracle, price_oracle * agg_price // 10**18, staked_tokens, fresh)
 
 
 @internal
 @view
-def _staked_scale(lt: LT, use_balances: bool, staked_tokens: uint256) -> uint256:
+def _staked_scale(lt: LT, fresh: bool, staked_tokens: uint256) -> uint256:
     """
     @notice Gauge share -> LT: the staker's LT balance over the gauge supply (1.0 without a
-            staker). The balance is staked_tokens from _price - what LT.updated_balances()
-            returns, but also defined while the AMM is untradable, where that reverts - or
-            the stored balance with use_balances.
+            staker). The balance is the fresh one from _price on its price-oracle path (what
+            LT.updated_balances() returns), else the stored one, matching the balances path's
+            cached liquidity values (and LT.updated_balances() reverts while untradable).
     """
     scale: uint256 = 10**18
     staker: address = staticcall lt.staker()
     if staker != empty(address):
         staker_balance: uint256 = staked_tokens
-        if use_balances:
+        if not fresh:
             staker_balance = staticcall lt.balanceOf(staker)
         gauge_supply: uint256 = staticcall ILiquidityGauge(staker).totalSupply()
         scale = (staker_balance + 1) * 10**18 // (gauge_supply + 1)
@@ -361,13 +387,14 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     @notice ybLT price denominated in the underlying asset (e.g. BTC), per LT token.
     @param lt The LT (market) to price
     @param use_balances Value from raw AMM balances instead of the manipulation-resistant
-           price-oracle path (which is capped at it when the position is non-tradable)
+           price-oracle path (this path is used anyway when the position is non-tradable)
     @return Price scaled to 1e18
     """
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
     staked_tokens: uint256 = 0
-    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
+    fresh: bool = False
+    yb_oracle, asset_price, staked_tokens, fresh = self._price(lt, use_balances)
     return yb_oracle * 10**18 // asset_price
 
 
@@ -396,8 +423,9 @@ def staked_price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
     staked_tokens: uint256 = 0
-    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
-    return yb_oracle * self._staked_scale(lt, use_balances, staked_tokens) // asset_price
+    fresh: bool = False
+    yb_oracle, asset_price, staked_tokens, fresh = self._price(lt, use_balances)
+    return yb_oracle * self._staked_scale(lt, fresh, staked_tokens) // asset_price
 
 
 @external
@@ -412,5 +440,6 @@ def staked_price_in_usd(lt: LT, use_balances: bool = False) -> uint256:
     yb_oracle: uint256 = 0
     asset_price: uint256 = 0
     staked_tokens: uint256 = 0
-    yb_oracle, asset_price, staked_tokens = self._price(lt, use_balances)
-    return yb_oracle * self._staked_scale(lt, use_balances, staked_tokens) // 10**18
+    fresh: bool = False
+    yb_oracle, asset_price, staked_tokens, fresh = self._price(lt, use_balances)
+    return yb_oracle * self._staked_scale(lt, fresh, staked_tokens) // 10**18
