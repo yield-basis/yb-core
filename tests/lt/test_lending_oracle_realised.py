@@ -23,6 +23,9 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
 FUZZ_EXAMPLES = int(os.getenv("REALISED_FUZZ_EXAMPLES", "50"))
+# Independent fuzz runs, for a long campaign on all cores (PyPy: one per physical core), e.g.
+#   FUZZ_SHARDS=4 REALISED_FUZZ_EXAMPLES=2000 uv run pytest -n 4 tests/lt/test_lending_oracle_realised.py -k fuzz
+FUZZ_SHARDS = int(os.getenv("FUZZ_SHARDS", "1"))
 EMA_TIME = 866
 COLLATERAL_SLOT = 1  # AMM.collateral_amount
 PRICE_ABI = '[{"name":"price","outputs":[{"type":"uint256"}],"inputs":[],"stateMutability":"view","type":"function"}]'
@@ -229,6 +232,7 @@ def test_oracles_match_realised_value(env):
     assert all(seen.values()), f"not every arbitrage outcome covered: {seen}"
 
 
+@pytest.mark.parametrize("shard", range(FUZZ_SHARDS))
 @given(
     ops=st.lists(st.tuples(st.integers(0, 3), st.integers(1, 100)), min_size=1, max_size=6),
     k_permille=st.integers(600, 3000),
@@ -236,7 +240,7 @@ def test_oracles_match_realised_value(env):
 )
 @settings(max_examples=FUZZ_EXAMPLES, deadline=None,
           suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
-def test_oracles_match_realised_value_fuzz(env, ops, k_permille, tiny_fee):
+def test_oracles_match_realised_value_fuzz(env, shard, ops, k_permille, tiny_fee):
     """Random pool trades with time in between (so price_scale moves the way it does), then a
     random AMM position: the oracles must match the realised value as in the grid test."""
     amm_fee = "tiny AMM fee" if tiny_fee else "AMM fee"

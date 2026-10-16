@@ -26,6 +26,9 @@ from hypothesis import given, settings, strategies as st, HealthCheck
 # Equivalence-fuzz examples: a real fuzz by default, crankable via env for a heavy campaign
 # (e.g. LL_FUZZ_EXAMPLES=1000 uv run pytest ...).
 FUZZ_EXAMPLES = int(os.getenv("LL_FUZZ_EXAMPLES", "200"))
+# Independent fuzz runs, for a long campaign on all cores (PyPy: one per physical core), e.g.
+#   FUZZ_SHARDS=4 LL_FUZZ_EXAMPLES=2000 uv run pytest -n 4 tests/lt/test_lending_oracle_ll.py -k fuzz
+FUZZ_SHARDS = int(os.getenv("FUZZ_SHARDS", "1"))
 
 EMA_TIME = 866   # half-life = EMA_TIME * ln(2) ~= 600s (10 min); factory default
 HALF_LIFE = 600
@@ -568,10 +571,11 @@ def _apply_op(env, op, param):
     boa.env.time_travel(max(1, param) * 60)               # let the pool price_oracle EMA advance
 
 
+@pytest.mark.parametrize("shard", range(FUZZ_SHARDS))
 @given(seq=st.lists(st.tuples(st.integers(0, 5), st.integers(55, 130)), min_size=1, max_size=6))
 @settings(max_examples=FUZZ_EXAMPLES, deadline=None,
           suppress_health_check=[HealthCheck.function_scoped_fixture])
-def test_ll_equiv_fuzz(equiv_env, seq):
+def test_ll_equiv_fuzz(equiv_env, shard, seq):
     """Drive random price moves / fee accrual / agg changes / idle gaps and assert the unseeded
     LL equals the reference at every step (each example rolled back via anchor)."""
     with boa.env.anchor():
