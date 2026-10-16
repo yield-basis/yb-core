@@ -12,9 +12,10 @@
      conversion at price == price_scale, which absorbs wash-trade pumping of both AMM.vy
      equity and pool virtual_price); the shift to price_oracle is a pure (A, price ratio)
      function applied live. ema_time is factory-settable.
-     When the AMM is untradable (x0 unsolvable), x0 is floored at its boundary value, so the
-     fundamental stays continuous, and the price is capped at the balance value at
-     price_oracle (what LT.emergency_withdraw pays): never above the realisable value.
+     The shift accounts for where arbitrage actually leaves the AMM: its safe-debt limits can
+     stop it short of the market price. When the AMM is untradable (x0 unsolvable) it can't
+     trade at all and there is no fundamental to record: the price is the balance value at
+     price_oracle, what LT.emergency_withdraw pays.
 """
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
@@ -71,6 +72,11 @@ L: constant(uint256) = 2
 LEV_RATIO: constant(uint256) = (L * PRECISION)**2 * PRECISION // (2 * L * PRECISION - PRECISION)**2
 SQRT_MIN_UNSTAKED_FRACTION: constant(int256) = 10**14
 MIN_STAKED_FOR_FEES: constant(int256) = 10**16
+# sqrt(AMM price / its price oracle) where debt / collateral value reaches AMM.MAX_SAFE_DEBT (17/32)
+# and AMM.MIN_SAFE_DEBT (1/16): along the AMM curve (fixed x0 and price oracle) that ratio is
+# 3/2 * s - s**2 at L=2, so s = 3/4 + sqrt(9/16 - limit).
+SQRT_P_MAX_DEBT: constant(uint256) = 926776695296636881     # 3/4 + sqrt(2)/8
+SQRT_P_MIN_DEBT: constant(uint256) = 1457106781186547524    # 3/4 + sqrt(2)/2
 # Sane upper bound on the EMA time constant (~31.7 yr); guards a fat-finger set_ema_time.
 MAX_EMA_TIME: constant(uint256) = 10**9
 
@@ -143,21 +149,44 @@ def _mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
 def _get_x0(p_oracle: uint256, collateral: uint256, debt: uint256) -> (bool, uint256):
     """
     @notice AMM.get_x0(p_oracle, collateral, debt, safe_limits=False) reproduced in-contract:
-            bit-for-bit identical where it succeeds. Where it would revert on the discriminant
-            underflow, returns solvable == False and x0 with the discriminant floored at 0 (its
-            value at the boundary). Done here for gas and to avoid the OOG-vs-revert ambiguity
-            of AMM.get_state() re-entering the crvUSD aggregator.
+            bit-for-bit identical, but returns (solvable, x0) rather than reverting on the
+            discriminant underflow. Done here for gas and to avoid the OOG-vs-revert
+            ambiguity of AMM.get_state() re-entering the crvUSD aggregator.
     @dev COLLATERAL_PRECISION == 1 (the cryptopool LP is 18-dec). solvable is False exactly
          when AMM.get_x0 would revert (position too imbalanced: ratio < 9/16 at L=2).
     @return (solvable, x0)
     """
     coll_value: uint256 = p_oracle * collateral // PRECISION
     d_sub: uint256 = 4 * coll_value * LEV_RATIO // PRECISION * debt
-    solvable: bool = coll_value * coll_value >= d_sub
-    disc: uint256 = 0
-    if solvable:
-        disc = coll_value * coll_value - d_sub
-    return (solvable, (coll_value + isqrt(disc)) * PRECISION // (2 * LEV_RATIO))
+    if coll_value * coll_value < d_sub:
+        return (False, 0)
+    return (True, (coll_value + isqrt(coll_value * coll_value - d_sub)) * PRECISION // (2 * LEV_RATIO))
+
+
+@internal
+@pure
+def _sqrt_arb_endpoint(sqrt_r: uint256, x0: uint256, debt: uint256, coll_value: uint256) -> uint256:
+    """
+    @notice sqrt(e): where arbitrage leaves the AMM's price, relative to its price oracle, when
+            the LP market price is r times that oracle (sqrt_r = sqrt(r), 1e18).
+    @dev Arbitrage moves the AMM along its curve towards r, but AMM.exchange only accepts a
+         final state with debt / coll_value inside [MIN_SAFE_DEBT, MAX_SAFE_DEBT], unless the
+         trade moves towards the equilibrium (coll_value == 2 * debt) without crossing it. So it
+         stops at the safe limit, or doesn't move at all if the AMM is already past it.
+    @param sqrt_r sqrt(LP market price / AMM price oracle), 1e18
+    @param x0 The AMM's (solvable) x0 at its price oracle
+    @param debt The AMM's debt
+    @param coll_value The AMM's collateral value at its price oracle
+    @return sqrt(e), 1e18
+    """
+    sqrt_e: uint256 = sqrt_r
+    if coll_value > 0:
+        sqrt_c: uint256 = isqrt((x0 - debt) * 10**36 // coll_value)   # the AMM's price now
+        if sqrt_r < sqrt_c:     # AMM above the market: arbitrage sells it LP, adding debt
+            sqrt_e = max(sqrt_r, min(sqrt_c, SQRT_P_MAX_DEBT))
+        else:                   # AMM below the market: arbitrage buys LP, repaying debt
+            sqrt_e = min(sqrt_r, max(sqrt_c, SQRT_P_MIN_DEBT))
+    return sqrt_e
 
 
 @internal
@@ -236,10 +265,10 @@ def _assert_not_reentrant(amm: LevAMM):
 
 # The controller's per-call state: the EMA-able fundamental plus the live multipliers.
 struct Snapshot:
-    fundamental: uint256   # asset-denominated LT rate at price == price_scale (1e18/share)
+    fundamental: uint256   # asset-denominated LT rate at price == price_scale (1e18/share); 0 if untradable
     po_shift: uint256      # live multiplier fundamental -> price at price_oracle, asset denom (1e18)
     asset_price: uint256   # USD per asset at price_oracle (1e18), for the USD denomination
-    tradable: bool         # x0 solvable; otherwise the price is capped at balance_price
+    tradable: bool         # x0 solvable; otherwise the price is balance_price
     balance_price: uint256 # untradable only: balance value at price_oracle, asset denom (1e18/share)
 
 
@@ -257,13 +286,14 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
            po_shift = (2L*sqrt(pv_norm) - (2L-1)) * price_scale / price_oracle,
          is a pure function of (A, price_oracle/price_scale) - no vprice, no AMM state - so it
          is safe to apply live (price_oracle is the pool's own EMA). It hits 0 exactly at the
-         ratio-9/16 insolvency boundary (the same boundary where get_x0 reverts).
+         ratio-9/16 insolvency boundary. That assumes arbitrage takes the AMM all the way to
+         pv_norm; where its safe-debt limits stop it short (_sqrt_arb_endpoint), sqrt(pv_norm)
+         becomes (pv_norm / sqrt(e) + sqrt(e)) / 2, which depends on the AMM state only outside
+         the safe band, where AMM trades can only move it back at the trader's cost.
          fundamental * po_shift is algebraically YBLendingOracle's price (up to rounding).
-         In the x0-unsolvable region the AMM is untradable: x0 is floored at its boundary value
-         (see _get_x0), so the fundamental is continuous there, and the snapshot also carries
-         the balance value at price_oracle to cap the price at, as YBLendingOracle does. The
-         cap does not bind at the boundary (7/16 vs 6/16 of collateral value at price_oracle
-         == price_scale), only as the position worsens.
+         In the x0-unsolvable region the AMM can't trade and there is no fundamental; the
+         snapshot carries the balance value at price_oracle instead, which is YBLendingOracle's
+         price there (what LT.emergency_withdraw pays).
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
@@ -292,27 +322,31 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
 
-    # Leverage shift to price_oracle: 2L*sqrt(pv_norm) - (2L-1), floored at 0 once the
-    # leveraged equity is wiped (pv_norm < (9/16 at L=2)) instead of underflowing.
-    po_shift: uint256 = 0
-    s: uint256 = 2 * L * isqrt(pv_norm * PRECISION)
-    if s > (2 * L - 1) * PRECISION:
-        po_shift = (s - (2 * L - 1) * PRECISION) * price_scale // price_oracle
     asset_price: uint256 = price_oracle * agg_price // PRECISION
-
-    # Equity at price_scale: x0/(2L-1) (== the AMM value the LT itself accounts with).
-    p_o_ps: uint256 = price_scale * agg_price // PRECISION   # USD per asset at price_scale
-    value_ps: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
-    lv_total: uint256 = 0
-    lv_admin: int256 = 0
-    lt_supply: uint256 = 0
-    lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o_ps, value_ps)
-    # Per-share, admin-fee-adjusted, converted USD -> asset at the price_scale marking.
-    fundamental: uint256 = (value_ps * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total)
-                            * PRECISION // lt_supply) * PRECISION // p_o_ps
-
+    fundamental: uint256 = 0
+    po_shift: uint256 = 0
     balance_price: uint256 = 0
-    if not x0_ok:
+    if x0_ok:
+        # Leverage shift to price_oracle: 2L*sqrt(pv_norm) - (2L-1) with the arbitrage endpoint
+        # (see the docstring), floored at 0 once the leveraged equity is wiped instead of
+        # underflowing.
+        sqrt_r: uint256 = isqrt(pv_norm * PRECISION)
+        sqrt_e: uint256 = self._sqrt_arb_endpoint(sqrt_r, x0, debt, p_o_amm * collateral // PRECISION)
+        s: uint256 = L * (sqrt_r * sqrt_r // sqrt_e + sqrt_e)
+        if s > (2 * L - 1) * PRECISION:
+            po_shift = (s - (2 * L - 1) * PRECISION) * price_scale // price_oracle
+
+        # Equity at price_scale: x0/(2L-1) (== the AMM value the LT itself accounts with).
+        p_o_ps: uint256 = price_scale * agg_price // PRECISION   # USD per asset at price_scale
+        value_ps: uint256 = x0 * PRECISION // (2 * L * PRECISION - PRECISION)
+        lv_total: uint256 = 0
+        lv_admin: int256 = 0
+        lt_supply: uint256 = 0
+        lv_total, lv_admin, lt_supply = self._calculate_fresh_lv(lt, p_o_ps, value_ps)
+        # Per-share, admin-fee-adjusted, converted USD -> asset at the price_scale marking.
+        fundamental = (value_ps * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total)
+                       * PRECISION // lt_supply) * PRECISION // p_o_ps
+    else:
         # AMM untradable (get_x0 would revert): collateral at price_oracle (cv_po = cv_ps * pv_norm)
         # minus debt; 0 for an insolvent position instead of underflowing.
         cv_po: uint256 = collateral * lp_price_ps // PRECISION * agg_price // PRECISION * pv_norm // PRECISION
@@ -347,11 +381,11 @@ def _fundamental_ema(ema: uint256) -> uint256:
 @internal
 @pure
 def _price_from(fundamental: uint256, snap: Snapshot, usd: bool) -> uint256:
-    """Price in the requested denomination from a (possibly smoothed) fundamental + live shift.
-    Untradable: capped at the balance value."""
-    price_asset: uint256 = fundamental * snap.po_shift // PRECISION
-    if not snap.tradable:
-        price_asset = min(price_asset, snap.balance_price)
+    """Price in the requested denomination from a (possibly smoothed) fundamental + live shift,
+    or the balance value if the AMM is untradable."""
+    price_asset: uint256 = snap.balance_price
+    if snap.tradable:
+        price_asset = fundamental * snap.po_shift // PRECISION
     if usd:
         return price_asset * snap.asset_price // PRECISION
     return price_asset
@@ -384,13 +418,15 @@ def _price_w(usd: bool) -> uint256:
     snap: Snapshot = self._snapshot(lt, pool, amm, agg_price)
 
     ema: uint256 = self.fundamental_ema
-    if ema == 0:
-        ema = snap.fundamental                    # seed the EMA at the first checkpoint
-    else:
+    if ema != 0:
         ema = self._fundamental_ema(ema)          # advance using the OLD fundamental_last
+    if snap.tradable:
+        if ema == 0:
+            ema = snap.fundamental                # seed the EMA at the first checkpoint
+        self.fundamental_last = snap.fundamental  # record current value for the NEXT advance
+    # Untradable: nothing to record, the EMA keeps converging to the last tradable fundamental
     self.fundamental_ema = ema
     self.ema_ts = block.timestamp
-    self.fundamental_last = snap.fundamental       # record current value for the NEXT advance
 
     return self._price_from(ema, snap, usd)
 
@@ -424,9 +460,10 @@ def price_w() -> uint256:
     """
     @notice Checkpoint and return the EMA-smoothed ybLT price in the underlying asset.
     @dev Advances the fundamental EMA using the PREVIOUS checkpoint's value, records the
-         current one for next time, and checkpoints the aggregator (agg.price_w()). The
-         returned price uses the advanced EMA, so this call is unaffected by same-tx wash
-         trades against the AMM or the pool. Call regularly (see the EMA note above).
+         current one for next time (if tradable), and checkpoints the aggregator
+         (agg.price_w()). The returned price uses the advanced EMA, so this call is
+         unaffected by same-tx wash trades against the AMM or the pool. Call regularly (see
+         the EMA note above).
     @return Smoothed price scaled to 1e18
     """
     return self._price_w(False)

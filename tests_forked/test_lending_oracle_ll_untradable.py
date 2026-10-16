@@ -4,11 +4,12 @@ YBLendingOracleLL on real markets pushed into the untradable region (x0 unsolvab
 The AMM position is moved by overwriting AMM.collateral_amount on a head fork, with
 k = cv_ps / (16/9 * debt): x0 is unsolvable when k < 1, and cv_ps == debt at k = 0.5625.
 A fresh LL is seeded on the healthy market first, as a deployed one would be. Checks:
-  - LL and YBLendingOracle never above the balance value, positive while it is,
-    including as cv_ps -> debt (where the old seeded LL blew up),
-  - both continuous across the boundary (the LL once its EMA has settled),
-  - after a shock: at or below the balance value through checkpoints and a long idle gap,
-  - YBLendingOracle's staked prices work there (F-07) and are continuous too.
+  - LL and YBLendingOracle price the balance value (what LT.emergency_withdraw pays, as the AMM
+    can't trade), positive while it is, including as cv_ps -> debt (where the old seeded LL
+    blew up),
+  - at the boundary both jump up to it, as the realised value does (no more arbitrage),
+  - after a shock: the balance value through checkpoints and a long idle gap,
+  - YBLendingOracle's staked prices work there (F-07).
 """
 from fractions import Fraction
 
@@ -81,38 +82,36 @@ def _tradable(amm):
         return False
 
 
-def _rounded_up(balance):
+def _near(price, balance):
     # The LL's balance value rounds differently from the reference's: a few wei either way.
-    return balance + balance // 10**12 + 10
+    return abs(price - balance) <= balance // 10**12 + 10
 
 
-def _check_capped(lt, ll, ref, ctx):
+def _check_balance(lt, ll, ref, ctx):
     balance = ref.price_in_asset(lt.address, True)
     price = ll.price()
-    assert price <= _rounded_up(balance), f"{ctx}: LL {price} above balance {balance}"
+    assert _near(price, balance), f"{ctx}: LL {price} balance {balance}"
     assert (price > 0) == (balance > 0), f"{ctx}: LL {price} balance {balance}"
-    assert ll.price_usd() <= _rounded_up(ref.price_in_usd(lt.address, True)), ctx
-    ref_price = ref.price_in_asset(lt.address)
-    assert ref_price <= balance, f"{ctx}: reference {ref_price} above balance {balance}"
-    assert (ref_price > 0) == (balance > 0), f"{ctx}: reference {ref_price} balance {balance}"
+    assert _near(ll.price_usd(), ref.price_in_usd(lt.address, True)), ctx
+    assert ref.price_in_asset(lt.address) == balance, ctx
     return price, balance
 
 
-def test_untradable_capped(market, ref):
+def test_untradable_balance_value(market, ref):
     lt, amm, ll, lp_oracle = market
     for k in GRID:
         with boa.env.anchor():
             _set_k(amm, lp_oracle, k)
             assert not _tradable(amm)
-            price, balance = _check_capped(lt, ll, ref, f"k={k}")
+            price, balance = _check_balance(lt, ll, ref, f"k={k}")
             print(f"k={k}: LL {price / 1e18:.6f} balance {balance / 1e18:.6f}")
     for eps in EPS_USD:
         with boa.env.anchor():
             _set_equity(amm, lp_oracle, eps)
-            _check_capped(lt, ll, ref, f"cv_ps - debt = {eps}")
+            _check_balance(lt, ll, ref, f"cv_ps - debt = {eps}")
 
 
-def test_untradable_continuous(market, ref):
+def test_untradable_boundary(market, ref):
     lt, amm, ll, lp_oracle = market
     _set_k(amm, lp_oracle, "1.002")
     for _ in range(12):
@@ -128,10 +127,8 @@ def test_untradable_continuous(market, ref):
     print(f"LL {ll_t / 1e18:.6f} -> {ll_u / 1e18:.6f}, reference {ref_t / 1e18:.6f} -> {ref_u / 1e18:.6f}")
 
     balance = ref.price_in_asset(lt.address, True)
-    assert ll_u == ll_t
-    assert ll_u < balance
-    assert abs(ref_u - ref_t) <= ref_t // 10**6, "reference jumped at the boundary"
-    assert ref_u < balance
+    assert ref_u == balance and _near(ll_u, balance)
+    assert ref_u > ref_t * 105 // 100 and ll_u > ll_t * 105 // 100
 
 
 @pytest.mark.parametrize("k", ["0.9", "0.6"])
@@ -140,38 +137,26 @@ def test_untradable_shock(market, ref, k):
     _set_k(amm, lp_oracle, k)
     with boa.env.anchor():
         boa.env.time_travel(3 * 86400)                   # no checkpoints at all
-        _check_capped(lt, ll, ref, f"k={k} idle")
+        _check_balance(lt, ll, ref, f"k={k} idle")
     for dt in [12] + [60] * 10 + [300] * 6 + [1800] * 2:
         boa.env.time_travel(dt)
         price = ll.price_w()
-        assert price <= _rounded_up(ref.price_in_asset(lt.address, True)), f"k={k} after {dt}s"
-        _check_capped(lt, ll, ref, f"k={k} after {dt}s")
+        assert _near(price, ref.price_in_asset(lt.address, True)), f"k={k} after {dt}s"
+        _check_balance(lt, ll, ref, f"k={k} after {dt}s")
 
 
 def test_untradable_staked_price(market, ref, deployers):
-    """F-07: staked prices no longer revert while the AMM is untradable, are continuous across
-    the boundary, and use the stored staker balance with use_balances."""
+    """F-07: staked prices no longer revert while the AMM is untradable; there they use the
+    stored staker balance, as the balance value uses the stored liquidity values."""
     lt, amm, ll, lp_oracle = market
     gauge = deployers["gauge"].at(lt.staker())
-
-    _set_k(amm, lp_oracle, "1.00000000000001")
-    assert _tradable(amm)
-    staked_t = ref.staked_price_in_asset(lt.address)
-    _set_k(amm, lp_oracle, "0.99999999999999")
-    assert not _tradable(amm)
-    staked_u = ref.staked_price_in_asset(lt.address)
-    print(f"staked {staked_t / 1e18:.6f} -> {staked_u / 1e18:.6f}")
-    assert abs(staked_u - staked_t) <= staked_t // 10**6, "staked price jumped at the boundary"
-
     scale = (lt.balanceOf(gauge.address) + 1) * 10**18 // (gauge.totalSupply() + 1)
     for k in GRID:
         with boa.env.anchor():
             _set_k(amm, lp_oracle, k)
-            for use_balances in (False, True):
-                price = ref.price_in_asset(lt.address, use_balances)
-                staked = ref.staked_price_in_asset(lt.address, use_balances)
-                assert (staked > 0) == (price > 0), f"k={k} use_balances={use_balances}"
-                ref.staked_price_in_usd(lt.address, use_balances)
-            staked_b = ref.staked_price_in_asset(lt.address, True)
+            assert not _tradable(amm)
             expected = ref.price_in_asset(lt.address, True) * scale // 10**18
-            assert abs(staked_b - expected) <= 2 + expected // 10**12, f"k={k}: {staked_b} vs {expected}"
+            for use_balances in (False, True):
+                staked = ref.staked_price_in_asset(lt.address, use_balances)
+                assert abs(staked - expected) <= 2 + expected // 10**12, f"k={k}: {staked} vs {expected}"
+                ref.staked_price_in_usd(lt.address, use_balances)

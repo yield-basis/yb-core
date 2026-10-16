@@ -90,6 +90,7 @@ def test_underflow_region_is_practically_insolvent(
         lt.deposit(10**18, p * 10**18 // 10**18, 0)
         lt.set_rate(0)
 
+    price_before = oracle.price_in_usd(lt.address)
     dumper = accounts[3]
     collateral_token._mint_for_testing(dumper, 5000 * 10**18)
     with boa.env.prank(dumper):
@@ -138,12 +139,14 @@ def test_underflow_region_is_practically_insolvent(
     # The oracle-underflow region is reached once the TRUE price (last_prices) has fallen to
     # <= price_scale/2 (the EMA clamp floor); there the position is practically insolvent at the
     # true price (v_true << debt), while get_state() still reports "OK" because it values
-    # collateral at the STALE price_scale. Rather than reverting (bricking liquidations), the
-    # oracle now returns 0 so a loss-taking liquidator can still clear the position.
+    # collateral at the STALE price_scale. The oracle doesn't revert (bricking liquidations).
+    # It prices at price_oracle, where arbitrage would leave the AMM at its max-safe-debt limit
+    # rather than wiping the equity, so it reports a small remainder rather than exactly 0; it
+    # can't see the true price below the EMA clamp.
     assert region, "never entered the (get_state ok AND oracle-underflow) region"
     for (step, vs, vo, vt, pu_ok, pu) in region:
         assert vs > 1.5         # AMM/get_state view (stale price_scale) still looks solvent
         assert vt <= vo <= vs   # true <= EMA <= stale: the staleness gap
-        assert pu_ok, f"step {step}: price_in_usd reverted instead of returning 0"
-        assert pu == 0, f"step {step}: price_in_usd returned {pu}, expected 0"
+        assert pu_ok, f"step {step}: price_in_usd reverted"
+        assert pu < price_before // 10, f"step {step}: price_in_usd {pu} vs {price_before} before the crash"
         assert vt < 1.5         # true-price value: position has lost ~all equity, not the ~2x the AMM sees

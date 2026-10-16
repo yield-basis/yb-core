@@ -115,8 +115,7 @@ def test_get_x0_internal_matches_amm(
     collateral, debt) -> (solvable, x0)`. Pin all three, bit-for-bit, to the AMM's own
     `get_x0(..., safe_limits=False)` across a grid that straddles the solvency boundary
     (debt == 9/16 * coll_value at L=2): same x0 where the AMM succeeds, and `solvable`
-    False exactly where the AMM reverts. There the lending oracles floor the discriminant at
-    0 (x0 at the boundary).
+    False exactly where the AMM reverts.
     """
     # The reproduction relies on COLLATERAL_PRECISION == 1 (the cryptopool LP collateral is
     # 18-dec, so the AMM's coll_value scaling is a no-op). That identity isn't asserted
@@ -142,8 +141,6 @@ def test_get_x0_internal_matches_amm(
                     assert ok == amm_ok, (name, p_o, collateral, debt, ok, amm_ok)
                     if amm_ok:
                         assert x0 == amm_x0, (name, p_o, collateral, debt, x0, amm_x0)
-                    elif name != "YBNetPressure":
-                        assert x0 == cv * 10**18 // (2 * LEV_RATIO), (name, p_o, collateral, debt, x0)
                 checked += 1
                 solvable_seen += amm_ok
                 revert_seen += not amm_ok

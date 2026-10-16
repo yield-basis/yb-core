@@ -13,8 +13,8 @@ flash-proof against both wash paths. Checks:
   - USD vs asset denomination: the USD forwarder shares the asset oracle's ONE EMA, so a
     checkpoint from either side advances it (ChainSecurity #002),
   - factory-settable ema_time,
-  - untradable AMM (x0 unsolvable): the smoothed price is capped at the balance value and
-    continuous across the boundary, as is the reference's (staked prices included).
+  - untradable AMM (x0 unsolvable): both price the balance value (what LT.emergency_withdraw
+    pays) and checkpoints there record no fundamental; the reference's staked prices work there.
 """
 import os
 from types import SimpleNamespace
@@ -378,19 +378,20 @@ def _agg_boundary(amm, mock_agg, admin):
     return lo, hi
 
 
-def _rounded_up(balance):
+def _near(price, balance):
     # The LL's balance value rounds differently from the reference's (cv_ps * pv_norm vs
     # portfolio_value * D / supply): a few wei either way.
-    return balance + balance // 10**12 + 10
+    return abs(price - balance) <= balance // 10**12 + 10
 
 
-def test_ll_untradable_continuous(
+def test_ll_untradable_boundary(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle, mock_agg,
 ):
-    """With the EMA settled just above the boundary, crossing into the untradable region does
-    not move the LL price at all (same EMA, same pool-only shift; the balance cap does not
-    bind). The reference, with x0 floored at its boundary value, does not jump either."""
+    """Crossing into the untradable region both oracles move to the balance value, what
+    LT.emergency_withdraw pays once the AMM can't trade. That is a real jump up: just above
+    the boundary arbitrage would still rebalance the AMM at LT holders' cost (realised values on
+    both sides: test_lending_oracle_realised). A settled LL takes the same jump."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     lt = yb_lt.address
@@ -409,20 +410,19 @@ def test_ll_untradable_continuous(
     balance = lending_oracle.price_in_asset(lt, True)
     print(f"\nLL {ll_t} -> {ll_u}   ref {ref_t} -> {ref_u} ({(ref_u - ref_t) / ref_t * 100:+.2f}%)")
 
-    assert ll_u == ll_t
-    assert ll_u < balance
-    assert abs(ref_u - ref_t) <= ref_t // 10**6, "reference jumped at the boundary"
-    assert ref_u < balance
+    assert ref_u == balance
+    assert _near(ll_u, balance)
+    assert ref_u > ref_t * 105 // 100 and ll_u > ll_t * 105 // 100
 
 
-def test_ll_untradable_capped_at_balance(
+def test_ll_untradable_balance_value(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, ll_usd_deployer,
     lending_oracle, mock_agg,
 ):
-    """F-01: seeded on a healthy market, the LL never prices above the balance value once the
-    AMM is untradable - in either denomination, on price_w(), and without checkpoints - and
-    stays positive while the balance value is. Likewise the reference."""
+    """F-01: seeded on a healthy market, once the AMM is untradable the LL prices exactly the
+    balance value, as the reference does - in either denomination, on price_w(), and without
+    checkpoints (no blow-up as cv_ps -> debt, no drop to 0 while there is equity)."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     ll_usd = ll_usd_deployer.deploy(ll.address)
@@ -439,16 +439,14 @@ def test_ll_untradable_capped_at_balance(
         balance = lending_oracle.price_in_asset(lt, True)
         price = ll.price()
         print(f"agg {agg_pct}%: LL {price} balance {balance}")
-        assert price <= _rounded_up(balance)
+        assert _near(price, balance)
         assert (price > 0) == (balance > 0)
-        assert ll_usd.price() <= _rounded_up(lending_oracle.price_in_usd(lt, True))
-        ref = lending_oracle.price_in_asset(lt)
-        assert ref <= balance
-        assert (ref > 0) == (balance > 0)
+        assert _near(ll_usd.price(), lending_oracle.price_in_usd(lt, True))
+        assert lending_oracle.price_in_asset(lt) == balance
         with boa.env.anchor():
-            assert ll.price_w() <= _rounded_up(balance)
+            assert _near(ll.price_w(), balance)
             boa.env.time_travel(3 * 86400)
-            assert ll.price() <= _rounded_up(lending_oracle.price_in_asset(lt, True))
+            assert _near(ll.price(), lending_oracle.price_in_asset(lt, True))
         checked += 1
     assert checked >= 3, "did not reach the untradable region"
 
@@ -457,29 +455,28 @@ def test_ll_untradable_checkpoints(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll_deployer, lending_oracle, mock_agg,
 ):
-    """Untradable checkpoints record the fundamental as usual: with x0 floored at its boundary
-    value it is continuous across the boundary. An unseeded LL is seeded there and equals the
-    reference."""
+    """Untradable checkpoints record no fundamental: an unseeded LL stays unseeded and prices
+    at the balance value; a seeded one keeps its last tradable fundamental."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     ll = _deploy_asset_ll(ll_deployer, yb_lt, admin)
     lt = yb_lt.address
     lo, _ = _agg_boundary(yb_amm, mock_agg, admin)
 
     _set_agg(mock_agg, admin, lo * 9 // 10)
-    _equiv(ll.price(), lending_oracle.price_in_asset(lt), "unseeded")
-    _equiv(ll.price_w(), lending_oracle.price_in_asset(lt), "unseeded price_w")
-    assert ll.fundamental_ema() == ll.fundamental_last() > 0
+    _equiv(ll.price(), lending_oracle.price_in_asset(lt, True), "unseeded")
+    _equiv(ll.price_w(), lending_oracle.price_in_asset(lt, True), "unseeded price_w")
+    assert ll.fundamental_ema() == 0 and ll.fundamental_last() == 0
 
+    _set_agg(mock_agg, admin, 10**18)
     boa.env.time_travel(60)
-    lo, hi = _agg_boundary(yb_amm, mock_agg, admin)         # interest has moved it
-    _set_agg(mock_agg, admin, hi)
     ll.price_w()
-    f_t = ll.fundamental_last()
-    _set_agg(mock_agg, admin, lo)
+    f0 = ll.fundamental_last()
+    assert f0 > 0 and ll.fundamental_ema() == f0
+
+    _set_agg(mock_agg, admin, lo * 9 // 10)
+    boa.env.time_travel(60)
     ll.price_w()
-    f_u = ll.fundamental_last()
-    print(f"\nfundamental {f_t} -> {f_u}")
-    assert abs(f_u - f_t) <= f_t // 10**6, "fundamental jumped at the boundary"
+    assert ll.fundamental_last() == f0 and ll.fundamental_ema() == f0
     assert ll.ema_ts() == boa.env.evm.patch.timestamp
 
 
@@ -489,7 +486,8 @@ def test_ref_staked_price_untradable(
 ):
     """F-07: the reference's staked prices no longer go through LT.updated_balances(), which
     reverts while the AMM is untradable. They match the gauge's own conversion while tradable,
-    are continuous across the boundary, and use the stored staker balance with use_balances."""
+    and use the stored staker balance once untradable (as the balance value uses the stored
+    liquidity values), with or without use_balances."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     with boa.env.prank(admin):
         yb_staker.deposit(yb_lt.balanceOf(admin) // 2, admin)
@@ -500,16 +498,12 @@ def test_ref_staked_price_untradable(
         return price * ((staker_balance + 1) * 10**18 // (yb_staker.totalSupply() + 1)) // 10**18
 
     _set_agg(mock_agg, admin, hi)
-    staked_t = lending_oracle.staked_price_in_asset(lt)
-    _approx(staked_t, scaled(lending_oracle.price_in_asset(lt), yb_lt.updated_balances()[1]))
+    _approx(lending_oracle.staked_price_in_asset(lt),
+            scaled(lending_oracle.price_in_asset(lt), yb_lt.updated_balances()[1]))
 
     _set_agg(mock_agg, admin, lo)
     with boa.reverts():
         yb_lt.updated_balances()
-    staked_u = lending_oracle.staked_price_in_asset(lt)
-    print(f"\nstaked price {staked_t} -> {staked_u}")
-    assert abs(staked_u - staked_t) <= staked_t // 10**6, "staked price jumped at the boundary"
-
     for agg_pct in (100, 90, 80, 70, 60, 50, 40, 30):
         agg = lo * agg_pct // 100
         _set_agg(mock_agg, admin, agg)
@@ -517,18 +511,16 @@ def test_ref_staked_price_untradable(
         for use_balances in (False, True):
             price = lending_oracle.price_in_asset(lt, use_balances)
             staked = lending_oracle.staked_price_in_asset(lt, use_balances)
-            assert (staked > 0) == (price > 0), (agg, use_balances)
+            _approx(staked, scaled(price, yb_lt.balanceOf(yb_staker.address)))
             _approx(lending_oracle.staked_price_in_usd(lt, use_balances),
                     staked * (cryptopool.price_oracle() * agg // 10**18) // 10**18, rel=10**-6)
-        _approx(lending_oracle.staked_price_in_asset(lt, True),
-                scaled(lending_oracle.price_in_asset(lt, True), yb_lt.balanceOf(yb_staker.address)))
 
 
 # --- equivalence fuzzing: unseeded LL must equal YBLendingOracle in ALL states ---------------
 # An unseeded LL prices off the raw current fundamental times the live shift, which is
 # algebraically the reference price (the decomposition is exact). So across any pool / AMM /
 # agg state the two must agree - including the x0-unsolvable (negative-discriminant) branch,
-# where both floor x0 at its boundary value and cap at the balance value at price_oracle.
+# where both use the balance value at price_oracle.
 
 def _equiv(a, b, ctx=""):
     # Combined abs+rel tolerance: rel covers normal values; the abs floor covers near-zero
@@ -598,18 +590,15 @@ def test_ll_equiv_fuzz(equiv_env, seq):
 def test_ll_equiv_insolvent(equiv_env):
     """Drive the AMM position x0-unsolvable (the reverting-discriminant branch) via a crvUSD
     depeg - low agg shrinks the USD collateral value below the leverage threshold - then assert
-    the LL still equals the reference there: both just past the boundary (x0 floored, below
-    the balance value) and deeper (capped at the balance value)."""
+    the LL still equals the reference there (both price the balance value)."""
     env = equiv_env
     with boa.env.anchor():
-        below = capped = 0
-        for agg_pct in range(90, 10, -2):
+        checked = 0
+        for agg_pct in range(90, 10, -5):
             _set_agg(env.mock_agg, env.admin, agg_pct * 10**16)
             if _tradable(env.amm):
                 continue
             _compare(env, f"agg {agg_pct}%")
-            ref, balance = env.yb.price_in_asset(env.lt), env.yb.price_in_asset(env.lt, True)
-            assert ref <= balance
-            below += ref < balance
-            capped += ref == balance
-        assert below > 0 and capped > 0, f"untradable regimes not both reached: {below}, {capped}"
+            assert env.yb.price_in_asset(env.lt) == env.yb.price_in_asset(env.lt, True)
+            checked += 1
+        assert checked >= 3, "did not reach the x0-unsolvable branch"
