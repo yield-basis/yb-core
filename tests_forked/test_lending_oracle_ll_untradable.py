@@ -7,8 +7,11 @@ A fresh LL is seeded on the healthy market first, as a deployed one would be. Ch
   - LL and YBLendingOracle price the balance value (what LT.emergency_withdraw pays, as the AMM
     can't trade), positive while it is, including as cv_ps -> debt (where the old seeded LL
     blew up),
-  - at the boundary both jump up to it, as the realised value does (no more arbitrage),
+  - across the boundary with no arbitrage in between, both step up to it from the value after
+    arbitrage (the arbitrage still pending there), as the realised value does,
   - after a shock: the balance value through checkpoints and a long idle gap,
+  - on recovery after a day untradable, the LL lands on the reference's value after
+    arbitrage (its EMA followed the position), not on the stale pre-untradable rate,
   - YBLendingOracle's staked prices work there (F-07).
 """
 from fractions import Fraction
@@ -129,6 +132,30 @@ def test_untradable_boundary(market, ref):
     balance = ref.price_in_asset(lt.address, True)
     assert ref_u == balance and _near(ll_u, balance)
     assert ref_u > ref_t * 105 // 100 and ll_u > ll_t * 105 // 100
+
+
+def test_untradable_recovery(market, ref):
+    lt, amm, ll, lp_oracle = market
+    for _ in range(36):                                  # settled on the healthy market
+        boa.env.time_travel(600)
+        ll.price_w()
+    _set_k(amm, lp_oracle, "0.99")
+    for _ in range(144):                                 # a day, checkpointed
+        boa.env.time_travel(600)
+        assert _near(ll.price_w(), ref.price_in_asset(lt.address, True))
+
+    # Recovered by hand: the 1% of collateral added back is a jump in the fundamental, which
+    # the EMA lags from below.
+    _set_k(amm, lp_oracle, "1.00000000000001")
+    assert _tradable(amm)
+    ll_t, ref_t = ll.price(), ref.price_in_asset(lt.address)
+    print(f"recovered: LL {ll_t / 1e18:.6f} reference {ref_t / 1e18:.6f} ({ll_t / ref_t:.4f})")
+    assert ref_t * 98 // 100 <= ll_t <= ref_t + ref_t // 10**9
+    for _ in range(15):
+        boa.env.time_travel(600)
+        ll.price_w()
+        assert ll.price() <= ref.price_in_asset(lt.address) * (10**9 + 1) // 10**9
+    assert abs(ll.price() - ref.price_in_asset(lt.address)) <= ref_t // 10**4
 
 
 @pytest.mark.parametrize("k", ["0.9", "0.6"])

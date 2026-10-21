@@ -14,7 +14,9 @@ flash-proof against both wash paths. Checks:
     checkpoint from either side advances it (ChainSecurity #002),
   - factory-settable ema_time,
   - untradable AMM (x0 unsolvable): both price the balance value (what LT.emergency_withdraw
-    pays) and checkpoints there record no fundamental; the reference's staked prices work there.
+    pays); checkpoints there record the fundamental at the boundary x0, so on recovery the LL
+    lands on the post-arbitrage value as the reference does; the reference's staked prices work
+    there.
 """
 import os
 from types import SimpleNamespace
@@ -389,10 +391,12 @@ def test_ll_untradable_boundary(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle, mock_agg,
 ):
-    """Crossing into the untradable region both oracles move to the balance value, what
-    LT.emergency_withdraw pays once the AMM can't trade. That is a real jump up: just above
-    the boundary arbitrage would still rebalance the AMM at LT holders' cost (realised values on
-    both sides: test_lending_oracle_realised). A settled LL takes the same jump."""
+    """Crossing into the untradable region with no arbitrage in between, both oracles move
+    from the value after arbitrage to the balance value, what LT.emergency_withdraw pays once
+    the AMM can't trade: up by the arbitrage still pending just above the boundary (realised
+    values on both sides: test_lending_oracle_realised). Arbitrage normally keeps the AMM away
+    from the boundary, so entering is continuous; the step is what leaving costs
+    (test_ll_untradable_recovery). A settled LL takes the same step."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     lt = yb_lt.address
 
@@ -453,28 +457,87 @@ def test_ll_untradable_checkpoints(
     cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
     accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle, mock_agg,
 ):
-    """Untradable checkpoints record no fundamental: an unseeded LL stays unseeded and prices
-    at the balance value; a seeded one keeps its last tradable fundamental."""
+    """Untradable checkpoints record the fundamental at the boundary x0, the same as just
+    above the boundary (x0 is continuous across it): an unseeded LL seeds there and still
+    prices at the balance value; a seeded one's EMA moves towards it."""
     _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
     lt = yb_lt.address
-    lo, _ = _agg_boundary(yb_amm, mock_agg, admin)
+    lo, hi = _agg_boundary(yb_amm, mock_agg, admin)
+
+    _set_agg(mock_agg, admin, hi)
+    with boa.env.anchor():
+        ll.price_w()
+        f_boundary = ll.fundamental_last()
 
     _set_agg(mock_agg, admin, lo * 9 // 10)
     _equiv(ll.price(), lending_oracle.price_in_asset(lt, True), "unseeded")
     _equiv(ll.price_w(), lending_oracle.price_in_asset(lt, True), "unseeded price_w")
-    assert ll.fundamental_ema() == 0 and ll.fundamental_last() == 0
+    f_u = ll.fundamental_last()
+    assert ll.fundamental_ema() == f_u
+    _approx(f_u, f_boundary, rel=10**-6)
 
     _set_agg(mock_agg, admin, 10**18)
     boa.env.time_travel(60)
     ll.price_w()
+    boa.env.time_travel(60)
+    ll.price_w()
     f0 = ll.fundamental_last()
-    assert f0 > 0 and ll.fundamental_ema() == f0
+    assert f0 > f_u * 11 // 10
+    ema0 = ll.fundamental_ema()
 
     _set_agg(mock_agg, admin, lo * 9 // 10)
     boa.env.time_travel(60)
+    ll.price_w()                                    # advances on f0, records the boundary value
+    _approx(ll.fundamental_last(), f_u, rel=10**-6)
+    boa.env.time_travel(EMA_TIME)
     ll.price_w()
-    assert ll.fundamental_last() == f0 and ll.fundamental_ema() == f0
+    assert ll.fundamental_ema() < ema0
     assert ll.ema_ts() == boa.env.evm.patch.timestamp
+    _equiv(ll.price(), lending_oracle.price_in_asset(lt, True), "seeded")
+
+
+def test_ll_untradable_recovery(
+    cryptopool, yb_lt, yb_amm, collateral_token, stablecoin,
+    accounts, admin, yb_allocated, seed_cryptopool, ll, lending_oracle, mock_agg,
+):
+    """A settled LL through a day in the untradable region: it prices the balance value
+    there, and when the AMM becomes tradable again it takes the same drop as the reference
+    (arbitrage resumes at the LT holders' cost), instead of reading the stale pre-untradable
+    fundamental (~30% above the reference here). An abrupt recovery all the way back is a jump
+    in the fundamental, which the EMA lags from below, never above."""
+    _setup_position(cryptopool, yb_lt, collateral_token, stablecoin, accounts, admin)
+    lt = yb_lt.address
+    for _ in range(36):                                     # settled on the healthy market
+        boa.env.time_travel(600)
+        ll.price_w()
+
+    lo, _ = _agg_boundary(yb_amm, mock_agg, admin)
+    _set_agg(mock_agg, admin, lo * 95 // 100)
+    for _ in range(144):                                    # a day, checkpointed
+        boa.env.time_travel(600)
+        assert _near(ll.price_w(), lending_oracle.price_in_asset(lt, True))
+
+    lo, hi = _agg_boundary(yb_amm, mock_agg, admin)         # interest has moved it
+    _set_agg(mock_agg, admin, lo)
+    ll_u, ref_u = ll.price(), lending_oracle.price_in_asset(lt)
+    _set_agg(mock_agg, admin, hi)
+    ll_t, ref_t = ll.price(), lending_oracle.price_in_asset(lt)
+    print(f"\nLL {ll_u} -> {ll_t}   ref {ref_u} -> {ref_t} ({(ref_t - ref_u) / ref_u * 100:+.2f}%)")
+    assert _near(ll_u, ref_u)
+    assert ref_t < ref_u * 95 // 100                        # the drop is real
+    _approx(ll_t, ref_t, rel=10**-6)
+
+    _set_agg(mock_agg, admin, 10**18)
+    under = []
+    for _ in range(15):
+        ll_p, ref_p = ll.price(), lending_oracle.price_in_asset(lt)
+        assert ll_p <= ref_p + ref_p // 10**9
+        under.append(1 - ll_p / ref_p)
+        boa.env.time_travel(600)
+        ll.price_w()
+    print("under-read: " + " ".join(f"{u:.4f}" for u in under))
+    assert under[0] > 0.1
+    _approx(ll.price(), lending_oracle.price_in_asset(lt), rel=10**-4)
 
 
 def test_ref_staked_price_untradable(
