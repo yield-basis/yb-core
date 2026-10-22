@@ -23,6 +23,11 @@ dependencies = [
 [tool.uv]
 package = false
 exclude-newer = "1 week"
+# certifi 2026.10.19 drops the compromised emSign roots (GHSA-6q48-6c7w-9gw2); shorter cooldown so security fixes land sooner
+exclude-newer-package = { certifi = "1 day" }
+# titanoboa pins mkdocs-material==9.5.41 (docs-only, never imported at runtime), which holds back
+# pymdown-extensions with GHSA-9xwg-3r6f-jcx2 and GHSA-gm37-52c6-37mw
+override-dependencies = ["mkdocs-material>=9.7.7"]
 
 [tool.uv.audit]
 # vyper 0.4.3 is not affected by either advisory:
