@@ -4,7 +4,7 @@
 @notice Deposit into a Yield Basis market with the debt computed on-chain,
         staked or unstaked
 @author Yield Basis
-@license MIT, Copyright (c) 2026
+@license GNU Affero General Public License v3.0
 @dev A cryptopool policy with an LT gate (YBOraclizedPolicy) admits a deposit
      only at the LevAMM book's ratio:
 
