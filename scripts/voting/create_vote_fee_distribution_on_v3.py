@@ -75,7 +75,7 @@ def account_load(fname: str):
     path = os.path.expanduser(
         os.path.join("~", ".brownie", "accounts", fname + ".json"))
     with open(path) as f:
-        pkey = account.decode_keyfile_json(json.load(f), getpass())
+        pkey = account.Account.decrypt(json.load(f), getpass())
     return account.Account.from_key(pkey)
 
 
