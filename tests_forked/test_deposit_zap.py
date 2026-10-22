@@ -64,7 +64,7 @@ def policy(market, curve_admin):
 
 @pytest.fixture(scope="module")
 def zap():
-    return boa.load("contracts/LTDepositZap.vy")
+    return boa.load("contracts/utils/LTDepositZap.vy")
 
 
 @pytest.fixture(scope="module")

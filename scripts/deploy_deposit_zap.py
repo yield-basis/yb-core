@@ -116,7 +116,7 @@ if __name__ == '__main__':
         etherscan = Etherscan(api_key=ETHERSCAN_API_KEY)
         boa.env.add_account(account_load('yb-deployer'))
 
-    zap = boa.load('contracts/LTDepositZap.vy')
+    zap = boa.load('contracts/utils/LTDepositZap.vy')
     print(f"LTDepositZap: {zap.address}")
 
     if FORK:
