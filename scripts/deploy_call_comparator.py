@@ -24,7 +24,7 @@ YB = "0x01791F726B4103694969820be083196cC7c045fF"
 def account_load(fname):
     path = os.path.expanduser(os.path.join('~', '.brownie', 'accounts', fname + '.json'))
     with open(path, 'r') as f:
-        pkey = account.decode_keyfile_json(json.load(f), getpass())
+        pkey = account.Account.decrypt(json.load(f), getpass())
         return account.Account.from_key(pkey)
 
 

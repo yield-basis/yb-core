@@ -252,7 +252,7 @@ def keystore_address(name: str) -> str:
 
 def account_load(name: str):
     with open(_keystore_path(name)) as f:
-        pkey = account.decode_keyfile_json(json.load(f), getpass())
+        pkey = account.Account.decrypt(json.load(f), getpass())
     return account.Account.from_key(pkey)
 
 
