@@ -219,15 +219,16 @@ if __name__ == '__main__':
                data=factory_owner.lt_set_amm_fee.prepare_calldata(lt.address, FEE)),
     ]
 
-    title = 'WETH market: donation APY to 2.60% and releverage fee to 150 bps (after Curve vote 1508)'
-    summary = ('Set the yb-WETH (market 10) donation APY to 2.60% per year on crvUSD - which at 2x leverage '
-               'corresponds to a 1.30% donation APY at the Curve pool level - and its releverage fee to 150 bps '
-               '(1.50%), from 10.00% and 130 bps. These parameters belong together with the YBOraclizedPolicy fee '
-               'and price_scale policy (Pyth ETH/USD reports) and the 43% reserved profit fraction which Curve '
-               'ownership vote 1508 installs on the crvUSD/WETH pool, as described in the research note "Oracle '
-               'reports for YieldBasis pools". This proposal is therefore guarded: it first asserts that the pool '
-               'already runs the policy contract that vote 1508 installs, and reverts otherwise. It cannot take '
-               'effect before the Curve vote is executed, and can simply be executed once that has happened.')
+    title = 'Enable permissionless propAMM operation for yb-WETH market (10)'
+
+    summary = (
+        'Research in [https://forum.yieldbasis.com/t/oracle-reports-for-yieldbasis-pools-a-new-price-scale-and-fee-policy-for-the-weth-market/40] '
+        'describes the approach and simulations. '
+        'Curve vote 1508 [https://www.curve.finance/dao/ethereum/proposals/1508-ownership] sets necessary pool '
+        'parameters on Curve side. '
+        'On YB side, we set donation APY to 2.60% and releverage fee to 150 bps. '
+        'Our vote is only executable once Curve vote is executed.'
+    )
 
     if not FORK:
         proposal_id = voting.createProposal(*Proposal(
