@@ -3,8 +3,8 @@
 @title LTDepositZap
 @notice Deposit into a Yield Basis market with the debt computed on-chain,
         staked or unstaked
-@author Scientia Spectra AG
-@license Copyright (c) 2025
+@author Yield Basis
+@license MIT, Copyright (c) 2026
 @dev A cryptopool policy with an LT gate (YBOraclizedPolicy) admits a deposit
      only at the LevAMM book's ratio:
 
