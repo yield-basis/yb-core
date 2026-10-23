@@ -46,7 +46,7 @@ LIVE_LT_MIGRATOR = "0xEacb6032d9d76D87DbD95bF05E2210820767cB0F"
 SUPERSEDED_LT_MIGRATOR = "0xd5b450fDD5aF5341436Fc37A46BBEc39CA8F92CB"
 
 # TokenVoting has a 1-day per-address createProposal cooldown
-PROPOSER_KEYSTORE = "yb-deployer"
+PROPOSER_KEYSTORE = "yb-deployer-2"
 
 # --fork only
 FORWARD = [(0, 7), (1, 8), (2, 9), (3, 7), (4, 8), (5, 9), (6, 10)]
