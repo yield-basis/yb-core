@@ -49,8 +49,10 @@ SEED_WAIT = 15                                           # seconds between retri
 # died mid-way (e.g. a flaky-RPC crash) without deploying another throwaway factory. "" = deploy.
 # 0x3e6B4795bd173Dd5c700cA8Cfd3f247BFcDC9D43 is the pre-#002 factory (separate USD/asset EMAs),
 # superseded by the shared-EMA version; 0x150dD481D306A3a8577cfc8fAC195720AA3Ee7Bc is the
-# shared-EMA factory, superseded by 0x1C4E1a6E8e470753eAA63888A6b588c8fa06e600 (current: untradable
-# balance value + safe-debt limits, see docs/oracles_addresses.md).
+# shared-EMA factory, superseded by 0x1C4E1a6E8e470753eAA63888A6b588c8fa06e600 (untradable balance
+# value + safe-debt limits, but the EMA froze while untradable), superseded by
+# 0xd22B8683081300c9F5bE4cD001e379ed3f7d10e4 (current: the EMA keeps following the position while
+# untradable, see docs/oracles_addresses.md).
 EXISTING_FACTORY = ""
 
 # --- ENS (optional) ----------------------------------------------------------
