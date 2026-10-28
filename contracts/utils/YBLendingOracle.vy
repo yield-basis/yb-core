@@ -165,7 +165,7 @@ def _mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
 
 @internal
 @view
-def _live_curve(pool: IFXSwap, price_scale: uint256) -> (uint256, uint256, uint256):
+def _live_curve(pool: IFXSwap, price_scale: uint256, pool_supply: uint256) -> (uint256, uint256, uint256):
     """
     @notice The pool's (A, virtual_price, D) at the current block.
     @dev The pool caches D and virtual_price at its last interaction, solved with the A of that
@@ -173,24 +173,22 @@ def _live_curve(pool: IFXSwap, price_scale: uint256) -> (uint256, uint256, uint2
          last_timestamp: the pool's own _is_ramping(), which stays True after the ramp ends or
          is stopped until the next trade), that next trade re-solves D from the stored balances
          at the current A (Twocrypto._get_D). Do the same, so the price follows the ramp instead
-         of lagging it (or pairing the current A with a stale D after stop_ramp_A_gamma). A
-         trade in this block already left D at the current A. virtual_price scales with D: xcp
-         is linear in D at a fixed price_scale and supply. Stored balances only change through
-         pool interactions, so this adds no manipulation surface.
+         of lagging it (or pairing the current A with a stale D after stop_ramp_A_gamma), with
+         virtual_price from the pool's formula 1e18 * xcp(D) / totalSupply. A trade in this
+         block already left D at the current A. Stored balances only change through pool
+         interactions, so this adds no manipulation surface.
     @return (A, virtual_price, D)
     """
     A: uint256 = staticcall pool.A()
-    vprice: uint256 = staticcall pool.virtual_price()
-    D: uint256 = staticcall pool.D()
     last_ts: uint256 = staticcall pool.last_timestamp()
     if last_ts < block.timestamp and staticcall pool.future_A_gamma_time() > last_ts:
         prec: uint256[2] = staticcall pool.precisions()
         xp: uint256[2] = [staticcall pool.balances(0) * prec[0],
                           staticcall pool.balances(1) * prec[1] * price_scale // PRECISION]
-        D_live: uint256 = staticcall (staticcall pool.MATH()).newton_D(A, staticcall pool.gamma(), xp, 0)
-        vprice = vprice * D_live // D
-        D = D_live
-    return A, vprice, D
+        D: uint256 = staticcall (staticcall pool.MATH()).newton_D(A, staticcall pool.gamma(), xp, 0)
+        # Twocrypto._xcp: D / N_COINS / sqrt(price_scale)
+        return A, 10**18 * (D * PRECISION // 2 // isqrt(PRECISION * price_scale)) // pool_supply, D
+    return A, staticcall pool.virtual_price(), staticcall pool.D()
 
 
 @internal
@@ -332,11 +330,11 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256, bool):
 
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
+    pool_supply: uint256 = staticcall pool.totalSupply()
     A: uint256 = 0
     vprice: uint256 = 0
     D: uint256 = 0
-    A, vprice, D = self._live_curve(pool, price_scale)
-    pool_supply: uint256 = staticcall pool.totalSupply()
+    A, vprice, D = self._live_curve(pool, price_scale, pool_supply)
 
     lp_price_ps: uint256 = 2 * vprice * isqrt(price_scale * 10**18) // 10**18
 
