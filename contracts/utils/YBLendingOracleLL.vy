@@ -17,6 +17,8 @@
      trade at all: the price is the balance value at price_oracle, what LT.emergency_withdraw
      pays. The EMA keeps following the position there (x0 at the boundary, see _get_x0), so on
      recovery the price lands where arbitrage takes it, not on a stale pre-untradable rate.
+     The pool is read at its current A: during an A ramp not yet observed by a trade, D is
+     re-solved as the pool's next trade would (see _live_curve).
 """
 from ..twocrypto_lp_oracle.contracts.main import LPOracle
 from snekmate.utils import math
@@ -38,6 +40,14 @@ interface IFXSwap:
     def price_oracle() -> uint256: view
     def D() -> uint256: view
     def totalSupply() -> uint256: view
+    def A() -> uint256: view
+    def gamma() -> uint256: view
+    def precisions() -> uint256[2]: view
+    def balances(i: uint256) -> uint256: view
+    def MATH() -> PoolMath: view
+
+interface PoolMath:
+    def newton_D(ANN: uint256, gamma: uint256, x_unsorted: uint256[2], K0_prev: uint256) -> uint256: view
 
 interface LT:
     def CRYPTOPOOL() -> IFXSwap: view
@@ -143,6 +153,34 @@ def _mul_div_signed(x: int256, y: int256, denominator: int256) -> int256:
     if ((x < 0) != (y < 0)) != (denominator < 0):
         value = -value
     return value
+
+
+@internal
+@view
+def _live_curve(pool: IFXSwap, price_scale: uint256) -> (uint256, uint256):
+    """
+    @notice The pool's (A, virtual_price) at the current block.
+    @dev The pool caches D and virtual_price at its last interaction, solved with the A of that
+         time. While an A ramp hasn't been observed by a trade (future_A_gamma_time >
+         last_timestamp: the pool's own _is_ramping(), which stays True after the ramp ends or
+         is stopped until the next trade), that next trade re-solves D from the stored balances
+         at the current A (Twocrypto._get_D). Do the same, so the price follows the ramp instead
+         of lagging it (or pairing the current A with a stale D after stop_ramp_A_gamma). A
+         trade in this block already left D at the current A. virtual_price scales with D: xcp
+         is linear in D at a fixed price_scale and supply. Stored balances only change through
+         pool interactions, so this adds no manipulation surface.
+    @return (A, virtual_price)
+    """
+    A: uint256 = staticcall pool.A()
+    vprice: uint256 = staticcall pool.virtual_price()
+    last_ts: uint256 = staticcall pool.last_timestamp()
+    if last_ts < block.timestamp and staticcall pool.future_A_gamma_time() > last_ts:
+        prec: uint256[2] = staticcall pool.precisions()
+        xp: uint256[2] = [staticcall pool.balances(0) * prec[0],
+                          staticcall pool.balances(1) * prec[1] * price_scale // PRECISION]
+        D_live: uint256 = staticcall (staticcall pool.MATH()).newton_D(A, staticcall pool.gamma(), xp, 0)
+        vprice = vprice * D_live // staticcall pool.D()
+    return A, vprice
 
 
 @internal
@@ -301,12 +339,13 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
-    vprice: uint256 = staticcall pool.virtual_price()
+    A: uint256 = 0
+    vprice: uint256 = 0
+    A, vprice = self._live_curve(pool, price_scale)
 
     # pv_norm: D=1 portfolio value at price_oracle - depends only on A and the price ratio
     # (mirrors YBNetPressure._pool_metrics); == lp_price_oracle/lp_price_ps.
-    A_raw: uint256 = LPOracle._scaled_A_raw_from_A(
-        LPOracle._A_at_last_timestamp(LPOracle.IFXSwap(pool.address)))
+    A_raw: uint256 = LPOracle._scaled_A_raw_from_A(A)
     p: uint256 = price_oracle * PRECISION // price_scale
     x: uint256 = 0
     y: uint256 = 0
