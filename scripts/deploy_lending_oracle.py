@@ -43,7 +43,8 @@ MARKET_IDS = [7, 8, 9, 10]                               # markets to create pri
 # run that died mid-way (e.g. a receipt the RPC never reported) without deploying another
 # throwaway singleton. "" = deploy fresh.
 # 0x58241c11abd0BDb1448EF9f38f8AA7Fda21a3A44 is the pre-safe-limits singleton, superseded by
-# 0x61BDFf6850ad7bBD67D3307d5c608C6e4cb3158f (current, see docs/oracles_addresses.md).
+# 0x61BDFf6850ad7bBD67D3307d5c608C6e4cb3158f (A at the last trade: lags idle A ramps), superseded by
+# 0xB2dC48d8C09094e8426376B3C9090Eca8c11bD29 (current: live A, see docs/oracles_addresses.md).
 EXISTING_ORACLE = ""
 
 # --- ENS (optional) ----------------------------------------------------------

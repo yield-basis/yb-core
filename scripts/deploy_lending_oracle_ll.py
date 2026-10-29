@@ -51,8 +51,9 @@ SEED_WAIT = 15                                           # seconds between retri
 # superseded by the shared-EMA version; 0x150dD481D306A3a8577cfc8fAC195720AA3Ee7Bc is the
 # shared-EMA factory, superseded by 0x1C4E1a6E8e470753eAA63888A6b588c8fa06e600 (untradable balance
 # value + safe-debt limits, but the EMA froze while untradable), superseded by
-# 0xd22B8683081300c9F5bE4cD001e379ed3f7d10e4 (current: the EMA keeps following the position while
-# untradable, see docs/oracles_addresses.md).
+# 0xd22B8683081300c9F5bE4cD001e379ed3f7d10e4 (the EMA keeps following the position while
+# untradable, but A at the last trade: lags idle A ramps), superseded by
+# 0x1B861e3b4fAc6cA259b14cC7471048bC07213315 (current: live A, see docs/oracles_addresses.md).
 EXISTING_FACTORY = ""
 
 # --- ENS (optional) ----------------------------------------------------------
