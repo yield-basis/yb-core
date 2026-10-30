@@ -44,7 +44,8 @@ MARKET_IDS = [7, 8, 9, 10]                               # markets to create pri
 # throwaway singleton. "" = deploy fresh.
 # 0x58241c11abd0BDb1448EF9f38f8AA7Fda21a3A44 is the pre-safe-limits singleton, superseded by
 # 0x61BDFf6850ad7bBD67D3307d5c608C6e4cb3158f (A at the last trade: lags idle A ramps), superseded by
-# 0xB2dC48d8C09094e8426376B3C9090Eca8c11bD29 (current: live A, see docs/oracles_addresses.md).
+# 0xB2dC48d8C09094e8426376B3C9090Eca8c11bD29 (live A, but a killed AMM priced as if it traded), superseded by
+# 0xcE43c6668945FEfa079Da1c38F7CDab5A525Ec7C (current: killed = emergency_withdraw value, see docs/oracles_addresses.md).
 EXISTING_ORACLE = ""
 
 # --- ENS (optional) ----------------------------------------------------------

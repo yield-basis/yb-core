@@ -53,7 +53,9 @@ SEED_WAIT = 15                                           # seconds between retri
 # value + safe-debt limits, but the EMA froze while untradable), superseded by
 # 0xd22B8683081300c9F5bE4cD001e379ed3f7d10e4 (the EMA keeps following the position while
 # untradable, but A at the last trade: lags idle A ramps), superseded by
-# 0x1B861e3b4fAc6cA259b14cC7471048bC07213315 (current: live A, see docs/oracles_addresses.md).
+# 0x1B861e3b4fAc6cA259b14cC7471048bC07213315 (live A, but a killed AMM priced as if it traded),
+# superseded by 0xaC866A97FB35fdE170853d3dA58Da7195F97f7f8 (current: killed = emergency_withdraw
+# value, see docs/oracles_addresses.md).
 EXISTING_FACTORY = ""
 
 # --- ENS (optional) ----------------------------------------------------------
