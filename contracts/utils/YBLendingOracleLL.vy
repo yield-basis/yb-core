@@ -17,6 +17,8 @@
      trade at all: the price is the balance value at price_oracle, what LT.emergency_withdraw
      pays. The EMA keeps following the position there (x0 at the boundary, see _get_x0), so on
      recovery the price lands where arbitrage takes it, not on a stale pre-untradable rate.
+     A killed AMM can't trade either: the balance value again, exactly what the killed
+     LT.emergency_withdraw pays (a pro-rata share of the whole AMM), with the EMA following.
      The pool is read at its current A: during an A ramp not yet observed by a trade, D is
      re-solved as the pool's next trade would (see _live_curve).
 """
@@ -63,6 +65,7 @@ interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
+    def is_killed() -> bool: view
 
 struct LiquidityValues:
     admin: int256  # Can be negative
@@ -309,7 +312,7 @@ struct Snapshot:
     fundamental: uint256   # asset-denominated LT rate at price == price_scale (1e18/share)
     po_shift: uint256      # live multiplier fundamental -> price at price_oracle, asset denom (1e18)
     asset_price: uint256   # USD per asset at price_oracle (1e18), for the USD denomination
-    tradable: bool         # x0 solvable; otherwise the price is balance_price
+    tradable: bool         # x0 solvable and AMM not killed; otherwise the price is balance_price
     balance_price: uint256 # untradable only: balance value at price_oracle, asset denom (1e18/share)
 
 
@@ -336,6 +339,10 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
          price_oracle, which is YBLendingOracle's price there (what LT.emergency_withdraw
          pays). The fundamental is still computed, off the boundary x0 (_get_x0), for the EMA
          to record: it equals the fundamental at the boundary, where arbitrage resumes.
+         A killed AMM can't trade either: the balance value, without holding back the admin fee
+         buffer (the killed LT.emergency_withdraw pays a pro-rata share of the whole AMM). The
+         EMA keeps recording the fundamental, so if the AMM is unkilled the price lands where
+         arbitrage takes it.
     """
     price_oracle: uint256 = staticcall pool.price_oracle()
     price_scale: uint256 = staticcall pool.price_scale()
@@ -364,6 +371,8 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
     x0_ok: bool = False
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
+    killed: bool = staticcall amm.is_killed()
+    tradable: bool = x0_ok and not killed
 
     asset_price: uint256 = price_oracle * agg_price // PRECISION
     po_shift: uint256 = 0
@@ -380,7 +389,7 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
     fundamental: uint256 = (value_ps * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total)
                             * PRECISION // lt_supply) * PRECISION // p_o_ps
 
-    if x0_ok:
+    if tradable:
         # Leverage shift to price_oracle: 2L*sqrt(pv_norm) - (2L-1) with the arbitrage endpoint
         # (see the docstring), floored at 0 once the leveraged equity is wiped instead of
         # underflowing.
@@ -390,16 +399,19 @@ def _snapshot(lt: LT, pool: IFXSwap, amm: LevAMM, agg_price: uint256) -> Snapsho
         if s > (2 * L - 1) * PRECISION:
             po_shift = (s - (2 * L - 1) * PRECISION) * price_scale // price_oracle
     else:
-        # AMM untradable (get_x0 would revert): collateral at price_oracle (cv_po = cv_ps * pv_norm)
-        # minus debt; 0 for an insolvent position instead of underflowing.
+        # AMM untradable (get_x0 would revert) or killed: collateral at price_oracle
+        # (cv_po = cv_ps * pv_norm) minus debt, less the admin fee buffer unless killed (see the
+        # docstring); 0 for an insolvent position instead of underflowing.
         cv_po: uint256 = collateral * lp_price_ps // PRECISION * agg_price // PRECISION * pv_norm // PRECISION
         if cv_po > debt:
-            lv: LiquidityValues = staticcall lt.liquidity()
-            balance_price = ((cv_po - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
-                             * PRECISION // staticcall lt.totalSupply()) * PRECISION // asset_price
+            equity: uint256 = cv_po - debt
+            if not killed:
+                lv: LiquidityValues = staticcall lt.liquidity()
+                equity = equity * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+            balance_price = (equity * PRECISION // staticcall lt.totalSupply()) * PRECISION // asset_price
 
     return Snapshot(fundamental=fundamental, po_shift=po_shift, asset_price=asset_price,
-                    tradable=x0_ok, balance_price=balance_price)
+                    tradable=tradable, balance_price=balance_price)
 
 
 # Honest fundamental-rate EMA (cryptopool / FastGauge style). The reported value blends the

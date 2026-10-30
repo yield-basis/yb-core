@@ -56,6 +56,7 @@ interface LevAMM:
     def PRICE_ORACLE_CONTRACT() -> PriceOracle: view
     def collateral_amount() -> uint256: view
     def get_debt() -> uint256: view
+    def is_killed() -> bool: view
 
 interface ILiquidityGauge:
     def totalSupply() -> uint256: view
@@ -355,9 +356,11 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256, bool):
     x0: uint256 = 0
     x0_ok, x0 = self._get_x0(p_o_amm, collateral, debt)
 
+    killed: bool = staticcall amm.is_killed()
+
     yb_oracle: uint256 = 0
     staked_tokens: uint256 = 0
-    fresh: bool = x0_ok and not use_balances
+    fresh: bool = x0_ok and not use_balances and not killed
     if fresh:
         # yb_oracle_value = x0 * (2/3 * (r / sqrt(e) + sqrt(e)) - 1) <- agg price cancels out, with
         #   r = lp_price_oracle / lp_price_ps: the LP market price over the AMM's price oracle,
@@ -385,15 +388,21 @@ def _price(lt: LT, use_balances: bool) -> (uint256, uint256, uint256, bool):
         # Make it per LT token
         yb_oracle = yb_oracle * lv_total // (convert(max(lv_admin, 0), uint256) + lv_total) * 10**18 // lt_supply
     else:
-        # AMM untradable (get_x0 would revert, so it can't trade and there is nothing to arbitrage)
-        # or use_balances requested: value from balances, what LT.emergency_withdraw pays, with the
-        # cached liquidity values as balances can't change in the non-tradable state.
+        # AMM killed or untradable (get_x0 would revert): it can't trade, so there is nothing to
+        # arbitrage; or use_balances requested. Value from balances, with the cached liquidity
+        # values as the LT doesn't update them while the AMM can't trade.
+        # Killed: exactly what LT.emergency_withdraw pays, a pro-rata share of the whole AMM (its
+        # killed branch doesn't hold back the admin fee buffer). Otherwise less the admin fee
+        # buffer, which the LT separates again once the AMM trades.
         # 0 for an insolvent position (collateral value below debt) instead of underflowing, for
         # the same liquidation-availability reason as above.
         coll_value: uint256 = collateral * lp_price_oracle // 10**18 * agg_price // 10**18
         if coll_value > debt:
-            lv: LiquidityValues = staticcall lt.liquidity()
-            yb_oracle = (coll_value - debt) * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total) * 10**18 // staticcall lt.totalSupply()
+            equity: uint256 = coll_value - debt
+            if not killed:
+                lv: LiquidityValues = staticcall lt.liquidity()
+                equity = equity * lv.total // (convert(max(lv.admin, 0), uint256) + lv.total)
+            yb_oracle = equity * 10**18 // staticcall lt.totalSupply()
 
     return (yb_oracle, price_oracle * agg_price // 10**18, staked_tokens, fresh)
 
@@ -405,7 +414,8 @@ def _staked_scale(lt: LT, fresh: bool, staked_tokens: uint256) -> uint256:
     @notice Gauge share -> LT: the staker's LT balance over the gauge supply (1.0 without a
             staker). The balance is the fresh one from _price on its price-oracle path (what
             LT.updated_balances() returns), else the stored one, matching the balances path's
-            cached liquidity values (and LT.updated_balances() reverts while untradable).
+            cached liquidity values (LT.updated_balances() reverts while untradable, and a
+            killed LT doesn't rebase the staker).
     """
     scale: uint256 = 10**18
     staker: address = staticcall lt.staker()
@@ -425,7 +435,8 @@ def price_in_asset(lt: LT, use_balances: bool = False) -> uint256:
     @notice ybLT price denominated in the underlying asset (e.g. BTC), per LT token.
     @param lt The LT (market) to price
     @param use_balances Value from raw AMM balances instead of the manipulation-resistant
-           price-oracle path (this path is used anyway when the position is non-tradable)
+           price-oracle path (this path is used anyway when the position is non-tradable or
+           the AMM is killed)
     @return Price scaled to 1e18
     """
     yb_oracle: uint256 = 0
