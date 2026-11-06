@@ -6,14 +6,15 @@ allocation CSV through a new Multisend.
 The season 1 Multisend can't be reused. Its already_sent is permanent, so it
 would silently skip every wallet that received YB in season 1.
 
-The CSV is yb_allocation_v3cap.csv from yb-research-scripts/pnl (written by
-scripts/yb_allocation.py). Only the `user` and `yb` columns are used.
+The CSV next to this script is a copy of yb_allocation_v3cap.csv from
+yb-research-scripts/pnl (written by scripts/yb_allocation.py) at end block
+26343097. Only the `user` and `yb` columns are used.
 
 From the repo root:
     # 1. rehearse the whole distribution on a fork, nothing is sent
     uv run python scripts/distribution/distribute_season2.py --fork [--rpc URL]
 
-    # 2. deploy the Multisend once, then set MULTISEND and CSV_SHA256 below
+    # 2. deploy the Multisend once, then set MULTISEND below
     uv run python scripts/distribution/distribute_season2.py --deploy
 
     # 3. fund the ADMIN EOA, then approve and send
@@ -43,11 +44,10 @@ DEPLOYER = "0xa41074e0472E4e014c655dD143E9f5b87784a9DF"
 SEASON_1_MULTISEND = "0x0926a73Bb2D169a86c2Da9c7E03aC63A5cf42883"
 YB_HOLDER = "0x38667AEC4a9793A91e7986c43Fba502BDE89D86C"  # funds the ADMIN on a fork only
 
-# Set both after --deploy
-MULTISEND = None
-CSV_SHA256 = None
+MULTISEND = None  # set after --deploy
+CSV_SHA256 = "da202357bb86b16294349827903ee07a48bdabb61e9b0590d62770c54fec0728"
 
-CSV = os.path.expanduser("~/Projects/yb-research-scripts/pnl/yb_allocation_v3cap.csv")
+CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yb_allocation_v3cap.csv")
 TOTAL = 1_406_250 * 10**18
 MAX_ROUNDING = 10**12  # 1e-6 YB: the CSV holds floats, so its sum is only close to TOTAL
 BATCH_SIZE = 100
@@ -179,7 +179,7 @@ def main():
         assert admin.address == DEPLOYER, f"Loaded {admin.address}"
         boa.env.add_account(admin)
         multisend = boa.load('contracts/dao/Multisend.vy', YB)
-        print(f"Deployed. Set in this script:\nMULTISEND = \"{multisend.address}\"\nCSV_SHA256 = \"{digest}\"")
+        print(f"Deployed. Set in this script:\nMULTISEND = \"{multisend.address}\"")
         return
 
     send_live(amounts, digest)
