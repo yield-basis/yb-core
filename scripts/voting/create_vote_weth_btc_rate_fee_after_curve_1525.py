@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 Set the donation APY and releverage fee of the WBTC (ID=7), cbBTC (ID=8), tBTC (ID=9) and WETH (ID=10)
-markets, but only after the Curve ownership vote which attaches the new YBOraclizedPolicy contracts
-(deployed 2026-11-14 from twocrypto-ng 24cb25e) to their cryptopools has been executed:
+markets, but only after Curve ownership vote 1525 has been executed.
+
+Curve vote 1525 (tx 0x528989af6193125c8f9fbcab43eccdc222339a0cc6f02084be7eb523a87548a9) attaches new
+YBOraclizedPolicy contracts (deployed 2026-11-14 from twocrypto-ng 24cb25e, driven by Pyth Pro reports) to
+the four markets' cryptopools and sets their reserved profit fractions (set_fee_parameters, then
+set_policy_contract, per pool; RPF unchanged for WETH):
 
     market       pool donation APY   rate on crvUSD (2x)   releverage fee   Curve sets RPF
     7  yb-WBTC   0.90% -> 0.85%      1.80% -> 1.70%        120 -> 180 bps   30% -> 48.75%
@@ -13,23 +17,20 @@ markets, but only after the Curve ownership vote which attaches the new YBOracli
 The research (yb_pyth_policy_4pools.ipynb, curve-fx-sim finalists 2026-11-13) tunes the donation rates and
 LevAMM releverage fees together with those policies and reserved profit fractions, so the new YB parameters
 only make sense once the policies are live. The vote is therefore guarded: actions 1-4 ask the on-chain
-CallComparator to assert that each pool's POLICY() is already the contract the Curve vote installs. Until it
+CallComparator to assert that each pool's POLICY() is already the contract vote 1525 installs. Until it
 executes, POLICY() is still the previous policy, the comparator reverts and the whole YB proposal reverts
-atomically (it stays executable, so it can simply be re-executed once Curve's side lands). Should Curve
-attach different policy contracts after all, this proposal can never execute and has to be recreated.
+atomically (it stays executable, so it can simply be re-executed once Curve's side lands).
 
-The Curve vote is not created yet. Until CURVE_VOTE_ID is filled in, --fork applies the notebook's actions
-(set_fee_parameters where the RPF changes, then set_policy_contract) through the ownership agent and the
-pools' AmmOwnerProxy. With CURVE_VOTE_ID set, it checks that the vote script carries those calls and
-executes the vote with Convex' veCRV instead. Either way, on a fork at head:
+Fork mode runs the full ordering end-to-end on a fork at head:
   1. YB actions before Curve's vote -> must revert ("Not equal", i.e. the previous policies are in)
-  2. Curve's actions                -> each POLICY() becomes the new YBOraclizedPolicy, RPFs set
+  2. Convex (biggest veCRV holder) votes yea on Curve vote 1525, time-travel past voteTime,
+     executeVote                    -> each POLICY() becomes the new YBOraclizedPolicy, RPFs set
   3. YB actions again               -> rates and AMM fees updated
   4. LT under the new policies, per market: borrower fees are donated, a deposit with debt at
      price_oracle fails the LT gate, a deposit through LTDepositZap and a withdrawal go through
 
-    python scripts/voting/create_vote_weth_btc_rate_fee_after_curve.py           # create the vote
-    python scripts/voting/create_vote_weth_btc_rate_fee_after_curve.py --fork    # simulate on a fork
+    python scripts/voting/create_vote_weth_btc_rate_fee_after_curve_1525.py           # create the vote
+    python scripts/voting/create_vote_weth_btc_rate_fee_after_curve_1525.py --fork    # simulate on a fork
 """
 
 import boa
@@ -50,7 +51,7 @@ from boa.util.abi import abi_decode
 
 Market = namedtuple("Market", ["id", "symbol", "pool", "policy", "rpf", "donation_bps", "fee_bps"])
 
-# Per market: the cryptopool, the YBOraclizedPolicy which the Curve vote attaches to it (doubling as the
+# Per market: the cryptopool, the YBOraclizedPolicy which Curve vote 1525 attaches to it (doubling as the
 # guard value), the reserved profit fraction it sets (10**10 precision), the pool donation APY and the
 # releverage fee
 MARKETS = [
@@ -86,11 +87,9 @@ CALL_COMPARATOR = "0xd3BFa85dc668Aab38121bE12D69dd180301dec25"
 DEPOSIT_ZAP = "0xF3a2bf354C28a1e0C84033f3ba3379e223F56E6A"  # LTDepositZap, fork mode only
 DEPOSIT_USD = 100_000                                      # fork mode only
 
-# Curve DAO (ownership) - only used by the fork simulation to land Curve's side before ours
-CURVE_VOTE_ID = None  # Not created yet
+# Curve DAO (ownership) - only used by the fork simulation to land vote 1525 before ours
 CURVE_VOTING = "0xE478de485ad2fe566d49342Cbd03E49ed7DB3356"
-CURVE_AGENT = "0x40907540d8a6C65c637785e8f8B742ae6b0b9968"      # ownership agent
-AMM_OWNER_PROXY = "0xeDA0108D5bB8cdE2ba4A59E22F3Ed5d211C77187"  # twocrypto factory admin, owned by the agent
+CURVE_VOTE_ID = 1525
 CONVEX_VOTER_PROXY = "0x989AEB4D175E16225E39E87D0D97A3360524AD80"
 
 # Whale with voting power, used only to simulate createProposal in fork mode.
@@ -122,12 +121,6 @@ CURVE_VOTING_ABI = json.dumps([
      "inputs": [{"type": "uint256"}, {"type": "bool"}, {"type": "bool"}], "outputs": []},
     {"name": "executeVote", "stateMutability": "nonpayable", "type": "function", "inputs": [{"type": "uint256"}],
      "outputs": []},
-])
-
-AMM_OWNER_PROXY_ABI = json.dumps([
-    {"name": "dao", "stateMutability": "view", "type": "function", "inputs": [], "outputs": [{"type": "address"}]},
-    {"name": "execute", "stateMutability": "nonpayable", "type": "function",
-     "inputs": [{"type": "address", "name": "_target"}, {"type": "bytes", "name": "_calldata"}], "outputs": []},
 ])
 
 ERC20_ABI = json.dumps([
@@ -173,7 +166,7 @@ def revert_reason(e: Exception) -> str:
 
 
 def curve_calls(markets) -> list:
-    """Pool admin calls of the Curve vote, as in the notebook: (pool, calldata)"""
+    """Pool admin calls which Curve vote 1525 has to make: (pool, calldata)"""
     calls = []
     for m in markets:
         if m['pool'].reserved_profit_fraction() != m['cfg'].rpf:
@@ -299,11 +292,10 @@ if __name__ == '__main__':
         actions.append(Action(to=factory_owner.address, value=0,
                               data=factory_owner.lt_set_amm_fee.prepare_calldata(m['lt'].address, market_fee(m['cfg']))))
 
-    curve_vote = (f'Curve vote {CURVE_VOTE_ID} [https://www.curve.finance/dao/ethereum/proposals/{CURVE_VOTE_ID}-ownership]'
-                  if CURVE_VOTE_ID else 'The Curve ownership vote')
     title = 'Donation APY and releverage fees for the WETH and BTC markets under the new pool policies'
     summary = (
-        f'{curve_vote} attaches new YBOraclizedPolicy contracts, driven by Pyth Pro reports, to the yb-WBTC, '
+        f'Curve vote {CURVE_VOTE_ID} [https://www.curve.finance/dao/ethereum/proposals/{CURVE_VOTE_ID}-ownership] '
+        'attaches new YBOraclizedPolicy contracts, driven by Pyth Pro reports, to the yb-WBTC, '
         'yb-cbBTC, yb-tBTC and yb-WETH pools, and sets their reserved profit fractions to 48.75%, 45%, 48.75% and '
         '43%. On YB side, we tune the markets to match. Pool donation APY: yb-WBTC and yb-tBTC 0.85%, yb-cbBTC '
         '0.55%, yb-WETH 0.90% (1.70%, 1.10% and 1.80% per year on crvUSD at 2x leverage, from 1.80% for the BTC '
@@ -312,8 +304,6 @@ if __name__ == '__main__':
     )
 
     if not FORK:
-        if not CURVE_VOTE_ID:
-            print("Note: CURVE_VOTE_ID is not set, so the description does not link the Curve vote")
         proposal_id = voting.createProposal(*Proposal(
             metadata=pin_to_ipfs({
                 'title': title,
@@ -329,16 +319,14 @@ if __name__ == '__main__':
         print("Proposal ID:", proposal_id)
 
     else:
-        calls = curve_calls(markets)
-        if CURVE_VOTE_ID:
-            curve_voting = boa.loads_abi(CURVE_VOTING_ABI, name="CurveVoting").at(CURVE_VOTING)
-            curve_script = curve_voting.getVote(CURVE_VOTE_ID)[9]
-            for target, calldata in calls:
-                assert bytes.fromhex(target[2:]) in curve_script, f"Curve vote {CURVE_VOTE_ID} does not touch {target}"
-                assert calldata in curve_script, f"Curve vote {CURVE_VOTE_ID} lacks {target}: 0x{calldata.hex()}"
-            print(f"\nCurve vote {CURVE_VOTE_ID} installs the expected policies and RPFs")
+        curve_voting = boa.loads_abi(CURVE_VOTING_ABI, name="CurveVoting").at(CURVE_VOTING)
+        curve_script = curve_voting.getVote(CURVE_VOTE_ID)[9]
+        for target, calldata in curve_calls(markets):
+            assert bytes.fromhex(target[2:]) in curve_script, f"Curve vote {CURVE_VOTE_ID} does not touch {target}"
+            assert calldata in curve_script, f"Curve vote {CURVE_VOTE_ID} lacks {target}: 0x{calldata.hex()}"
+        print(f"\nCurve vote {CURVE_VOTE_ID} installs the expected policies and RPFs")
 
-        print("\n=== YB vote before Curve's: must revert ===")
+        print(f"\n=== YB vote before Curve vote {CURVE_VOTE_ID}: must revert ===")
         for m in markets:
             assert m['pool'].POLICY() != m['cfg'].policy, \
                 f"Pool {m['pool'].address} already runs the new policy - guard is a no-op"
@@ -351,24 +339,15 @@ if __name__ == '__main__':
             except Exception as e:
                 print(f"  correctly reverted: {revert_reason(e)}")
 
-        if CURVE_VOTE_ID:
-            print(f"\n=== Executing Curve ownership vote {CURVE_VOTE_ID} via Convex ===")
-            execute_curve_vote(curve_voting, CURVE_VOTE_ID)
-        else:
-            print("\n=== Curve vote not created yet: its actions through the ownership agent ===")
-            proxy = boa.loads_abi(AMM_OWNER_PROXY_ABI, name="AmmOwnerProxy").at(AMM_OWNER_PROXY)
-            assert proxy.dao() == CURVE_AGENT, "The ownership agent does not own the AmmOwnerProxy"
-            with boa.env.prank(CURVE_AGENT):
-                for target, calldata in calls:
-                    proxy.execute(target, calldata)
-                    print(f"  {target}: 0x{calldata.hex()}")
+        print(f"\n=== Executing Curve ownership vote {CURVE_VOTE_ID} via Convex ===")
+        execute_curve_vote(curve_voting, CURVE_VOTE_ID)
         for m in markets:
             pool = m['pool']
             print(f"  pool {pool.address} POLICY() = {pool.POLICY()}, RPF = {pool.reserved_profit_fraction() / 1e10:.2%}")
-            assert pool.POLICY() == m['cfg'].policy, "Curve's side did not install the expected policy"
-            assert pool.reserved_profit_fraction() == m['cfg'].rpf, "Curve's side did not set the expected RPF"
+            assert pool.POLICY() == m['cfg'].policy, "Curve vote did not install the expected policy"
+            assert pool.reserved_profit_fraction() == m['cfg'].rpf, "Curve vote did not set the expected RPF"
 
-        print("\n=== YB vote after Curve's ===")
+        print(f"\n=== YB vote after Curve vote {CURVE_VOTE_ID} ===")
         with boa.env.prank(DAO):
             for i, action in enumerate(actions):
                 boa.env.raw_call(to_address=action.to, data=action.data)
