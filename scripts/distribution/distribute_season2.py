@@ -15,10 +15,13 @@ From the repo root:
     # 1. rehearse the whole distribution on a fork, nothing is sent
     uv run python scripts/distribution/distribute_season2.py --fork [--rpc URL]
 
-    # 2. fund the wallet, then deploy the Multisend, approve and send
+    # 2. once the wallet is funded, rehearse as that wallet with the YB it holds
+    uv run python scripts/distribution/distribute_season2.py --fork --account NAME
+
+    # 3. deploy the Multisend, approve and send
     uv run python scripts/distribution/distribute_season2.py --account NAME
 
-Step 2 is safe to re-run after a failure: it only pays wallets that the
+Step 3 is safe to re-run after a failure: it only pays wallets that the
 Multisend has not marked as sent. That protection lives in the contract, and a
 second deployment would start with a clean state and pay everyone again. So the
 first run saves the Multisend's address to MULTISEND_FILE before sending, and
@@ -40,7 +43,7 @@ from eth_utils import to_checksum_address
 
 YB = "0x01791F726B4103694969820be083196cC7c045fF"
 SEASON_1_MULTISEND = "0x0926a73Bb2D169a86c2Da9c7E03aC63A5cf42883"
-YB_HOLDER = "0x38667AEC4a9793A91e7986c43Fba502BDE89D86C"  # funds the sender on a fork only
+YB_HOLDER = "0x38667AEC4a9793A91e7986c43Fba502BDE89D86C"  # funds a rehearsal with no --account
 
 CSV_SHA256 = "da202357bb86b16294349827903ee07a48bdabb61e9b0590d62770c54fec0728"
 
@@ -53,11 +56,20 @@ BATCH_SIZE = 100
 LIVE_PAUSE = 60  # seconds between transactions, for lagging RPCs
 
 
+def keystore_path(fname):
+    return os.path.expanduser(os.path.join('~', '.brownie', 'accounts', fname + '.json'))
+
+
 def account_load(fname):
-    path = os.path.expanduser(os.path.join('~', '.brownie', 'accounts', fname + '.json'))
-    with open(path, 'r') as f:
+    with open(keystore_path(fname), 'r') as f:
         pkey = account.Account.decrypt(json.load(f), getpass())
         return account.Account.from_key(pkey)
+
+
+def keystore_address(fname):
+    """A keystore holds its address unencrypted, so this needs no password."""
+    with open(keystore_path(fname), 'r') as f:
+        return to_checksum_address(json.load(f)["address"])
 
 
 def load_allocation(path, total=TOTAL):
@@ -126,15 +138,20 @@ def get_multisend(yb, admin, total=TOTAL, pause=0):
     return multisend
 
 
-def rehearse(amounts):
-    """The whole distribution on a fork, checked wallet by wallet."""
-    admin = boa.env.eoa
+def rehearse(amounts, wallet=None):
+    """
+    The whole distribution on a fork, checked wallet by wallet: as `wallet` with
+    the YB it really holds, or with no wallet as a test sender funded by YB_HOLDER.
+    """
+    admin = boa.env.eoa = keystore_address(wallet) if wallet else boa.env.eoa
     yb = boa.load_partial('contracts/dao/YB.vy').at(YB)
+    if not wallet:
+        with boa.env.prank(YB_HOLDER):
+            yb.transfer(admin, TOTAL)
+    print(f"Rehearsing from {admin}, it holds {yb.balanceOf(admin) / 1e18:,.6f} YB")
     multisend = boa.load('contracts/dao/Multisend.vy', YB)
     check_multisend(multisend, admin)
 
-    with boa.env.prank(YB_HOLDER):
-        yb.transfer(admin, TOTAL)
     before = {user: yb.balanceOf(user) for user in amounts}
     admin_before = yb.balanceOf(admin)
 
@@ -168,7 +185,8 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--fork", action="store_true", help="rehearse on a fork of the network, nothing is sent")
-    parser.add_argument("--account", help="keystore name of the wallet that deploys and holds the YB, needed to send")
+    parser.add_argument("--account", help="keystore name of the wallet that deploys and holds the YB: needed to send, "
+                                            "and with --fork rehearses as it, no password needed")
     parser.add_argument("--rpc", default=NETWORK, help="RPC URL, networks.py by default")
     parser.add_argument("--csv", default=CSV, help="allocation CSV")
     args = parser.parse_args()
@@ -183,7 +201,7 @@ def main():
 
     if args.fork:
         boa.fork(args.rpc)
-        rehearse(amounts)
+        rehearse(amounts, args.account)
         return
 
     boa.set_network_env(args.rpc)

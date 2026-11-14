@@ -7,12 +7,14 @@ from eth_utils import to_checksum_address
 from scripts.distribution import distribute_season2
 from scripts.distribution.distribute_season2 import (
     SEASON_1_MULTISEND,
+    TOTAL,
     YB,
     YB_HOLDER,
     check_multisend,
     distribute,
     get_multisend,
     load_allocation,
+    rehearse,
 )
 from tests_forked.networks import NETWORK
 
@@ -184,6 +186,63 @@ def test_account_load_reads_the_named_keystore(keystores):
 def test_account_load_stops_on_an_unknown_name(keystores):
     with pytest.raises(FileNotFoundError):
         distribute_season2.account_load("no-such-wallet")
+
+
+def test_keystore_address_needs_no_password(keystores, monkeypatch):
+    wanted = Account.create()
+    write_keystore(keystores, "some-wallet", wanted.key)
+    monkeypatch.setattr(distribute_season2, "getpass", lambda: pytest.fail("asked for a password"))
+    assert distribute_season2.keystore_address("some-wallet") == wanted.address
+
+
+@pytest.fixture
+def wallet(keystores):
+    """A keystore with no YB yet, whose rehearsal replaces boa.env.eoa."""
+    named = Account.create()
+    write_keystore(keystores, "some-wallet", named.key)
+    with boa.env.anchor():
+        yield named.address
+    boa.env.eoa = SENDER
+
+
+@pytest.fixture
+def whole_distribution(amounts):
+    first, second = list(amounts)[:2]
+    return {first: TOTAL - 10**18, second: 10**18}
+
+
+def test_rehearsal_with_no_wallet_is_funded_by_the_holder(yb, whole_distribution):
+    with boa.env.anchor():
+        holder = yb.balanceOf(YB_HOLDER)
+        rehearse(whole_distribution)
+        assert yb.balanceOf(YB_HOLDER) == holder - TOTAL
+        assert yb.balanceOf(SENDER) == 0
+
+
+def test_rehearsal_spends_what_the_wallet_holds(yb, wallet, whole_distribution):
+    with boa.env.prank(YB_HOLDER):
+        yb.transfer(wallet, TOTAL)
+    holder = yb.balanceOf(YB_HOLDER)
+
+    rehearse(whole_distribution, "some-wallet")
+
+    assert boa.env.eoa == wallet
+    assert yb.balanceOf(wallet) == 0
+    assert yb.balanceOf(YB_HOLDER) == holder
+
+
+def test_rehearsal_fails_for_a_wallet_short_of_yb(yb, wallet, whole_distribution):
+    with boa.env.prank(YB_HOLDER):
+        yb.transfer(wallet, TOTAL - 1)
+    with pytest.raises(AssertionError, match="Wallet holds"):
+        rehearse(whole_distribution, "some-wallet")
+
+
+def test_rehearsal_refuses_a_wallet_that_is_a_recipient(yb, wallet, whole_distribution):
+    with boa.env.prank(YB_HOLDER):
+        yb.transfer(wallet, TOTAL)
+    with pytest.raises(AssertionError, match="can't be a recipient"):
+        rehearse({wallet: 1, **whole_distribution}, "some-wallet")
 
 
 def test_load_allocation_is_exact(tmp_path):
